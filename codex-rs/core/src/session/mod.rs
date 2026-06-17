@@ -286,8 +286,6 @@ pub(crate) struct PreviousTurnSettings {
     pub(crate) realtime_active: Option<bool>,
 }
 
-#[cfg(test)]
-use crate::SkillMetadata;
 use crate::SkillsService;
 use crate::agents_md::load_project_instructions;
 use crate::exec_policy::ExecPolicyUpdateError;
@@ -299,6 +297,8 @@ use crate::session_startup_prewarm::SessionStartupPrewarmHandle;
 use crate::shell;
 #[cfg(test)]
 use crate::skills::SkillLoadOutcome;
+#[cfg(test)]
+use crate::skills::SkillMetadata;
 use crate::state::AutoCompactWindowSnapshot;
 use crate::state::PendingRequestPermissions;
 use crate::state::SessionServices;
