@@ -5,7 +5,9 @@ LiteraryAgent is a modified fork of the OpenAI Codex CLI repository.
 ## Upstream
 
 - Upstream repository: https://github.com/openai/codex
+- Fork repository: https://github.com/ZhiHaOuang/LiteraryAgent
 - Upstream remote name in this checkout: `upstream`
+- Fork remote name in this checkout: `origin`
 - Local development branch: `literary-agent`
 
 ## Naming Policy
