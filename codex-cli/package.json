@@ -1,10 +1,10 @@
 {
-  "name": "@openai/codex",
+  "name": "literary-agent",
   "version": "0.0.0-dev",
-  "description": "Codex CLI is a coding agent from OpenAI that runs locally on your computer.",
+  "description": "LiteraryAgent is a modified agent CLI based on the open-source OpenAI Codex engine.",
   "license": "Apache-2.0",
   "bin": {
-    "codex": "bin/codex.js"
+    "literary-agent": "bin/codex.js"
   },
   "type": "module",
   "engines": {
@@ -13,10 +13,5 @@
   "files": [
     "bin/codex.js"
   ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/openai/codex.git",
-    "directory": "codex-cli"
-  },
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319"
 }
