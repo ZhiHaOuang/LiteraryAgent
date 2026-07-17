@@ -87,7 +87,7 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::TerminalName;
 
-/// LiteraryAgent CLI
+/// Codex CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
@@ -96,10 +96,11 @@ use codex_terminal_detection::TerminalName;
     version,
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
-    // The executable may still be built from upstream Codex internals, but the
-    // help output should use the LiteraryAgent command name that users run.
-    bin_name = "literary-agent",
-    override_usage = "literary-agent [OPTIONS] [PROMPT]\n       literary-agent [OPTIONS] <COMMAND> [ARGS]"
+    // The executable is sometimes invoked via a platform‑specific name like
+    // `codex-x86_64-unknown-linux-musl`, but the help output should always use
+    // the generic `codex` command name that users run.
+    bin_name = "codex",
+    override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
 )]
 struct MultitoolCli {
     #[clap(flatten)]
@@ -120,7 +121,7 @@ struct MultitoolCli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
-    /// Run LiteraryAgent non-interactively.
+    /// Run Codex non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
 
@@ -133,13 +134,13 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// Manage external MCP servers for LiteraryAgent.
+    /// Manage external MCP servers for Codex.
     Mcp(McpCli),
 
-    /// Manage LiteraryAgent plugins.
+    /// Manage Codex plugins.
     Plugin(PluginCli),
 
-    /// Start LiteraryAgent as an MCP server (stdio).
+    /// Start Codex as an MCP server (stdio).
     McpServer(McpServerCommand),
 
     /// [experimental] Run the app server or related tooling.
@@ -148,20 +149,20 @@ enum Subcommand {
     /// [experimental] Manage the app-server daemon with remote control enabled.
     RemoteControl(RemoteControlCommand),
 
-    /// Launch the upstream Codex desktop app (opens the app installer if missing).
+    /// Launch the Codex desktop app (opens the app installer if missing).
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     App(app_cmd::AppCommand),
 
     /// Generate shell completion scripts.
     Completion(CompletionCommand),
 
-    /// Update LiteraryAgent to the latest version.
+    /// Update Codex to the latest version.
     Update,
 
-    /// Diagnose local LiteraryAgent installation, config, auth, and runtime health.
+    /// Diagnose local Codex installation, config, auth, and runtime health.
     Doctor(DoctorCommand),
 
-    /// Run commands within a LiteraryAgent-provided sandbox.
+    /// Run commands within a Codex-provided sandbox.
     Sandbox(HostSandboxArgs),
 
     /// Debugging tools.
@@ -171,7 +172,7 @@ enum Subcommand {
     #[clap(hide = true)]
     Execpolicy(ExecpolicyCommand),
 
-    /// Apply the latest diff produced by LiteraryAgent as a `git apply` to your local working tree.
+    /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
 

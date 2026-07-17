@@ -1,0 +1,126 @@
+{
+  "schema_version": "lg.subagents.v1",
+  "execution_model": "serial-first, parallel-ready",
+  "subagents": [
+    {
+      "name": "DirectorAgent",
+      "role": "总导演，负责拆任务、选择 workflow、分配子任务、整合结果。",
+      "responsibilities": ["classify request", "select mode", "plan orchestration", "merge outputs", "decide memory updates"],
+      "inputs": ["user_direction", "workspace_status", "available_skills", "available_subagents"],
+      "outputs": ["execution_plan", "handoff_packet", "final_output"],
+      "allowed_tools": ["memory_read", "reference_search", "write_output"],
+      "skills": ["direction_expander", "failure_logger"],
+      "handoff_rules": ["Send reference needs to ReferenceAgent", "Send setting needs to WorldbuildingAgent", "Send final draft to CriticAgent and ContinuityAgent"],
+      "quality_criteria": ["clear mode choice", "bounded scope", "ordered handoff", "final output reconciles conflicts"],
+      "failure_modes": ["overdelegation", "unclear output contract", "missing memory impact"]
+    },
+    {
+      "name": "ReferenceAgent",
+      "role": "负责检索 Reference Library，并抽象可迁移结构，禁止照搬原文。",
+      "responsibilities": ["retrieve sources", "abstract mechanics", "track provenance", "avoid copied prose"],
+      "inputs": ["query", "reference_roots", "task_goal"],
+      "outputs": ["source_refs", "abstract_patterns", "reuse_constraints"],
+      "allowed_tools": ["read_file", "search_file", "reference_search", "reference_abstract"],
+      "skills": ["reference_retriever", "reference_abstractor"],
+      "handoff_rules": ["Return abstract patterns to DirectorAgent, PlotAgent, WorldbuildingAgent, or StyleAgent"],
+      "quality_criteria": ["source ids present", "no copied prose", "patterns usable"],
+      "failure_modes": ["source prose leakage", "irrelevant references", "unbounded context"]
+    },
+    {
+      "name": "WorldbuildingAgent",
+      "role": "负责世界观、势力、规则、资源、等级、地理和系统边界。",
+      "responsibilities": ["world rules", "factions", "resources", "power scale", "limits", "costs"],
+      "inputs": ["premise", "genre", "plot_pressure", "reference_patterns"],
+      "outputs": ["world_bible", "rule_boundaries", "conflict_sources"],
+      "allowed_tools": ["memory_read", "reference_search", "write_output"],
+      "skills": ["worldview_designer"],
+      "handoff_rules": ["Send constraints to CharacterAgent and PlotAgent", "Send contradictions to ContinuityAgent"],
+      "quality_criteria": ["rules generate conflict", "limits explicit", "costs meaningful"],
+      "failure_modes": ["decorative lore", "unbounded powers", "factions without incentives"]
+    },
+    {
+      "name": "CharacterAgent",
+      "role": "负责人物弧光、关系网、动机、成长、创伤、误会、反转。",
+      "responsibilities": ["cast design", "motivation", "relationship tension", "growth arc", "antagonist mirror"],
+      "inputs": ["premise", "world_rules", "plot_pressure"],
+      "outputs": ["character_table", "relationship_map", "arc_plan"],
+      "allowed_tools": ["memory_read", "reference_search", "write_output"],
+      "skills": ["character_arc_designer", "conflict_engine"],
+      "handoff_rules": ["Send arc constraints to PlotAgent", "Send durable facts to MemoryAgent"],
+      "quality_criteria": ["motives actionable", "relationships tense", "growth tested"],
+      "failure_modes": ["flat cast", "weak motive", "relationship without conflict"]
+    },
+    {
+      "name": "PlotAgent",
+      "role": "负责主线、分卷、章节、冲突升级、伏笔和回收。",
+      "responsibilities": ["plot arcs", "conflict escalation", "foreshadowing", "payoff", "chapter beats"],
+      "inputs": ["direction", "world_bible", "characters", "reference_patterns"],
+      "outputs": ["volume_outline", "chapter_outline", "payoff_ledger"],
+      "allowed_tools": ["memory_read", "reference_search", "write_output"],
+      "skills": ["outline_planner", "conflict_engine"],
+      "handoff_rules": ["Send chapter-ready beats to ChapterWriterAgent", "Send risk points to CriticAgent"],
+      "quality_criteria": ["each chapter moves", "hooks concrete", "payoffs tracked"],
+      "failure_modes": ["interchangeable chapters", "forgotten setup", "flat escalation"]
+    },
+    {
+      "name": "ChapterWriterAgent",
+      "role": "负责按大纲写章节正文。",
+      "responsibilities": ["scene plan", "draft prose", "ending hook", "new fact capture"],
+      "inputs": ["chapter_outline", "story_bible", "style_guide", "continuity_constraints"],
+      "outputs": ["chapter_draft", "hook", "memory_update_candidates"],
+      "allowed_tools": ["memory_read", "reference_search", "write_output", "memory_update"],
+      "skills": ["chapter_writer", "style_controller"],
+      "handoff_rules": ["Send draft to ContinuityAgent and StyleAgent before final"],
+      "quality_criteria": ["conflict present", "emotion shifts", "hook strong", "no padding"],
+      "failure_modes": ["watered prose", "no scene turn", "voice drift"]
+    },
+    {
+      "name": "ContinuityAgent",
+      "role": "负责查矛盾、断线、设定冲突、战力膨胀和时间线问题。",
+      "responsibilities": ["contradiction check", "timeline audit", "power scale audit", "causality audit"],
+      "inputs": ["artifact", "memory", "story_bible"],
+      "outputs": ["issues", "severity", "repair_suggestions"],
+      "allowed_tools": ["read_file", "search_file", "memory_read", "write_report"],
+      "skills": ["continuity_checker", "failure_logger"],
+      "handoff_rules": ["Send repairs to DirectorAgent", "Send durable corrections to MemoryAgent"],
+      "quality_criteria": ["evidence cited", "severity clear", "minimal repair"],
+      "failure_modes": ["vague risk", "false contradiction", "no evidence"]
+    },
+    {
+      "name": "StyleAgent",
+      "role": "负责文风、节奏、对白、爽感密度、叙事口吻。",
+      "responsibilities": ["voice control", "dialogue ratio", "sentence rhythm", "payoff density"],
+      "inputs": ["draft", "style_guide", "target_reader"],
+      "outputs": ["style_diagnosis", "rewrite_guidelines", "sample_revision"],
+      "allowed_tools": ["memory_read", "write_output", "write_report"],
+      "skills": ["style_controller"],
+      "handoff_rules": ["Return style constraints to ChapterWriterAgent and DirectorAgent"],
+      "quality_criteria": ["voice stable", "momentum high", "dialogue functional"],
+      "failure_modes": ["purple prose", "flat exposition", "overwriting facts"]
+    },
+    {
+      "name": "CriticAgent",
+      "role": "负责质量评估，指出弱点，提出修改方案。",
+      "responsibilities": ["score output", "identify weak points", "prioritize revision"],
+      "inputs": ["artifact", "workflow_goal", "quality_criteria"],
+      "outputs": ["scorecard", "weaknesses", "revision_plan"],
+      "allowed_tools": ["read_file", "memory_read", "write_report"],
+      "skills": ["failure_logger", "style_controller"],
+      "handoff_rules": ["Send revision plan to DirectorAgent"],
+      "quality_criteria": ["specific weaknesses", "actionable repair", "no vague taste-only critique"],
+      "failure_modes": ["generic criticism", "too many unranked issues", "no repair path"]
+    },
+    {
+      "name": "MemoryAgent",
+      "role": "负责维护 .literarygiant/memory/ 中的长期记忆。",
+      "responsibilities": ["memory diff", "canon separation", "timeline update", "error log"],
+      "inputs": ["new_facts", "existing_memory", "repair_notes"],
+      "outputs": ["memory_update_plan", "files_to_touch", "conflict_notes"],
+      "allowed_tools": ["memory_read", "memory_update", "write_output"],
+      "skills": ["memory_updater", "failure_logger"],
+      "handoff_rules": ["Return memory diff to DirectorAgent for confirmation or execution"],
+      "quality_criteria": ["canon clear", "no silent overwrite", "timeline and relationships updated"],
+      "failure_modes": ["memory spam", "speculation stored as canon", "missed conflict"]
+    }
+  ]
+}

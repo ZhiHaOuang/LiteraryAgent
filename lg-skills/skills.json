@@ -1,0 +1,150 @@
+{
+  "schema_version": "lg.skills.v1",
+  "skill_schema": {
+    "required_fields": [
+      "name",
+      "purpose",
+      "when_to_use",
+      "inputs",
+      "outputs",
+      "tools_allowed",
+      "instructions",
+      "quality_checklist",
+      "failure_modes"
+    ]
+  },
+  "skills": [
+    {
+      "name": "direction_expander",
+      "purpose": "Expand a one-line fiction direction into genre, protagonist, central conflict, selling points, payoff, reader expectations, and commercial tags.",
+      "when_to_use": "At the start of an outline, pitch, world, plot, or writing task when the user gives only a premise or vague direction.",
+      "inputs": ["direction", "target_audience", "genre_hint", "reference_constraints"],
+      "outputs": ["genre_positioning", "protagonist_seed", "core_conflict", "selling_points", "payoff_types", "reader_promises", "commercial_tags"],
+      "tools_allowed": ["memory_read", "reference_search", "write_output"],
+      "instructions": "Identify the reader promise first. Do not overbuild lore before the conflict and protagonist desire are clear. Produce several compatible variants when the direction is underspecified.",
+      "quality_checklist": ["clear target reader", "specific protagonist desire", "external pressure", "repeatable payoff engine", "chapter hook potential"],
+      "failure_modes": ["generic genre soup", "no concrete conflict", "worldbuilding without plot pressure", "selling points too abstract"]
+    },
+    {
+      "name": "worldview_designer",
+      "purpose": "Design world rules, factions, geography, resources, hierarchy, power systems, boundaries, taboo, and cost.",
+      "when_to_use": "When creating or revising a setting, power system, social order, or long-form story bible.",
+      "inputs": ["premise", "genre", "plot_needs", "character_needs", "reference_patterns"],
+      "outputs": ["world_rules", "factions", "geography", "resources", "power_hierarchy", "system_rules", "boundaries", "taboos", "costs"],
+      "tools_allowed": ["memory_read", "reference_search", "write_output"],
+      "instructions": "Make rules generate conflict. Every advantage needs limits, price, scarcity, enforcement, or political consequence. Prefer usable story constraints over encyclopedic lore.",
+      "quality_checklist": ["rules create plot pressure", "resources are scarce", "factions have incompatible incentives", "power scale has limits", "taboos have consequences"],
+      "failure_modes": ["decorative lore", "unbounded power system", "factions without incentives", "geography irrelevant to plot"]
+    },
+    {
+      "name": "character_arc_designer",
+      "purpose": "Design protagonists, love interests, antagonists, allies, desire, wounds, lies, growth, relationships, and reversals.",
+      "when_to_use": "When defining cast, relationship tension, emotional stakes, or character-driven plot beats.",
+      "inputs": ["premise", "world_rules", "plot_pressure", "relationship_needs"],
+      "outputs": ["cast_table", "desires", "wounds", "misbeliefs", "growth_lines", "relationship_tension", "reversal_points"],
+      "tools_allowed": ["memory_read", "reference_search", "write_output"],
+      "instructions": "Tie each major character to a pressure source and decision pattern. Antagonists should mirror or invert the protagonist, not merely block them.",
+      "quality_checklist": ["distinct desire", "actionable wound", "relationship friction", "growth test", "antagonist mirror", "chapter-level behavior cues"],
+      "failure_modes": ["flat cast", "motivation stated but not dramatized", "relationships with no conflict", "villain without worldview"]
+    },
+    {
+      "name": "conflict_engine",
+      "purpose": "Build escalation chains across external, internal, relationship, class, misunderstanding, oppression, counterattack, reversal, and climax conflicts.",
+      "when_to_use": "When an outline lacks pressure, when chapters feel static, or when a plot arc needs escalating stakes.",
+      "inputs": ["protagonist_desire", "opposing_force", "world_rules", "relationship_network", "current_arc"],
+      "outputs": ["conflict_ladder", "pressure_sources", "reversal_plan", "counterattack_plan", "stage_climaxes"],
+      "tools_allowed": ["memory_read", "reference_search", "write_output"],
+      "instructions": "Escalate by changing cost, visibility, relationship damage, or irreversible commitment. Each win should create a new problem.",
+      "quality_checklist": ["clear opposition", "escalating cost", "reversals change decisions", "wins create consequences", "climax resolves a stage promise"],
+      "failure_modes": ["random events", "same conflict repeated", "stakes only numerical", "reversal without setup"]
+    },
+    {
+      "name": "outline_planner",
+      "purpose": "Generate volume outline, chapter outline, key nodes, foreshadowing, payoff, climaxes, reversals, hooks, and rhythm curve.",
+      "when_to_use": "When producing a new outline or refactoring an existing structure.",
+      "inputs": ["direction", "worldview", "characters", "conflict_ladder", "target_length"],
+      "outputs": ["volume_outline", "chapter_outline", "key_nodes", "foreshadowing_ledger", "payoff_ledger", "hooks", "rhythm_curve"],
+      "tools_allowed": ["memory_read", "reference_search", "write_output"],
+      "instructions": "Build from promise to payoff. Make each chapter change information, power, relationship, or danger. Track setup and payoff explicitly.",
+      "quality_checklist": ["each chapter has movement", "hooks are concrete", "payoffs are tracked", "volume climaxes escalate", "pacing varies"],
+      "failure_modes": ["summary without beats", "chapters interchangeable", "forgotten foreshadowing", "climax arrives without pressure"]
+    },
+    {
+      "name": "chapter_writer",
+      "purpose": "Write chapter prose with advancement, conflict, emotional movement, payoff, setup, and ending hook.",
+      "when_to_use": "When turning a chapter plan into draft prose.",
+      "inputs": ["chapter_goal", "scene_plan", "story_bible", "style_guide", "continuity_constraints"],
+      "outputs": ["chapter_draft", "ending_hook", "new_facts", "memory_update_candidates"],
+      "tools_allowed": ["memory_read", "reference_search", "memory_update", "write_output"],
+      "instructions": "Do not pad. Every scene should reveal, pressure, decide, fight, bond, betray, or change direction. Preserve voice and continuity.",
+      "quality_checklist": ["scene has goal", "conflict present", "emotion shifts", "payoff or setup included", "ending hook", "no contradiction"],
+      "failure_modes": ["watered prose", "no scene turn", "generic dialogue", "forgotten memory", "hook unrelated to chapter"]
+    },
+    {
+      "name": "continuity_checker",
+      "purpose": "Check contradictions in characters, locations, world rules, timeline, power scale, relationships, foreshadowing, and motivation.",
+      "when_to_use": "Before finalizing outlines, chapters, revisions, and memory updates.",
+      "inputs": ["artifact", "memory", "story_bible", "reference_constraints"],
+      "outputs": ["contradictions", "severity", "evidence", "repair_suggestions", "memory_updates_needed"],
+      "tools_allowed": ["read_file", "search_file", "memory_read", "write_report"],
+      "instructions": "Separate hard contradictions from weak risks and missing evidence. Provide concrete artifact references whenever possible.",
+      "quality_checklist": ["severity assigned", "evidence cited", "repair is minimal", "memory updates identified", "false positives avoided"],
+      "failure_modes": ["vague concern", "overcorrecting style as contradiction", "no evidence", "ignoring power scale"]
+    },
+    {
+      "name": "style_controller",
+      "purpose": "Control prose style, sentence length, pacing, dialogue ratio, web-novel voice, payoff density, viewpoint, and emotional tension.",
+      "when_to_use": "When drafting or revising prose and when a style guide exists or needs to be inferred.",
+      "inputs": ["draft", "style_guide", "target_reader", "genre"],
+      "outputs": ["style_diagnosis", "rewrite_guidelines", "sample_revision", "style_memory_updates"],
+      "tools_allowed": ["memory_read", "write_output", "write_report"],
+      "instructions": "Favor clarity, momentum, concrete action, and emotional pressure. Preserve story facts while changing voice.",
+      "quality_checklist": ["voice consistent", "dialogue ratio intentional", "sentence rhythm varied", "payoff density matches mode", "viewpoint stable"],
+      "failure_modes": ["purple prose", "flat exposition", "voice drift", "dialogue explains too much"]
+    },
+    {
+      "name": "reference_retriever",
+      "purpose": "Retrieve similar structures, plot mechanics, relationship patterns, and pacing templates from Reference Library.",
+      "when_to_use": "When a task asks for reference, comparison, trope mining, abstraction, or reuse of existing structural knowledge.",
+      "inputs": ["query", "reference_roots", "memory", "limits"],
+      "outputs": ["source_refs", "candidate_patterns", "relevance_notes"],
+      "tools_allowed": ["read_file", "search_file", "reference_search"],
+      "instructions": "Retrieve structure, not prose. Track source paths or ids and keep snippets minimal.",
+      "quality_checklist": ["source ids present", "query matched", "patterns separable from source wording", "context budget bounded"],
+      "failure_modes": ["copying source prose", "no source ids", "too many irrelevant references", "unbounded context"]
+    },
+    {
+      "name": "reference_abstractor",
+      "purpose": "Abstract reference content into transferable mechanics while explicitly avoiding copied prose.",
+      "when_to_use": "After retrieval, before using reference material in outline, world, character, plot, or style tasks.",
+      "inputs": ["source_refs", "retrieved_patterns", "task_goal"],
+      "outputs": ["abstract_mechanics", "applicable_constraints", "do_not_copy_notes"],
+      "tools_allowed": ["reference_abstract", "write_output"],
+      "instructions": "Translate plot mechanics into neutral structural language. Never preserve distinctive expression, names, or scene text.",
+      "quality_checklist": ["no copied prose", "mechanic is reusable", "limits stated", "fit to current task explained"],
+      "failure_modes": ["thin paraphrase", "retaining names or scenes", "mechanic too generic", "missing applicability"]
+    },
+    {
+      "name": "memory_updater",
+      "purpose": "Update .literarygiant/memory for characters, places, setting, plot, timeline, relationships, foreshadowing, and error records.",
+      "when_to_use": "After new outline, world, character, plot, chapter, check, or revision output creates durable story facts.",
+      "inputs": ["new_facts", "existing_memory", "artifact_refs"],
+      "outputs": ["memory_diff", "files_to_update", "conflict_notes"],
+      "tools_allowed": ["memory_read", "memory_update", "write_output"],
+      "instructions": "Only promote durable facts. Keep speculative ideas separate from established story bible facts. Do not overwrite existing facts silently.",
+      "quality_checklist": ["durable facts separated", "conflicts logged", "files named", "no silent overwrite", "timeline updated when needed"],
+      "failure_modes": ["memory spam", "overwriting facts", "missing timeline change", "mixing brainstorm with canon"]
+    },
+    {
+      "name": "failure_logger",
+      "purpose": "Record generation failures, setting conflicts, style drift, plot breaks, weak motivation, and repair actions.",
+      "when_to_use": "Whenever a workflow detects a quality failure, contradiction, missing input, or adapter limitation.",
+      "inputs": ["failure", "severity", "artifact_refs", "repair_attempts"],
+      "outputs": ["failure_record", "repair_plan", "follow_up_checks"],
+      "tools_allowed": ["write_report", "write_output"],
+      "instructions": "Record failure plainly with enough context to reproduce. Prefer smallest repair path.",
+      "quality_checklist": ["failure type clear", "severity clear", "artifact refs present", "next action concrete"],
+      "failure_modes": ["blame without fix", "missing reproduction", "too broad repair", "not logging adapter stubs"]
+    }
+  ]
+}

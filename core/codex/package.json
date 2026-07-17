@@ -1,7 +1,7 @@
 {
-  "name": "literary-agent-monorepo",
+  "name": "codex-monorepo",
   "private": true,
-  "description": "Tools for LiteraryAgent repo-wide maintenance.",
+  "description": "Tools for repo-wide maintenance.",
   "scripts": {
     "format": "prettier --check *.json *.md docs/*.md .github/workflows/*.yml **/*.js",
     "format:fix": "prettier --write *.json *.md docs/*.md .github/workflows/*.yml **/*.js",

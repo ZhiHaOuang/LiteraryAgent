@@ -1,0 +1,91 @@
+{
+  "schema_version": "lg.workflows.v1",
+  "default_orchestration_flow": [
+    "User Direction",
+    "DirectorAgent",
+    "ReferenceAgent",
+    "WorldbuildingAgent",
+    "CharacterAgent",
+    "PlotAgent",
+    "CriticAgent",
+    "ChapterWriterAgent",
+    "ContinuityAgent",
+    "MemoryAgent",
+    "Final Output"
+  ],
+  "workflows": {
+    "chat_workflow": {
+      "description": "General planning and conversation workflow.",
+      "stages": [
+        {"agent": "DirectorAgent", "skill": "direction_expander", "task": "Classify request and select the next mode."}
+      ],
+      "outputs": ["answer", "next_steps"]
+    },
+    "outline_workflow": {
+      "description": "Expand a direction into a novel outline.",
+      "stages": [
+        {"agent": "DirectorAgent", "skill": "direction_expander", "task": "Clarify genre, promise, target reader, and commercial tags."},
+        {"agent": "ReferenceAgent", "skill": "reference_retriever", "task": "Retrieve analogous structures when available and abstract them."},
+        {"agent": "WorldbuildingAgent", "skill": "worldview_designer", "task": "Draft world rules and conflict sources."},
+        {"agent": "CharacterAgent", "skill": "character_arc_designer", "task": "Draft protagonist, antagonist, supporting cast, and relationships."},
+        {"agent": "PlotAgent", "skill": "outline_planner", "task": "Create volume structure, chapter beats, hooks, payoff, and pacing."},
+        {"agent": "CriticAgent", "skill": "failure_logger", "task": "Identify weak motive, repetitive payoff, and continuity risks."}
+      ],
+      "outputs": ["题材定位", "核心卖点", "世界观草案", "主角设定", "核心冲突", "分卷结构", "章节大纲", "爽点分布", "伏笔与回收", "风险点"]
+    },
+    "worldbuilding_workflow": {
+      "description": "Design world rules and systems.",
+      "stages": [
+        {"agent": "DirectorAgent", "skill": "direction_expander", "task": "Extract premise and genre constraints."},
+        {"agent": "WorldbuildingAgent", "skill": "worldview_designer", "task": "Build rules, factions, resources, geography, hierarchy, limits, taboo, and cost."},
+        {"agent": "ContinuityAgent", "skill": "continuity_checker", "task": "Check contradictions and loopholes."}
+      ],
+      "outputs": ["世界规则", "势力结构", "资源体系", "等级体系", "地图/地理", "社会秩序", "冲突来源", "规则边界"]
+    },
+    "character_workflow": {
+      "description": "Design character arcs and relationship tension.",
+      "stages": [
+        {"agent": "CharacterAgent", "skill": "character_arc_designer", "task": "Build cast, desire, wound, misunderstanding, reversal, and growth."},
+        {"agent": "PlotAgent", "skill": "conflict_engine", "task": "Connect character desire to plot conflict."},
+        {"agent": "CriticAgent", "skill": "failure_logger", "task": "Flag weak motivation and flat relationships."}
+      ],
+      "outputs": ["人物表", "主角弧光", "主要关系", "反派结构", "人物欲望", "人物弱点", "成长节点", "关系冲突"]
+    },
+    "chapter_writing_workflow": {
+      "description": "Draft a chapter from outline and memory.",
+      "stages": [
+        {"agent": "DirectorAgent", "skill": "outline_planner", "task": "Select chapter goal and scene constraints."},
+        {"agent": "ChapterWriterAgent", "skill": "chapter_writer", "task": "Write prose with conflict, emotional movement, payoff, setup, and ending hook."},
+        {"agent": "StyleAgent", "skill": "style_controller", "task": "Control voice, sentence rhythm, dialogue ratio, and web-novel momentum."},
+        {"agent": "ContinuityAgent", "skill": "continuity_checker", "task": "Check contradictions before final output."},
+        {"agent": "MemoryAgent", "skill": "memory_updater", "task": "Propose memory updates."}
+      ],
+      "outputs": ["章节目标", "场景设计", "正文草稿", "结尾钩子", "记忆更新", "一致性检查报告"]
+    },
+    "consistency_check_workflow": {
+      "description": "Audit story artifacts for contradictions.",
+      "stages": [
+        {"agent": "ContinuityAgent", "skill": "continuity_checker", "task": "Scan memory, outline, chapters, and references for contradictions."},
+        {"agent": "CriticAgent", "skill": "failure_logger", "task": "Prioritize issues and repair steps."},
+        {"agent": "MemoryAgent", "skill": "memory_updater", "task": "List memory updates needed after repair."}
+      ],
+      "outputs": ["矛盾列表", "严重程度", "涉及文件", "修复建议", "需要更新的 memory"]
+    },
+    "reference_workflow": {
+      "description": "Retrieve and abstract reference structures.",
+      "stages": [
+        {"agent": "ReferenceAgent", "skill": "reference_retriever", "task": "Search ReferenceLibrary, TaciturnRaw, Bridges, AbstractLibrary, memory, and learnings."},
+        {"agent": "ReferenceAgent", "skill": "reference_abstractor", "task": "Abstract reusable mechanics without copying prose."}
+      ],
+      "outputs": ["source_refs", "abstract_patterns", "usable_constraints", "risks"]
+    },
+    "code_workflow": {
+      "description": "Use Codex coding ability through adapter for explicitly requested code work.",
+      "stages": [
+        {"agent": "DirectorAgent", "skill": "failure_logger", "task": "Define edit scope and verification plan."},
+        {"agent": "DirectorAgent", "skill": "failure_logger", "task": "Delegate to Codex exec adapter when enabled."}
+      ],
+      "outputs": ["plan", "edits", "verification", "remaining_risks"]
+    }
+  }
+}

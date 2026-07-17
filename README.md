@@ -1,55 +1,68 @@
-<p align="center"><strong>LiteraryAgent</strong> is a modified agent workspace based on the open-source OpenAI Codex CLI.</p>
+# LiteraryGiant Agent
 
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="OpenAI Codex CLI splash" width="80%" />
-</p>
+LiteraryGiant, abbreviated LG, is a custom agent framework layered around a vendored Codex core.
 
-LiteraryAgent is not an OpenAI product. It keeps OpenAI Codex as its upstream engine while adding a separate product identity for literary-agent workflows, monitors, skills, tools, and future internal agent changes.
+`core/codex` contains the original Codex fork and should remain updateable. LG product logic lives outside core:
 
----
+- `lg-cli/` - user-facing `lg` CLI
+- `lg-agent/` - task modes, workflow definitions, and core adapter notes
+- `lg-prompts/` - prompt templates
+- `lg-context/` - reference and memory context design
+- `lg-skills/` - LG skill catalog
+- `lg-subagents/` - LG subagent catalog
+- `lg-tools/` - tool policy and allowlist
+- `lg-config/` - default LG config
+- `lg-memory/` - memory templates
+- `lg-output/` - output conventions
 
-## Fork Status
-
-- Product name: LiteraryAgent
-- Upstream source: <https://github.com/openai/codex>
-- Active development branch: `literary-agent`
-- License: Apache-2.0. Original OpenAI notices are preserved in `LICENSE` and `NOTICE`.
-
-Internal Rust crate names and some implementation paths still use `codex-*` names. Those are treated as engine internals for now so this fork can keep merging upstream changes with manageable conflicts.
-
-## Quickstart
-
-### Build from source
+Run without installing:
 
 ```bash
-cd codex-rs
-cargo build --bin literary-agent
+PYTHONPATH=lg-cli python -m lg_cli --help
+PYTHONPATH=lg-cli python -m lg_cli status
+PYTHONPATH=lg-cli python -m lg_cli init
+PYTHONPATH=lg-cli python -m lg_cli outline "写个都市重生爽文"
 ```
 
-Run the CLI locally:
+Install the CLI:
 
 ```bash
-cargo run --bin literary-agent -- --help
+python -m pip install -e lg-cli
+lg status
 ```
 
-The upstream Codex install scripts and release packages are intentionally not documented here because this fork should be installed and distributed under the LiteraryAgent name.
+LG does not trigger Codex login. Configure a model key with `LITERARYGIANT_API_KEY`, `LG_API_KEY`, `OPENAI_API_KEY`, or `.literarygiant/config.toml`.
 
-### Authentication
+## Current Workflow Loop
 
-The underlying engine still uses OpenAI Codex authentication flows. During the early fork phase, expect some prompts, configuration keys, and internal paths to retain upstream naming.
+`lg outline "<direction>"` now runs the first LG-owned workflow loop:
 
-## Development Direction
+1. load LG config
+2. read `.literarygiant/memory`
+3. search `ReferenceLibrary`, `AbstractLibrary`, `Bridges`, `TaciturnRaw`, parent `Library/*`, and `.learnings`
+4. build an LG prompt from modes, skills, subagents, memory, reference snippets, and tool policy
+5. save `.literarygiant/logs/last_prompt.md`
+6. attempt a non-interactive Codex core adapter when an API key is configured
+7. otherwise write a structured degraded fallback
+8. save `.literarygiant/output/outlines/outline-*.md`, `.literarygiant/output/outline.latest.md`, and `.literarygiant/logs/last_run.json`
 
-- Keep upstream Codex as the mergeable engine baseline.
-- Add LiteraryAgent-specific orchestration, monitoring, skills, tools, and policies around the engine.
-- Modify Codex internals only when the public extension surfaces are not enough.
-- Keep rebranding patches explicit so upstream sync conflicts are easy to review.
+The Codex source remains isolated in `core/codex`; LG workflow, prompt, memory, reference, skill, subagent, and CLI code stays outside core so future Codex updates can be merged with less friction.
 
-## Docs
+## Codex Core Updates
 
-- [Fork notes](./FORK.md)
-- [Installing & building](./docs/install.md)
-- [Upstream Codex documentation](https://developers.openai.com/codex)
-- [Upstream contributing guide](./docs/contributing.md)
+The parent `LiteraryGiant` repo tracks `LiteraryAgent` as a submodule. Inside `LiteraryAgent`, `core/codex` is a vendored Codex prefix, not a separate submodule.
 
-This repository is licensed under the [Apache-2.0 License](LICENSE). LiteraryAgent is a modified fork and is not affiliated with or endorsed by OpenAI.
+Check upstream Codex status:
+
+```bash
+cd LiteraryAgent
+scripts/update_codex_core.sh --check
+```
+
+After the current LG migration is committed and the worktree is clean, apply a core update with:
+
+```bash
+scripts/update_codex_core.sh --apply
+```
+
+Details live in `docs/codex-core-updates.md`.

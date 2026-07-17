@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Unified entry point for the LiteraryAgent CLI.
+// Unified entry point for the Codex CLI.
 
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "fs";
@@ -97,10 +97,10 @@ function findCodexExecutable() {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g literary-agent@latest"
-      : "npm install -g literary-agent@latest";
+      ? "bun install -g @openai/codex@latest"
+      : "npm install -g @openai/codex@latest";
   throw new Error(
-    `Missing optional dependency ${platformPackage}. Reinstall LiteraryAgent: ${updateCommand}`,
+    `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
   );
 }
 
@@ -139,14 +139,11 @@ function detectPackageManager() {
 
 const packageManagerEnvVar =
   detectPackageManager() === "bun"
-    ? "LITERARY_AGENT_MANAGED_BY_BUN"
-    : "LITERARY_AGENT_MANAGED_BY_NPM";
+    ? "CODEX_MANAGED_BY_BUN"
+    : "CODEX_MANAGED_BY_NPM";
 const env = {
   ...process.env,
   [packageManagerEnvVar]: "1",
-  ...(packageManagerEnvVar === "LITERARY_AGENT_MANAGED_BY_NPM"
-    ? { CODEX_MANAGED_BY_NPM: "1" }
-    : { CODEX_MANAGED_BY_BUN: "1" }),
   CODEX_MANAGED_PACKAGE_ROOT: realpathSync(path.join(__dirname, "..")),
 };
 

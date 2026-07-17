@@ -1,0 +1,16 @@
+[model]
+provider = "openai"
+default = "gpt-5.5-thinking"
+writer = "gpt-5.5-thinking"
+coder = "gpt-5.5-codex"
+critic = "gpt-5-mini"
+
+[paths]
+memory = ".literarygiant/memory"
+output = ".literarygiant/output"
+reference = "ReferenceLibrary"
+
+[agent]
+default_mode = "chat"
+enable_shell = false
+enable_reference = true

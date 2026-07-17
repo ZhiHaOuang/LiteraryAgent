@@ -6,7 +6,7 @@ license.workspace = true
 build = "build.rs"
 
 [[bin]]
-name = "literary-agent"
+name = "codex"
 path = "src/main.rs"
 
 [lib]
