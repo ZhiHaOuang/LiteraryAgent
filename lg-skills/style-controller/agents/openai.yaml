@@ -1,0 +1,4 @@
+interface:
+  display_name: "Style Controller"
+  short_description: "Control prose voice, rhythm, and momentum"
+  default_prompt: "Use -controller to revise this draft toward the project style guide."

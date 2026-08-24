@@ -1,0 +1,4 @@
+interface:
+  display_name: "Continuity Checker"
+  short_description: "Find story contradictions with evidence"
+  default_prompt: "Use -checker to audit this story artifact for contradictions."

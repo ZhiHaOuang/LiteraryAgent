@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "director"
+name = "DirectorAgent"
+version = "1.0.0"
+role = "总导演，负责拆任务、选择 workflow、分配子任务、整合结果。"
+model_profile = "writer"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["memory_read", "reference_search", "write_output"]
+skills = ["direction-expander", "failure-logger"]
+inputs = ["user_direction", "workspace_status", "available_skills", "available_subagents"]
+outputs = ["execution_plan", "handoff_packet", "final_output"]

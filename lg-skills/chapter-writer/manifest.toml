@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "chapter-writer"
+legacy_id = "chapter_writer"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["chapter_goal", "scene_plan", "story_bible", "style_guide", "continuity_constraints"]
+outputs = ["chapter_draft", "ending_hook", "new_facts", "memory_update_candidates"]
+tools = ["memory_read", "reference_search", "memory_update", "write_output"]
+quality_checks = ["scene has goal", "conflict present", "emotion shifts", "payoff or setup included", "ending hook", "no contradiction"]
+failure_modes = ["watered prose", "no scene turn", "generic dialogue", "forgotten memory", "hook unrelated to chapter"]

@@ -1,0 +1,1 @@
+"""LiteraryGiant CLI tests."""

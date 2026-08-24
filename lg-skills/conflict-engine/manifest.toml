@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "conflict-engine"
+legacy_id = "conflict_engine"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["protagonist_desire", "opposing_force", "world_rules", "relationship_network", "current_arc"]
+outputs = ["conflict_ladder", "pressure_sources", "reversal_plan", "counterattack_plan", "stage_climaxes"]
+tools = ["memory_read", "reference_search", "write_output"]
+quality_checks = ["clear opposition", "escalating cost", "reversals change decisions", "wins create consequences", "climax resolves a stage promise"]
+failure_modes = ["random events", "same conflict repeated", "stakes only numerical", "reversal without setup"]

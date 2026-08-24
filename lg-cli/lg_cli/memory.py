@@ -51,8 +51,14 @@ class MemoryContext:
         return "\n\n".join(parts)
 
 
-def read_memory_context(workspace: Path, *, max_total_chars: int = 16000, max_file_chars: int = 3000) -> MemoryContext:
-    root = workspace / ".literarygiant" / "memory"
+def read_memory_context(
+    workspace: Path,
+    *,
+    memory_root: Path | None = None,
+    max_total_chars: int = 16000,
+    max_file_chars: int = 3000,
+) -> MemoryContext:
+    root = memory_root or workspace / ".literarygiant" / "memory"
     warnings: list[str] = []
     files: list[MemoryFile] = []
     remaining = max_total_chars

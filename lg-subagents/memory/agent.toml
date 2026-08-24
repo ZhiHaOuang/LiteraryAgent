@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "memory"
+name = "MemoryAgent"
+version = "1.0.0"
+role = "负责维护 .literarygiant/memory/ 中的长期记忆。"
+model_profile = "writer"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["memory_read", "memory_update", "write_output"]
+skills = ["memory-updater", "story-bible-curator", "failure-logger"]
+inputs = ["new_facts", "existing_memory", "repair_notes"]
+outputs = ["memory_update_plan", "files_to_touch", "conflict_notes"]

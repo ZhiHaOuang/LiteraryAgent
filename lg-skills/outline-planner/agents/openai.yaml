@@ -1,0 +1,4 @@
+interface:
+  display_name: "Outline Planner"
+  short_description: "Plan volumes, chapters, hooks, and payoffs"
+  default_prompt: "Use -planner to turn this direction into a detailed novel outline."

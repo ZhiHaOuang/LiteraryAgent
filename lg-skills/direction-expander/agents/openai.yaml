@@ -1,0 +1,4 @@
+interface:
+  display_name: "Direction Expander"
+  short_description: "Expand a premise into a concrete story direction"
+  default_prompt: "Use -expander to expand this premise into a commercial story direction."

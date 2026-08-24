@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LiteraryGiant scene draft output",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {"type": "string"},
+    "draft_markdown": {"type": "string"},
+    "continuity_notes": {"type": "array", "items": {"type": "string"}},
+    "memory_proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {"type": "string"},
+          "key": {"type": "string"},
+          "value": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "rationale": {"type": "string"}
+        },
+        "required": ["category", "key", "value", "tags", "rationale"]
+      }
+    },
+    "risks": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["summary", "draft_markdown", "continuity_notes", "memory_proposals", "risks"]
+}

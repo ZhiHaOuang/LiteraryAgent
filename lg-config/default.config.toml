@@ -1,16 +1,24 @@
 [model]
 provider = "openai"
-default = "gpt-5.5-thinking"
-writer = "gpt-5.5-thinking"
-coder = "gpt-5.5-codex"
-critic = "gpt-5-mini"
+default = ""
+writer = ""
+coder = ""
+critic = ""
 
 [paths]
 memory = ".literarygiant/memory"
 output = ".literarygiant/output"
 reference = "ReferenceLibrary"
 
+[knowledge]
+library = ""
+top_k = 6
+allow_raw_reference = false
+
 [agent]
 default_mode = "chat"
+execution_strategy = "staged"
 enable_shell = false
 enable_reference = true
+timeout_seconds = 300
+max_stage_context_chars = 24000

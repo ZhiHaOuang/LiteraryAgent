@@ -4,14 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "literarygiant-cli"
-version = "0.1.0"
-description = "LiteraryGiant custom agent CLI scaffold."
+version = "0.3.0"
+description = "LiteraryGiant literary agent runtime and CLI."
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "prompt-toolkit>=3.0.48,<4",
+    "rich>=13.9,<15",
+    "tomli>=2.2.1; python_version < '3.11'",
+]
 
 [project.scripts]
 lg = "lg_cli.main:main"
+literary = "lg_cli.main:main"
 literarygiant = "lg_cli.main:main"
 
 [tool.setuptools.packages.find]
 include = ["lg_cli*"]
+
+[tool.setuptools.package-data]
+lg_cli = ["resources/*.json", "resources/*.txt"]

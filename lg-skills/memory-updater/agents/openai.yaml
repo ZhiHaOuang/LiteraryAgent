@@ -1,0 +1,4 @@
+interface:
+  display_name: "Memory Updater"
+  short_description: "Propose safe durable story-memory updates"
+  default_prompt: "Use -updater to prepare a conflict-aware memory update from this artifact."

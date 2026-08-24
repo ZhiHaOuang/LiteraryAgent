@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reference Abstractor"
+  short_description: "Turn references into reusable mechanics safely"
+  default_prompt: "Use -abstractor to abstract these references without copying prose."

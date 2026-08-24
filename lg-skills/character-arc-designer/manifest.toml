@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "character-arc-designer"
+legacy_id = "character_arc_designer"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["premise", "world_rules", "plot_pressure", "relationship_needs"]
+outputs = ["cast_table", "desires", "wounds", "misbeliefs", "growth_lines", "relationship_tension", "reversal_points"]
+tools = ["memory_read", "reference_search", "write_output"]
+quality_checks = ["distinct desire", "actionable wound", "relationship friction", "growth test", "antagonist mirror", "chapter-level behavior cues"]
+failure_modes = ["flat cast", "motivation stated but not dramatized", "relationships with no conflict", "villain without worldview"]

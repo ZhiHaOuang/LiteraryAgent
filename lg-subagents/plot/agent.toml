@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "plot"
+name = "PlotAgent"
+version = "1.0.0"
+role = "负责主线、分卷、章节、冲突升级、伏笔和回收。"
+model_profile = "writer"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["memory_read", "reference_search", "write_output"]
+skills = ["outline-planner", "conflict-engine"]
+inputs = ["direction", "world_bible", "characters", "reference_patterns"]
+outputs = ["volume_outline", "chapter_outline", "payoff_ledger"]

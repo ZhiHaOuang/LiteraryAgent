@@ -1,0 +1,4 @@
+interface:
+  display_name: "Worldview Designer"
+  short_description: "Design conflict-producing world rules and systems"
+  default_prompt: "Use -designer to design a usable world system for this story."

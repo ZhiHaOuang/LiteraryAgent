@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "scene-planner"
+name = "ScenePlannerAgent"
+version = "1.0.0"
+role = "负责把章节节点转化为可审批的场景卡和因果节拍，不提前写正文。"
+model_profile = "writer"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["memory_read", "reference_search", "write_output"]
+skills = ["scene-planner", "conflict-engine", "story-bible-curator"]
+inputs = ["author_request", "scene_card", "story_bible", "timeline", "foreshadowing_ledger"]
+outputs = ["candidate_scene_plan", "card_updates", "continuity_risks", "memory_proposals"]

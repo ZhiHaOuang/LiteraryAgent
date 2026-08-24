@@ -1,45 +1,96 @@
-# LiteraryGiant Agent Architecture
+# LiteraryGiant Architecture
 
-LiteraryGiant, abbreviated LG, is the custom agent framework for this project.
+## Ownership Boundary
 
-## Layers
+LG owns orchestration, literary policy, persistence, and user experience. Codex owns the model execution engine.
 
-1. LG UI Layer: `lg-cli`
-2. LG Agent Layer: `lg-agent`, `lg-prompts`, `lg-skills`, `lg-subagents`
-3. LG Context Layer: `lg-context`, `lg-memory`, `.literarygiant/memory`
-4. LG Tool Layer: `lg-tools`
-5. LG Adapter Layer: `lg-agent/core_adapter.md` and `lg-cli/lg_cli/core_adapter.py`
-6. Codex Core Layer: `core/codex`
+```text
+CLI / interactive session
+        |
+        +-> StoryWorkflowService -> ProjectStore -> story.sqlite3
+        |          |                    +-> documents + candidate versions
+        |          |                    +-> Story Bible + proposals
+        |          |                    +-> scenes + timeline + foreshadowing + review doubts
+        |          +-> RunEvent -> RunStore
+        |
+        +-> WorkflowRunner -> RunEvent -> RunStore
+                   +-> DefinitionRegistry -> SKILL.md + subagent prompt/model/tools/schema
+                   +-> MemoryContext
+                   +-> KnowledgeGateway -> AbstractLibrary -> ReferenceLibrary -> BridgeIndex -> raw opt-in
+        |
+CodexExecAdapter -> codex exec (prompt over stdin, JSONL events, structured final output)
+```
 
-## Boundary Rule
+`core/codex` contains no LG branding or product patches. `CODEX_CORE_COMMIT` and `scripts/update_codex_core.sh --verify` prove that its committed tree matches the pinned upstream commit.
 
-`core/codex` is an updateable vendor engine. Do not put LiteraryGiant workflows, prompts, subagents, or reference-library logic inside it.
+## Execution Model
 
-## Current Integration Status
+1. CLI resolves explicit commands or routes natural-language intent.
+2. `WorkflowRunner` creates `.literarygiant/runs/<run-id>/run.json`.
+3. Memory and knowledge context are loaded once with bounded budgets.
+4. Each workflow stage resolves one subagent and one skill.
+5. A stage prompt includes the original request, bounded context, and prior handoffs.
+6. `CodexExecAdapter` runs `codex exec` with the stage model profile and JSON schema.
+7. JSONL engine events are wrapped as durable `RunEvent` records.
+8. Valid stage output is stored before the next stage starts.
+9. The final stage becomes a timestamped artifact and `<command>.latest.md`.
+10. Failed runs retain completed stages and can be resumed into a new linked run.
 
-The scaffold is runnable. `outline` now has the first LG-owned workflow loop:
+The default strategy is `staged`. `single-pass` is available as an explicit lower-cost configuration and collapses the workflow into its final synthesizer.
 
-- display the LG dashboard
-- initialize `.literarygiant/`
-- list skills, subagents, and modes
-- show status
-- read memory and parent reference libraries
-- build and save `.literarygiant/logs/last_prompt.md`
-- attempt a non-interactive Codex process adapter when an API key is configured
-- write degraded fallback output when no key or core executable is available
-- save `.literarygiant/logs/last_run.json` and timestamped outline outputs
-- enter workflow stubs for world, character, plot, write, ref, check, chat, and code
+Story operations add a human-gated state machine around model execution:
 
-The adapter deliberately avoids login. LG validates configuration first and passes credentials through environment variables.
+1. A scene card is created from explicit author constraints.
+2. `scene plan` creates a candidate plan; it cannot authorize prose generation.
+3. `scene approve` records the author's decision.
+4. `scene draft` creates an inactive candidate document version.
+5. `version diff/accept/reject/restore` controls manuscript activation and history.
+6. Durable facts emitted by a model become proposals; only explicit author commands can promote them to Canonical.
 
-## Next Integration Step
+## Durable State
 
-Promote the remaining modes into dedicated workflow modules:
+```text
+.literarygiant/
+  project.json
+  story.sqlite3
+  config.toml
+  history
+  memory/
+  output/
+    candidates/
+    exports/
+  runs/<run-id>/
+    run.json
+    events.jsonl
+    stages/<stage-id>.prompt.md
+    stages/<stage-id>.md
+    stages/<stage-id>.json
+  logs/agent.log
+  logs/failures.md
+```
 
-1. `world` - memory/reference/prompt/core/output loop for world bibles
-2. `character` - cast and relationship design loop
-3. `write` - chapter drafting loop with memory update proposals
-4. `check` - continuity audit loop
-5. `ref` - reference retrieval and abstraction loop
+`story.sqlite3` is local-first and contains revision history instead of destructive overwrites. Memory updates are proposed by the workflow but are not silently committed to canon. References are untrusted evidence. Original source text remains disabled unless the user explicitly opts in.
 
-Keep `core/codex` as an updateable vendor engine. New LG behavior should live in `lg-cli`, `lg-agent`, `lg-skills`, `lg-subagents`, `lg-tools`, and project `.literarygiant` state.
+## Adapter Contract
+
+The stable adapter surface is `codex exec`, not a patch inside Codex. It:
+
+- probes every executable candidate with `--version`
+- sends prompts only through stdin
+- uses an isolated mode-`0700` `CODEX_HOME`
+- forwards JSONL events
+- reads the authoritative `--output-last-message`
+- applies per-subagent model profiles and output schemas
+- terminates process groups on timeout
+- preserves stderr and nonzero process exit codes
+
+Build-on-demand from vendored Rust source is disabled unless `LG_CODEX_BUILD_ON_DEMAND=1`; an unbuilt source tree is not reported as a healthy runtime.
+
+## Extension Points
+
+- Add a skill through `SKILL.md`, `manifest.toml`, and `skills.json`.
+- Add a subagent through `agent.toml`, `prompt.md`, and `output.schema.json`.
+- Add stages declaratively in `lg-agent/workflows.json`.
+- Add project-level story operations through `StoryWorkflowService` while keeping author approval in `ProjectStore` state transitions.
+- Override skills or subagents per project under `.literarygiant/skills` and `.literarygiant/subagents`.
+- Implement another model adapter against the `ModelAdapter` protocol without changing workflows.

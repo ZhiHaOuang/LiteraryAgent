@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import DEFAULT_CONFIG_TEXT
+from .project_store import ProjectRegistry, ProjectStore
 
 
 MEMORY_FILES = {
@@ -41,10 +42,18 @@ def init_workspace(workspace: Path) -> InitResult:
         root / "memory",
         root / "output",
         root / "output" / "outlines",
+        root / "output" / "worlds",
+        root / "output" / "characters",
+        root / "output" / "plots",
         root / "output" / "chapters",
-        root / "output" / "diagrams",
         root / "output" / "reports",
+        root / "output" / "references",
+        root / "output" / "conversations",
+        root / "output" / "plans",
+        root / "output" / "exports",
         root / "logs",
+        root / "runs",
+        root / "tmp",
         root / "skills",
         root / "subagents",
         workspace / "ReferenceLibrary",
@@ -58,6 +67,12 @@ def init_workspace(workspace: Path) -> InitResult:
     _write_if_missing(root / "config.toml", DEFAULT_CONFIG_TEXT, created, skipped)
     _write_if_missing(root / "logs" / "agent.log", "", created, skipped)
     _write_if_missing(root / "logs" / "failures.md", "# Failures\n\n", created, skipped)
+    _write_if_missing(
+        root / ".gitignore",
+        "codex-home/\ntmp/\nhistory\n",
+        created,
+        skipped,
+    )
     _write_if_missing(root / "skills" / "README.md", "# Project Skills\n\nProject-local LG skills can live here.\n", created, skipped)
     _write_if_missing(
         root / "subagents" / "README.md",
@@ -70,6 +85,8 @@ def init_workspace(workspace: Path) -> InitResult:
         _write_if_missing(root / "memory" / name, text, created, skipped)
     for name, text in OUTPUT_FILES.items():
         _write_if_missing(root / "output" / name, text, created, skipped)
+    project = ProjectStore(workspace).initialize()
+    ProjectRegistry().register(project)
     return InitResult(created=created, skipped=skipped)
 
 

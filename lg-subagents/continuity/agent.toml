@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "continuity"
+name = "ContinuityAgent"
+version = "1.0.0"
+role = "负责查矛盾、断线、设定冲突、战力膨胀和时间线问题。"
+model_profile = "critic"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["read_file", "search_file", "memory_read", "write_report"]
+skills = ["continuity-checker", "failure-logger"]
+inputs = ["artifact", "memory", "story_bible"]
+outputs = ["issues", "severity", "repair_suggestions"]

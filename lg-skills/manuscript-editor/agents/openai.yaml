@@ -1,0 +1,3 @@
+interface:
+  display_name: "Manuscript Editor"
+  short_description: "Create scoped candidate revisions with change logs"

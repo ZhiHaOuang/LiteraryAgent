@@ -1,0 +1,4 @@
+interface:
+  display_name: "Character Arc Designer"
+  short_description: "Design character motives, arcs, and relationships"
+  default_prompt: "Use -arc-designer to build the main cast and relationship tensions."

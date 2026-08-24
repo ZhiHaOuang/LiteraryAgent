@@ -1,0 +1,4 @@
+interface:
+  display_name: "Conflict Engine"
+  short_description: "Build escalating conflict and reversal chains"
+  default_prompt: "Use -engine to strengthen escalation and reversals in this plot."

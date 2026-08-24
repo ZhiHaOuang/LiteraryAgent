@@ -20,7 +20,11 @@ LG product logic belongs in:
 - `lg-output/`
 - `docs/`
 
-LG CLI must not trigger Codex login. Validate `LITERARYGIANT_API_KEY`, `LG_API_KEY`, `OPENAI_API_KEY`, or `.literarygiant/config.toml` before delegating to model adapters.
+LG CLI must not trigger Codex login. Validate `LITERARYGIANT_API_KEY`, `LG_API_KEY`, `CODEX_API_KEY`, `OPENAI_API_KEY`, or the compatibility config key before delegating to model adapters.
+
+Use `KnowledgeGateway` for reference retrieval. Search `AbstractLibrary` first, then the project reference library and `BridgeIndex`. Never scan `Bridges` directly, and require explicit opt-in before reading `TaciturnRaw`.
+
+New literary behavior belongs in declarative workflows, `SKILL.md` definitions, independent subagent prompts/schemas, or the outer Python runtime. Do not add LG behavior to `core/codex`.
 
 Runtime generated story artifacts should default to `.literarygiant/output/`. Durable story memory should default to `.literarygiant/memory/`.
 

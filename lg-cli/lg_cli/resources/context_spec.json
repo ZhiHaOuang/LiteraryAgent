@@ -1,0 +1,35 @@
+{
+  "schema_version": "lg.context.v1",
+  "roots": [
+    "ReferenceLibrary",
+    "TaciturnRaw",
+    "Bridges",
+    "AbstractLibrary",
+    ".literarygiant/memory",
+    ".learnings"
+  ],
+  "degraded_mode": "Missing roots produce warnings, not fatal errors.",
+  "capabilities": [
+    "read_project_config",
+    "read_memory",
+    "read_existing_outline",
+    "read_existing_chapters",
+    "reference_search_stub",
+    "reference_abstract_stub",
+    "bounded_context_builder",
+    "source_tracking"
+  ],
+  "context_budget": {
+    "default_max_chars": 24000,
+    "single_file_max_chars": 6000,
+    "source_notes_required": true
+  },
+  "future_adapter": {
+    "module": "lg_context",
+    "entrypoints": [
+      "build_context(task_mode, query, workspace)",
+      "search_reference(query, roots, limit)",
+      "abstract_reference(source_refs, task_goal)"
+    ]
+  }
+}

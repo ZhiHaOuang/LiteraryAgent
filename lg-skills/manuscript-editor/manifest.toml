@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "manuscript-editor"
+legacy_id = "manuscript_editor"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["source_version", "revision_mode", "author_request", "canonical_facts", "style_guide"]
+outputs = ["candidate_revision", "change_log", "continuity_risks", "memory_proposals"]
+tools = ["memory_read", "write_output", "write_report"]
+quality_checks = ["revision mode is respected", "canon is preserved", "full candidate text is returned", "change log is concrete", "active manuscript remains untouched"]
+failure_modes = ["scope creep", "silent plot rewrite", "canon drift", "partial text presented as full revision", "candidate treated as accepted"]

@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "direction-expander"
+legacy_id = "direction_expander"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["direction", "target_audience", "genre_hint", "reference_constraints"]
+outputs = ["genre_positioning", "protagonist_seed", "core_conflict", "selling_points", "payoff_types", "reader_promises", "commercial_tags"]
+tools = ["memory_read", "reference_search", "write_output"]
+quality_checks = ["clear target reader", "specific protagonist desire", "external pressure", "repeatable payoff engine", "chapter hook potential"]
+failure_modes = ["generic genre soup", "no concrete conflict", "worldbuilding without plot pressure", "selling points too abstract"]

@@ -5,24 +5,43 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+    import tomli as tomllib
+
 
 DEFAULT_CONFIG_TEXT = """[model]
 provider = "openai"
-default = "gpt-5.5-thinking"
-writer = "gpt-5.5-thinking"
-coder = "gpt-5.5-codex"
-critic = "gpt-5-mini"
+# Leave model names empty to use the current Codex default.
+default = ""
+writer = ""
+coder = ""
+critic = ""
 
 [paths]
 memory = ".literarygiant/memory"
 output = ".literarygiant/output"
 reference = "ReferenceLibrary"
 
+[knowledge]
+# Set library to an explicit Library directory when automatic discovery is not suitable.
+library = ""
+top_k = 6
+allow_raw_reference = false
+
 [agent]
 default_mode = "chat"
+execution_strategy = "staged"
 enable_shell = false
 enable_reference = true
+timeout_seconds = 300
+max_stage_context_chars = 24000
 """
+
+
+class ConfigError(ValueError):
+    """Raised when LiteraryGiant configuration is invalid."""
 
 
 @dataclass(frozen=True)
@@ -36,16 +55,40 @@ class LGConfig:
     memory_path: Path
     output_path: Path
     reference_path: Path
+    library_path: Path | None
+    knowledge_top_k: int
+    allow_raw_reference: bool
     default_mode: str
+    execution_strategy: str
     enable_shell: bool
     enable_reference: bool
+    timeout_seconds: int
+    max_stage_context_chars: int
     api_key: str | None
     api_key_source: str
-    loaded_files: list[Path]
+    loaded_files: tuple[Path, ...]
+    warnings: tuple[str, ...]
 
     @property
     def model_label(self) -> str:
-        return self.default_model or "not configured"
+        return self.default_model or "auto (core default)"
+
+    def model_for_mode(self, mode: str) -> str:
+        if mode == "code":
+            return self.coder_model or self.default_model
+        if mode in {"check", "critic", "ref"}:
+            return self.critic_model or self.writer_model or self.default_model
+        return self.writer_model or self.default_model
+
+    def model_for_profile(self, profile: str, *, mode: str = "") -> str:
+        normalized = profile.strip().lower()
+        if normalized in {"coder", "code"}:
+            return self.coder_model or self.default_model
+        if normalized in {"critic", "reviewer", "reference"}:
+            return self.critic_model or self.writer_model or self.default_model
+        if normalized in {"writer", "creative", "director"}:
+            return self.writer_model or self.default_model
+        return self.model_for_mode(mode)
 
 
 def project_config_path(workspace: Path) -> Path:
@@ -58,89 +101,142 @@ def user_config_path() -> Path:
 
 def load_config(workspace: Path | None = None) -> LGConfig:
     root = (workspace or Path.cwd()).resolve()
-    data: dict[str, dict[str, Any]] = {}
+    data: dict[str, Any] = {}
     loaded: list[Path] = []
+    warnings: list[str] = []
 
-    # Lower priority first, then higher priority. The requested effective
-    # priority is env > user config > project config.
-    for path in [project_config_path(root), user_config_path()]:
+    # The requested order is environment > user config > project config.
+    for path in (project_config_path(root), user_config_path()):
         if path.exists():
-            _merge(data, _parse_toml_like(path))
+            _merge(data, _read_toml(path))
             loaded.append(path)
+
+    model = _section(data, "model")
+    paths = _section(data, "paths")
+    knowledge = _section(data, "knowledge")
+    agent = _section(data, "agent")
 
     api_key, api_source = _api_key_from_env()
     if not api_key:
-        api_key = str(data.get("model", {}).get("api_key") or "").strip() or None
-        api_source = "config:model.api_key" if api_key else "not configured"
+        configured_key = _string(model.get("api_key"))
+        if configured_key:
+            api_key = configured_key
+            api_source = "config:model.api_key"
+            warnings.append(
+                "model.api_key is supported for compatibility; environment variables are safer for secrets."
+            )
 
-    provider = str(data.get("model", {}).get("provider") or "openai")
-    default_model = str(data.get("model", {}).get("default") or "gpt-5.5-thinking")
-    writer_model = str(data.get("model", {}).get("writer") or default_model)
-    coder_model = str(data.get("model", {}).get("coder") or "gpt-5.5-codex")
-    critic_model = str(data.get("model", {}).get("critic") or "gpt-5-mini")
-    paths = data.get("paths", {})
-    agent = data.get("agent", {})
+    default_model = _env_string("LITERARYGIANT_MODEL", "LG_MODEL") or _string(model.get("default"))
+    writer_model = _string(model.get("writer"))
+    coder_model = _string(model.get("coder"))
+    critic_model = _string(model.get("critic"))
+    library_raw = _string(knowledge.get("library"))
+
     return LGConfig(
         workspace=root,
-        provider=provider,
+        provider=_env_string("LITERARYGIANT_PROVIDER", "LG_PROVIDER")
+        or _string(model.get("provider"))
+        or "openai",
         default_model=default_model,
         writer_model=writer_model,
         coder_model=coder_model,
         critic_model=critic_model,
-        memory_path=_workspace_path(root, str(paths.get("memory") or ".literarygiant/memory")),
-        output_path=_workspace_path(root, str(paths.get("output") or ".literarygiant/output")),
-        reference_path=_workspace_path(root, str(paths.get("reference") or "ReferenceLibrary")),
-        default_mode=str(agent.get("default_mode") or "chat"),
-        enable_shell=bool(agent.get("enable_shell", False)),
-        enable_reference=bool(agent.get("enable_reference", True)),
+        memory_path=_workspace_path(root, _string(paths.get("memory")) or ".literarygiant/memory"),
+        output_path=_workspace_path(root, _string(paths.get("output")) or ".literarygiant/output"),
+        reference_path=_workspace_path(root, _string(paths.get("reference")) or "ReferenceLibrary"),
+        library_path=_workspace_path(root, library_raw) if library_raw else None,
+        knowledge_top_k=_bounded_int(knowledge.get("top_k"), default=6, minimum=1, maximum=30),
+        allow_raw_reference=_boolean(knowledge.get("allow_raw_reference"), False),
+        default_mode=_string(agent.get("default_mode")) or "chat",
+        execution_strategy=_choice(
+            agent.get("execution_strategy"), {"single-pass", "staged"}, "staged"
+        ),
+        enable_shell=_boolean(agent.get("enable_shell"), False),
+        enable_reference=_boolean(agent.get("enable_reference"), True),
+        timeout_seconds=_bounded_int(agent.get("timeout_seconds"), 300, 10, 3600),
+        max_stage_context_chars=_bounded_int(
+            agent.get("max_stage_context_chars"), 24000, 4000, 200000
+        ),
         api_key=api_key,
         api_key_source=api_source,
-        loaded_files=loaded,
+        loaded_files=tuple(loaded),
+        warnings=tuple(warnings),
     )
 
 
+def _read_toml(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("rb") as handle:
+            value = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError(f"cannot read config {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ConfigError(f"config root must be a table: {path}")
+    return value
+
+
+def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
+    value = data.get(name, {})
+    if not isinstance(value, dict):
+        raise ConfigError(f"[{name}] must be a TOML table")
+    return value
+
+
+def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for key, value in source.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _merge(target[key], value)
+        elif isinstance(value, dict):
+            target[key] = dict(value)
+        else:
+            target[key] = value
+
+
 def _workspace_path(root: Path, raw: str) -> Path:
-    path = Path(raw)
-    return path if path.is_absolute() else root / path
+    path = Path(raw).expanduser()
+    return path.resolve() if path.is_absolute() else (root / path).resolve()
 
 
 def _api_key_from_env() -> tuple[str | None, str]:
-    for name in ("LITERARYGIANT_API_KEY", "LG_API_KEY", "OPENAI_API_KEY"):
-        value = os.environ.get(name)
+    for name in ("LITERARYGIANT_API_KEY", "LG_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY"):
+        value = os.environ.get(name, "").strip()
         if value:
             return value, f"env:{name}"
     return None, "not configured"
 
 
-def _merge(target: dict[str, dict[str, Any]], source: dict[str, dict[str, Any]]) -> None:
-    for section, values in source.items():
-        target.setdefault(section, {}).update(values)
+def _env_string(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
-def _parse_toml_like(path: Path) -> dict[str, dict[str, Any]]:
-    data: dict[str, dict[str, Any]] = {}
-    section = ""
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.split("#", 1)[0].strip()
-        if not line:
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            section = line[1:-1].strip()
-            data.setdefault(section, {})
-            continue
-        if "=" not in line:
-            continue
-        key, value = [part.strip() for part in line.split("=", 1)]
-        data.setdefault(section, {})[key] = _parse_value(value)
-    return data
+def _string(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
-def _parse_value(value: str) -> Any:
-    if value in {"true", "false"}:
-        return value == "true"
-    if len(value) >= 2 and value[0] == value[-1] == '"':
-        return value[1:-1]
-    try:
-        return int(value)
-    except ValueError:
-        return value
+def _boolean(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ConfigError(f"expected boolean, got {value!r}")
+    return value
+
+
+def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"expected integer, got {value!r}")
+    if not minimum <= value <= maximum:
+        raise ConfigError(f"integer {value} must be between {minimum} and {maximum}")
+    return value
+
+
+def _choice(value: Any, choices: set[str], default: str) -> str:
+    text = _string(value) or default
+    if text not in choices:
+        raise ConfigError(f"expected one of {sorted(choices)}, got {text!r}")
+    return text

@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "style"
+name = "StyleAgent"
+version = "1.0.0"
+role = "负责文风、节奏、对白、爽感密度、叙事口吻。"
+model_profile = "writer"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["memory_read", "write_output", "write_report"]
+skills = ["style-controller"]
+inputs = ["draft", "style_guide", "target_reader"]
+outputs = ["style_diagnosis", "rewrite_guidelines", "sample_revision"]

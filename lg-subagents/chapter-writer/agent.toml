@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "chapter-writer"
+name = "ChapterWriterAgent"
+version = "1.0.0"
+role = "负责按大纲写章节正文。"
+model_profile = "writer"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["memory_read", "reference_search", "write_output", "memory_update"]
+skills = ["chapter-writer", "style-controller"]
+inputs = ["chapter_outline", "story_bible", "style_guide", "continuity_constraints"]
+outputs = ["chapter_draft", "hook", "memory_update_candidates"]

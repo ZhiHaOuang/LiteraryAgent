@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "worldview-designer"
+legacy_id = "worldview_designer"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["premise", "genre", "plot_needs", "character_needs", "reference_patterns"]
+outputs = ["world_rules", "factions", "geography", "resources", "power_hierarchy", "system_rules", "boundaries", "taboos", "costs"]
+tools = ["memory_read", "reference_search", "write_output"]
+quality_checks = ["rules create plot pressure", "resources are scarce", "factions have incompatible incentives", "power scale has limits", "taboos have consequences"]
+failure_modes = ["decorative lore", "unbounded power system", "factions without incentives", "geography irrelevant to plot"]

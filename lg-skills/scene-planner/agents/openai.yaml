@@ -1,0 +1,3 @@
+interface:
+  display_name: "Scene Planner"
+  short_description: "Build approvable causal scene plans before drafting"

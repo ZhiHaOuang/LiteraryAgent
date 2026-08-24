@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "manuscript-editor"
+name = "ManuscriptEditorAgent"
+version = "1.0.0"
+role = "负责按明确模式生成可对比的候选修订，不覆盖当前接受版本。"
+model_profile = "writer"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["memory_read", "write_output", "write_report"]
+skills = ["manuscript-editor", "style-controller", "continuity-checker", "story-bible-curator"]
+inputs = ["source_version", "revision_mode", "author_request", "story_bible", "style_guide"]
+outputs = ["candidate_revision", "change_log", "continuity_risks", "memory_proposals"]

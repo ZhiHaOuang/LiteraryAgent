@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "worldbuilding"
+name = "WorldbuildingAgent"
+version = "1.0.0"
+role = "负责世界观、势力、规则、资源、等级、地理和系统边界。"
+model_profile = "writer"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["memory_read", "reference_search", "write_output"]
+skills = ["worldview-designer"]
+inputs = ["premise", "genre", "plot_pressure", "reference_patterns"]
+outputs = ["world_bible", "rule_boundaries", "conflict_sources"]

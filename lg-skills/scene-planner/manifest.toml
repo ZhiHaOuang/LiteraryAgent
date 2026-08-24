@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "scene-planner"
+legacy_id = "scene_planner"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["author_request", "scene_card", "canonical_facts", "ideas", "timeline", "foreshadowing_ledger"]
+outputs = ["scene_plan", "card_updates", "continuity_risks", "memory_proposals"]
+tools = ["memory_read", "reference_search", "write_output"]
+quality_checks = ["goal and opposition are concrete", "beats form a causal chain", "information flow is explicit", "emotion changes", "ending state creates consequence", "canon additions remain proposals"]
+failure_modes = ["summary instead of actionable beats", "drafting prose before approval", "events without causality", "silent canon invention", "scene ends unchanged"]

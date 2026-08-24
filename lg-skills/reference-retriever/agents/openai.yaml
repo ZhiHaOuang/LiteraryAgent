@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reference Retriever"
+  short_description: "Retrieve relevant abstract story patterns"
+  default_prompt: "Use -retriever to find relevant structural references for this task."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chapter Writer"
+  short_description: "Draft purposeful scenes and chapter prose"
+  default_prompt: "Use -writer to draft this chapter from the approved story plan."

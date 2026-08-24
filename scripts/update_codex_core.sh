@@ -103,6 +103,14 @@ verify_index_core() {
   [[ "$expected_tree" == "$actual_tree" ]]
 }
 
+if [[ "$MODE" == "verify" ]]; then
+  echo "LiteraryAgent repo: $repo_root"
+  echo "Codex prefix:       $PREFIX"
+  echo "Pinned commit:      $pinned_sha"
+  verify_committed_core
+  exit $?
+fi
+
 if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
   echo "Missing remote '$REMOTE'." >&2
   echo "Expected something like:" >&2
@@ -139,11 +147,6 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Working tree has uncommitted changes."
   echo "Commit or stash them before applying a Codex core update."
   echo
-fi
-
-if [[ "$MODE" == "verify" ]]; then
-  verify_committed_core
-  exit $?
 fi
 
 if [[ "$MODE" == "check" ]]; then

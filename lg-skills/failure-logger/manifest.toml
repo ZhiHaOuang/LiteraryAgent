@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "failure-logger"
+legacy_id = "failure_logger"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["failure", "severity", "artifact_refs", "repair_attempts"]
+outputs = ["failure_record", "repair_plan", "follow_up_checks"]
+tools = ["write_report", "write_output"]
+quality_checks = ["failure type clear", "severity clear", "artifact refs present", "next action concrete"]
+failure_modes = ["blame without fix", "missing reproduction", "too broad repair", "not logging adapter stubs"]

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Failure Logger"
+  short_description: "Record reproducible workflow failures and repairs"
+  default_prompt: "Use -logger to record this failure and propose the smallest repair."

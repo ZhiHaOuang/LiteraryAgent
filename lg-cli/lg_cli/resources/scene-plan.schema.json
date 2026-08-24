@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LiteraryGiant scene plan output",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {"type": "string"},
+    "plan_markdown": {"type": "string"},
+    "card_updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pov": {"type": "string"},
+        "narrative_tense": {"type": "string"},
+        "time_label": {"type": "string"},
+        "location": {"type": "string"},
+        "goal": {"type": "string"},
+        "characters": {"type": "array", "items": {"type": "string"}},
+        "conflict": {"type": "string"},
+        "required_information": {"type": "string"},
+        "emotional_change": {"type": "string"},
+        "end_state": {"type": "string"},
+        "word_min": {"type": ["integer", "null"], "minimum": 0},
+        "word_max": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "memory_proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {"type": "string"},
+          "key": {"type": "string"},
+          "value": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "rationale": {"type": "string"}
+        },
+        "required": ["category", "key", "value", "tags", "rationale"]
+      }
+    },
+    "risks": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["summary", "plan_markdown", "card_updates", "memory_proposals", "risks"]
+}

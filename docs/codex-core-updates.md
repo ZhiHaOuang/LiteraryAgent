@@ -45,6 +45,8 @@ Verify that the committed prefix exactly matches its pin:
 scripts/update_codex_core.sh --verify
 ```
 
+`--verify` is local-only: it does not fetch or require network access. It compares the committed `core/codex` tree hash with the tree of `CODEX_CORE_COMMIT` and also rejects a dirty core prefix.
+
 ## Apply An Update
 
 Run this only after the current LG migration has been committed and the worktree is clean:
@@ -76,6 +78,14 @@ When satisfied:
 ```bash
 git commit -m "Update Codex core from upstream/main"
 ```
+
+Alternatively, request the commit after verification:
+
+```bash
+scripts/update_codex_core.sh --apply --commit
+```
+
+After committing inside `LiteraryAgent`, commit only the updated `LiteraryAgent` submodule pointer in the parent `LiteraryGiant` repository.
 
 ## Conflict Rule
 

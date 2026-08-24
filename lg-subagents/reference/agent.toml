@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "reference"
+name = "ReferenceAgent"
+version = "1.0.0"
+role = "负责检索 Reference Library，并抽象可迁移结构，禁止照搬原文。"
+model_profile = "critic"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["read_file", "search_file", "reference_search", "reference_abstract"]
+skills = ["reference-retriever", "reference-abstractor"]
+inputs = ["query", "reference_roots", "task_goal"]
+outputs = ["source_refs", "abstract_patterns", "reuse_constraints"]

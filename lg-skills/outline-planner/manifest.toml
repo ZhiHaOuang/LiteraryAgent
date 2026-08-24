@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "outline-planner"
+legacy_id = "outline_planner"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["direction", "worldview", "characters", "conflict_ladder", "target_length"]
+outputs = ["volume_outline", "chapter_outline", "key_nodes", "foreshadowing_ledger", "payoff_ledger", "hooks", "rhythm_curve"]
+tools = ["memory_read", "reference_search", "write_output"]
+quality_checks = ["each chapter has movement", "hooks are concrete", "payoffs are tracked", "volume climaxes escalate", "pacing varies"]
+failure_modes = ["summary without beats", "chapters interchangeable", "forgotten foreshadowing", "climax arrives without pressure"]

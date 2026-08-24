@@ -1,0 +1,10 @@
+schema_version = "lg.skill.v1"
+id = "continuity-checker"
+legacy_id = "continuity_checker"
+version = "1.0.0"
+entrypoint = "SKILL.md"
+inputs = ["artifact", "memory", "story_bible", "reference_constraints"]
+outputs = ["contradictions", "severity", "evidence", "repair_suggestions", "memory_updates_needed"]
+tools = ["read_file", "search_file", "memory_read", "write_report"]
+quality_checks = ["severity assigned", "evidence cited", "repair is minimal", "memory updates identified", "false positives avoided"]
+failure_modes = ["vague concern", "overcorrecting style as contradiction", "no evidence", "ignoring power scale"]

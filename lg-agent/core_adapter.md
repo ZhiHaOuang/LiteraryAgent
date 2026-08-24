@@ -1,22 +1,21 @@
 # LG Core Adapter
 
-`core/codex` is the vendored Codex engine. LiteraryGiant product logic must stay outside it.
+`lg-cli/lg_cli/core_adapter.py` is the only model-engine boundary used by LG workflows. It delegates to the stable non-interactive `codex exec` surface while keeping every LG prompt, skill, workflow, subagent, and persistence rule outside `core/codex`.
 
-The first LG scaffold exposes a stub adapter in `lg-cli/lg_cli/core_adapter.py`. It verifies that Codex core exists and reports that the real model loop is not wired yet.
+## Contract
 
-Planned adapter entrypoints:
+- no login command or inherited Codex session
+- API key supplied by environment and mapped to child `CODEX_API_KEY`
+- prompt supplied on stdin, never argv
+- isolated `.literarygiant/codex-home`
+- candidate `--version` health probes
+- JSONL event forwarding
+- authoritative final response through `--output-last-message`
+- optional strict `--output-schema`
+- read-only sandbox for literary modes; workspace-write only for explicit code mode
+- timeout and process-group termination
+- nonzero child status preserved as workflow failure
 
-- `lg_core_adapter.run_model_turn(mode, prompt, context, config)`
-- `lg_core_adapter.run_code_task(prompt, workspace, policy)`
-- `lg_core_adapter.apply_patch(patch, workspace, policy)`
-- `lg_core_adapter.run_shell(command, workspace, policy)`
-- `lg_core_adapter.read_file(path, budget)`
-- `lg_core_adapter.search_files(query, roots)`
+Candidate order is explicit `LG_CODEX_COMMAND`, built vendored binaries, vendored Node wrapper, installed `codex`, then an opt-in cargo build fallback. Source presence alone is not runtime health.
 
-Integration order:
-
-1. Keep `core/codex` buildable as its own upstream tree.
-2. Use Codex exec/app-server public surfaces where possible.
-3. Add a thin process adapter before adding Rust crate dependencies.
-4. Only patch Codex core when a stable capability cannot be reached otherwise.
-5. Record every core patch in `core/patches` with reason and replay instructions.
+Future app-server or SDK adapters can implement the same `ModelAdapter` protocol. They do not require changes to declarative workflows or subagent definitions.

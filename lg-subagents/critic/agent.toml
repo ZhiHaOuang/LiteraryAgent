@@ -1,0 +1,12 @@
+schema_version = "lg.subagent.v1"
+id = "critic"
+name = "CriticAgent"
+version = "1.0.0"
+role = "负责质量评估，指出弱点，提出修改方案。"
+model_profile = "critic"
+prompt = "prompt.md"
+output_schema = "output.schema.json"
+tools = ["read_file", "memory_read", "write_report"]
+skills = ["failure-logger", "style-controller"]
+inputs = ["artifact", "workflow_goal", "quality_criteria"]
+outputs = ["scorecard", "weaknesses", "revision_plan"]
