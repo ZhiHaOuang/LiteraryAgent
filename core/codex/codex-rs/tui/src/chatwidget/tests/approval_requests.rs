@@ -10,9 +10,11 @@ async fn exec_approval_emits_proposed_command_and_decision_history() {
 
     // Trigger an exec approval request with a short, single-line command.
     let ev = ExecApprovalRequestEvent {
+        kind: Default::default(),
         call_id: "call-short".into(),
         approval_id: Some("call-short".into()),
         turn_id: "turn-short".into(),
+        environment_id: Some("remote".to_string()),
         command: vec!["bash".into(), "-lc".into(), "echo hello world".into()],
         cwd: AbsolutePathBuf::current_dir().expect("current dir"),
         reason: Some(
@@ -52,18 +54,20 @@ fn app_server_exec_approval_request_splits_shell_wrapped_command() {
     let script = r#"python3 -c 'print("Hello, world!")'"#;
     let request = exec_approval_request_from_params(
         AppServerCommandExecutionRequestApprovalParams {
+            kind: Default::default(),
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: None,
             command: Some(
                 shlex::try_join(["/bin/zsh", "-lc", script])
                     .expect("round-trippable shell wrapper"),
             ),
-            cwd: Some(test_path_buf("/tmp").abs()),
+            cwd: Some(test_path_buf("/tmp").abs().into()),
             command_actions: None,
             additional_permissions: None,
             proposed_execpolicy_amendment: None,
@@ -83,6 +87,42 @@ fn app_server_exec_approval_request_splits_shell_wrapped_command() {
     );
 }
 
+#[tokio::test]
+async fn app_server_write_stdin_approval_renders_terminal_input() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let event = exec_approval_request_from_params(
+        AppServerCommandExecutionRequestApprovalParams {
+            kind: codex_app_server_protocol::CommandExecutionApprovalKind::WriteStdin,
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "item-1".to_string(),
+            started_at_ms: 0,
+            approval_id: Some("approval-1".to_string()),
+            environment_id: None,
+            reason: None,
+            network_approval_context: None,
+            command: Some(
+                shlex::try_join(["write_stdin", "--session-id", "42", "confirm\n"])
+                    .expect("round-trippable write_stdin input"),
+            ),
+            cwd: Some(test_path_buf("/tmp").abs().into()),
+            command_actions: None,
+            additional_permissions: None,
+            proposed_execpolicy_amendment: None,
+            proposed_network_policy_amendments: None,
+            available_decisions: None,
+        },
+        &test_path_buf("/tmp").abs(),
+    );
+
+    handle_exec_approval_request(&mut chat, "approval-1", event);
+
+    let area = Rect::new(0, 0, 80, chat.desired_height(/*width*/ 80));
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    chat.render(area, &mut buf);
+    assert_snapshot!("write_stdin_approval_modal", format!("{buf:?}"));
+}
+
 #[test]
 fn app_server_exec_approval_request_preserves_permissions_context() {
     let read_path = AbsolutePathBuf::try_from(PathBuf::from(test_path_display("/tmp/read-only")))
@@ -93,18 +133,20 @@ fn app_server_exec_approval_request_preserves_permissions_context() {
     let write_api_path = LegacyAppPathString::from_abs_path(&write_path);
     let request = exec_approval_request_from_params(
         AppServerCommandExecutionRequestApprovalParams {
+            kind: Default::default(),
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: Some(codex_app_server_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
                 protocol: codex_app_server_protocol::NetworkApprovalProtocol::Socks5Tcp,
             }),
             command: Some("ls".to_string()),
-            cwd: Some(test_path_buf("/tmp").abs()),
+            cwd: Some(test_path_buf("/tmp").abs().into()),
             command_actions: None,
             additional_permissions: Some(AppServerAdditionalPermissionProfile {
                 network: Some(AppServerAdditionalNetworkPermissions {
@@ -152,11 +194,13 @@ async fn network_exec_approval_history_describes_session_host_allowance() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let request = exec_approval_request_from_params(
         AppServerCommandExecutionRequestApprovalParams {
+            kind: Default::default(),
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: Some(codex_app_server_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
@@ -193,11 +237,13 @@ async fn network_exec_approval_history_describes_one_time_host_allowance() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let request = exec_approval_request_from_params(
         AppServerCommandExecutionRequestApprovalParams {
+            kind: Default::default(),
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: Some(codex_app_server_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
@@ -234,11 +280,13 @@ async fn network_exec_approval_history_describes_canceled_host_request() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let request = exec_approval_request_from_params(
         AppServerCommandExecutionRequestApprovalParams {
+            kind: Default::default(),
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: Some(codex_app_server_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
@@ -287,7 +335,7 @@ fn app_server_request_permissions_preserves_file_system_permissions() {
         item_id: "item-1".to_string(),
         environment_id: Some("remote".to_string()),
         started_at_ms: 0,
-        cwd: cwd.clone(),
+        cwd: cwd.clone().into(),
         reason: Some("Select a workspace root".to_string()),
         permissions: codex_app_server_protocol::RequestPermissionProfile {
             network: Some(AppServerAdditionalNetworkPermissions {
@@ -315,7 +363,7 @@ fn app_server_request_permissions_preserves_file_system_permissions() {
             )),
         }
     );
-    assert_eq!(request.cwd, Some(cwd));
+    assert_eq!(request.cwd, Some(cwd.into()));
     assert_eq!(request.environment_id.as_deref(), Some("remote"));
 }
 
@@ -327,9 +375,11 @@ async fn exec_approval_uses_approval_id_when_present() {
         &mut chat,
         "sub-short",
         ExecApprovalRequestEvent {
+            kind: Default::default(),
             call_id: "call-parent".into(),
             approval_id: Some("approval-subcommand".into()),
             turn_id: "turn-short".into(),
+            environment_id: None,
             command: vec!["bash".into(), "-lc".into(), "echo hello world".into()],
             cwd: AbsolutePathBuf::current_dir().expect("current dir"),
             reason: Some(
@@ -369,9 +419,11 @@ async fn exec_approval_decision_truncates_multiline_and_long_commands() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     let ev_multi = ExecApprovalRequestEvent {
+        kind: Default::default(),
         call_id: "call-multi".into(),
         approval_id: Some("call-multi".into()),
         turn_id: "turn-multi".into(),
+        environment_id: None,
         command: vec!["bash".into(), "-lc".into(), "echo line1\necho line2".into()],
         cwd: AbsolutePathBuf::current_dir().expect("current dir"),
         reason: Some(
@@ -420,9 +472,11 @@ async fn exec_approval_decision_truncates_multiline_and_long_commands() {
 
     let long = format!("echo {}", "a".repeat(200));
     let ev_long = ExecApprovalRequestEvent {
+        kind: Default::default(),
         call_id: "call-long".into(),
         approval_id: Some("call-long".into()),
         turn_id: "turn-long".into(),
+        environment_id: None,
         command: vec!["bash".into(), "-lc".into(), long],
         cwd: AbsolutePathBuf::current_dir().expect("current dir"),
         reason: None,

@@ -7,7 +7,18 @@ use codex_extension_api::McpServerContributor;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_mcp::hosted_plugin_runtime_mcp_server_config;
 
+#[cfg(test)]
+#[path = "event_stream_tests.rs"]
+mod event_stream_tests;
 mod executor_plugin;
+mod stream_manager;
+
+pub use stream_manager::McpEventStreamManager;
+pub use stream_manager::McpEventStreamUpdate;
+
+#[cfg(test)]
+#[path = "stream_manager_tests.rs"]
+mod stream_manager_tests;
 
 struct HostedPluginRuntimeExtension;
 
@@ -27,11 +38,11 @@ impl McpServerContributor<Config> for HostedPluginRuntimeExtension {
                 return vec![McpServerContribution::Remove { name }];
             }
 
-            vec![McpServerContribution::Set {
-                name,
+            vec![McpServerContribution::HostedApps {
                 config: Box::new(hosted_plugin_runtime_mcp_server_config(
                     &config.chatgpt_base_url,
                     config.apps_mcp_product_sku.as_deref(),
+                    context.originator(),
                 )),
             }]
         })
@@ -52,9 +63,6 @@ pub fn install_executor_plugins(
     ));
 }
 
-/// Seeds the per-thread snapshot used by selected executor plugin MCP discovery.
-pub fn initialize_executor_plugin_thread_data(
-    thread_init: &mut codex_extension_api::ExtensionDataInit,
-) {
-    executor_plugin::seed_thread_state(thread_init);
-}
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;

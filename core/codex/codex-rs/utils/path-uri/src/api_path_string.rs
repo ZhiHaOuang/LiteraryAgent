@@ -1,10 +1,14 @@
+use crate::PathConvention;
 use crate::PathUri;
+use crate::PathUriParseError;
+use crate::is_windows_separator_byte;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::Serializer;
 use std::fmt;
+use std::path::Path;
 use thiserror::Error;
 use ts_rs::TS;
 
@@ -16,26 +20,43 @@ use ts_rs::TS;
 ///
 /// When converting from [`PathUri`], "native" refers to the supplied
 /// [`PathConvention`], which may be foreign to the operating system running
-/// this process. The inner string is private so path-producing code must convert
-/// from [`AbsolutePathBuf`] or use [`Self::from_path_uri`] instead of bypassing
-/// the intended conversion boundary. Non-UTF-8 paths are converted to UTF-8
-/// lossily because this API value is serialized as a JSON string.
+/// this process. The inner string is private so path-producing code must use a
+/// path conversion method instead of bypassing the intended conversion
+/// boundary. Non-UTF-8 paths are converted to UTF-8 lossily because this API
+/// value is serialized as a JSON string.
 ///
-/// Deserialization accepts any UTF-8 string without interpreting or validating
-/// it. That unrestricted construction path is intentionally available only to
-/// serde: Codex-internal code cannot construct this type directly from a raw
-/// `String` and is instead encouraged to convert through [`PathUri`] or
-/// [`AbsolutePathBuf`]. Relative path text remains valid until an operation
-/// such as [`Self::to_path_uri`] requires an absolute path.
+/// Deserialization and [`Self::from_string`] accept any UTF-8 string without
+/// interpreting or validating it. Use [`Self::from_string`] when a caller
+/// already owns legacy app-server path text and needs to preserve its wire
+/// spelling; use [`Self::from_path`], [`Self::from_abs_path`], or
+/// [`Self::from_path_uri`] when converting an actual path value. Relative
+/// path text remains valid until an operation such as [`Self::to_path_uri`]
+/// requires an absolute path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, TS)]
 #[serde(transparent)]
 #[ts(type = "string")]
 pub struct LegacyAppPathString(String);
 
 impl LegacyAppPathString {
+    /// Preserves already-legacy app-server path text without interpreting it
+    /// using the current host.
+    ///
+    /// This is for API-boundary values that are already strings, including
+    /// relative or foreign-platform spellings. Callers with a local
+    /// [`Path`], [`AbsolutePathBuf`], or [`PathUri`] should use the
+    /// corresponding typed constructor instead.
+    pub fn from_string(path: impl Into<String>) -> Self {
+        Self(path.into())
+    }
+
+    /// Preserves path text without interpreting it using the current host.
+    pub fn from_path(path: &Path) -> Self {
+        Self(path.to_string_lossy().into_owned())
+    }
+
     /// Renders an absolute path using the current host's path convention.
     pub fn from_abs_path(path: &AbsolutePathBuf) -> Self {
-        Self(path.to_string_lossy().into_owned())
+        Self::from_path(path.as_path())
     }
 
     /// Renders a path URI using the requested native path convention.
@@ -65,14 +86,81 @@ impl LegacyAppPathString {
         &self,
         convention: PathConvention,
     ) -> Result<PathUri, LegacyAppPathStringError> {
-        let path = match convention {
-            PathConvention::Posix => parse_posix_path(&self.0),
-            PathConvention::Windows => parse_windows_path(&self.0),
-        };
-        path.ok_or_else(|| LegacyAppPathStringError::InvalidNativePath {
-            path: self.0.clone(),
-            convention,
+        PathUri::from_absolute_native_path(&self.0, convention).ok_or_else(|| {
+            LegacyAppPathStringError::InvalidNativePath {
+                path: self.0.clone(),
+                convention: Some(convention),
+            }
         })
+    }
+
+    /// Resolves this raw API path spelling against an executor cwd.
+    ///
+    /// Relative paths use the cwd's inferred convention. Home-relative paths
+    /// use the supplied executor home, and clearly foreign absolute paths are
+    /// rejected rather than reinterpreted as relative path text.
+    pub fn resolve_against(
+        &self,
+        cwd: &PathUri,
+        user_home_dir: Option<&PathUri>,
+    ) -> Result<PathUri, LegacyAppPathStringError> {
+        let convention = cwd.infer_path_convention().ok_or_else(|| {
+            LegacyAppPathStringError::MissingBaseConvention {
+                cwd: cwd.to_string(),
+            }
+        })?;
+        let is_windows = convention == PathConvention::Windows;
+        let path = self.as_str();
+        let home_relative = path
+            .strip_prefix("~/")
+            .or_else(|| (path == "~").then_some(""))
+            .or_else(|| is_windows.then(|| path.strip_prefix(r"~\")).flatten());
+        if let Some(suffix) = home_relative {
+            let home =
+                user_home_dir.ok_or_else(|| LegacyAppPathStringError::MissingHomeDirectory {
+                    path: path.to_string(),
+                })?;
+            return Ok(home.join(suffix.trim_start_matches(|separator| {
+                separator == '/' || is_windows && separator == '\\'
+            }))?);
+        }
+
+        if is_windows && (path.starts_with("//") || path.starts_with(r"\\")) {
+            return self.to_path_uri(PathConvention::Windows);
+        }
+
+        match self.infer_absolute_path_convention() {
+            Some(path_convention) if path_convention == convention => self.to_path_uri(convention),
+            Some(PathConvention::Posix) if is_windows => Ok(cwd.join(path)?),
+            Some(path_convention) => Err(LegacyAppPathStringError::MismatchedConvention {
+                path: path.to_string(),
+                path_convention,
+                cwd: cwd.to_string(),
+                convention,
+            }),
+            None => Ok(cwd.join(path)?),
+        }
+    }
+
+    /// Parses this API string as an absolute path using the convention inferred from its spelling.
+    pub fn to_inferred_path_uri(&self) -> Option<PathUri> {
+        PathUri::try_from(self.clone()).ok()
+    }
+
+    /// Renders this API path for display in a user interface.
+    ///
+    /// Absolute paths are normalized using their inferred native convention.
+    /// Strings that cannot be interpreted as absolute paths retain their raw
+    /// API spelling.
+    pub fn render_for_ui(&self) -> String {
+        self.to_inferred_path_uri()
+            .map(|path| path.inferred_native_path_string())
+            .unwrap_or_else(|| self.0.clone())
+    }
+
+    /// Parses this API string as a host-native absolute path.
+    pub fn to_inferred_abs_path(&self) -> Option<AbsolutePathBuf> {
+        AbsolutePathBuf::try_from(self.clone()).ok()
     }
 
     /// Infers the path convention of an absolute API path from its spelling.
@@ -111,86 +199,42 @@ impl From<AbsolutePathBuf> for LegacyAppPathString {
     }
 }
 
-fn parse_posix_path(path: &str) -> Option<PathUri> {
-    let path = path.strip_prefix('/')?;
-    if path.contains('\0') {
-        return Some(PathUri::from_opaque_path_bytes(
-            format!("/{path}").as_bytes(),
-        ));
+impl From<PathUri> for LegacyAppPathString {
+    fn from(path: PathUri) -> Self {
+        Self(path.inferred_native_path_string())
     }
-    path_uri_from_segments(/*host*/ None, path.split('/'))
 }
 
-fn parse_windows_path(path: &str) -> Option<PathUri> {
-    let bytes = path.as_bytes();
-    let uses_namespace = matches!(
-        bytes,
-        [first, second, namespace @ (b'.' | b'?'), separator, ..]
-            if is_windows_separator_byte(*first)
-                && is_windows_separator_byte(*second)
-                && is_windows_separator_byte(*separator)
-                && matches!(*namespace, b'.' | b'?')
-    );
-    if uses_namespace || path.contains('\0') {
-        return Some(windows_opaque_path_uri(path));
-    }
+impl TryFrom<LegacyAppPathString> for PathUri {
+    type Error = LegacyAppPathStringError;
 
-    if matches!(
-        bytes,
-        [drive, b':', separator, ..]
-            if drive.is_ascii_alphabetic() && is_windows_separator_byte(*separator)
-    ) {
-        return path_uri_from_segments(
-            /*host*/ None,
-            std::iter::once(&path[..2]).chain(path[3..].split(is_windows_separator_char)),
-        );
+    fn try_from(path: LegacyAppPathString) -> Result<Self, Self::Error> {
+        let Some(convention) = path.infer_absolute_path_convention() else {
+            return Err(LegacyAppPathStringError::InvalidNativePath {
+                path: path.0,
+                convention: None,
+            });
+        };
+        PathUri::from_absolute_native_path(path.as_str(), convention).ok_or({
+            LegacyAppPathStringError::InvalidNativePath {
+                path: path.0,
+                convention: Some(convention),
+            }
+        })
     }
-
-    if matches!(bytes, [first, second, ..]
-        if is_windows_separator_byte(*first) && is_windows_separator_byte(*second))
-    {
-        let mut components = path[2..].split(is_windows_separator_char);
-        let host = components.next().filter(|host| !host.is_empty())?;
-        let share = components.next().filter(|share| !share.is_empty())?;
-        return path_uri_from_segments(Some(host), std::iter::once(share).chain(components))
-            .or_else(|| Some(windows_opaque_path_uri(path)));
-    }
-
-    None
 }
 
-fn path_uri_from_segments<'a>(
-    host: Option<&str>,
-    segments: impl Iterator<Item = &'a str>,
-) -> Option<PathUri> {
-    let mut url = url::Url::parse("file:///").ok()?;
-    if let Some(host) = host {
-        url.set_host(Some(host)).ok()?;
+impl TryFrom<LegacyAppPathString> for AbsolutePathBuf {
+    type Error = LegacyAppPathStringError;
+
+    fn try_from(path: LegacyAppPathString) -> Result<Self, Self::Error> {
+        AbsolutePathBuf::from_absolute_path_checked(path.as_str()).map_err(|_| {
+            LegacyAppPathStringError::InvalidNativePath {
+                path: path.0,
+                convention: None,
+            }
+        })
     }
-    {
-        let mut url_segments = url.path_segments_mut().ok()?;
-        url_segments.clear();
-        for segment in segments {
-            url_segments.push(segment);
-        }
-    }
-    PathUri::try_from(url).ok()
-}
-
-fn windows_opaque_path_uri(path: &str) -> PathUri {
-    let path_bytes = path
-        .encode_utf16()
-        .flat_map(u16::to_le_bytes)
-        .collect::<Vec<_>>();
-    PathUri::from_opaque_path_bytes(&path_bytes)
-}
-
-fn is_windows_separator_char(character: char) -> bool {
-    matches!(character, '\\' | '/')
-}
-
-fn is_windows_separator_byte(character: u8) -> bool {
-    matches!(character, b'\\' | b'/')
 }
 
 fn render_opaque_fallback(
@@ -361,46 +405,29 @@ pub enum LegacyAppPathStringError {
         path: String,
         convention: PathConvention,
     },
-    #[error("path `{path}` is not absolute using {convention} path syntax")]
+    #[error(
+        "path `{path}` is not absolute{convention}",
+        convention = .convention.map(|convention| format!(" using {convention} path syntax")).unwrap_or_default()
+    )]
     InvalidNativePath {
         path: String,
+        convention: Option<PathConvention>,
+    },
+    #[error("path URI `{cwd}` has no path convention")]
+    MissingBaseConvention { cwd: String },
+    #[error("cannot resolve home-relative path `{path}` without an executor home")]
+    MissingHomeDirectory { path: String },
+    #[error(
+        "path {path} uses {path_convention} paths, but executor cwd {cwd} uses {convention} paths"
+    )]
+    MismatchedConvention {
+        path: String,
+        path_convention: PathConvention,
+        cwd: String,
         convention: PathConvention,
     },
-}
-
-/// Path syntax used to render a [`PathUri`] as an operating-system path.
-///
-/// This describes path grammar rather than a specific operating system because
-/// Linux and macOS share the POSIX representation relevant here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(rename_all = "snake_case")]
-pub enum PathConvention {
-    Posix,
-    Windows,
-}
-
-impl PathConvention {
-    /// Returns the path convention used by the current process.
-    #[cfg(windows)]
-    pub const fn native() -> Self {
-        Self::Windows
-    }
-
-    /// Returns the path convention used by the current process.
-    #[cfg(unix)]
-    pub const fn native() -> Self {
-        Self::Posix
-    }
-}
-
-impl fmt::Display for PathConvention {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Posix => f.write_str("POSIX"),
-            Self::Windows => f.write_str("Windows"),
-        }
-    }
+    #[error(transparent)]
+    PathUri(#[from] PathUriParseError),
 }
 
 #[cfg(test)]

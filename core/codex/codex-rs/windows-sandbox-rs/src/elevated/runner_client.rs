@@ -1,4 +1,8 @@
+use crate::desktop::DesktopPolicy;
+use crate::desktop::shared_private_desktop_for_user;
 use crate::identity::SandboxCreds;
+use crate::ipc_framed::ErrorPayload;
+use crate::ipc_framed::ErrorStage;
 use crate::ipc_framed::FramedMessage;
 use crate::ipc_framed::IPC_PROTOCOL_VERSION;
 use crate::ipc_framed::Message;
@@ -17,7 +21,6 @@ use anyhow::Context;
 use anyhow::Result;
 use std::ffi::c_void;
 use std::fs::File;
-use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
 use std::path::Path;
 use std::ptr;
@@ -28,25 +31,25 @@ use std::time::Instant;
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::Foundation::DUPLICATE_SAME_ACCESS;
 use windows_sys::Win32::Foundation::DuplicateHandle;
+use windows_sys::Win32::Foundation::ERROR_ACCOUNT_DISABLED;
 use windows_sys::Win32::Foundation::ERROR_LOGON_FAILURE;
+use windows_sys::Win32::Foundation::ERROR_NO_SUCH_LOGON_SESSION;
 use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
 use windows_sys::Win32::Foundation::GetLastError;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode;
 use windows_sys::Win32::System::IO::CancelSynchronousIo;
-use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 use windows_sys::Win32::System::Threading::CreateProcessWithLogonW;
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::System::Threading::GetCurrentThread;
-use windows_sys::Win32::System::Threading::LOGON_WITH_PROFILE;
 use windows_sys::Win32::System::Threading::PROCESS_INFORMATION;
+use windows_sys::Win32::System::Threading::STARTF_FORCEOFFFEEDBACK;
 use windows_sys::Win32::System::Threading::STARTUPINFOW;
 use windows_sys::Win32::System::Threading::TerminateProcess;
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
 const RUNNER_SPAWN_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const RUNNER_PIPE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-const RUNNER_SPAWN_READY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const RUNNER_ERROR_MODE_FLAGS: u32 = 0x0001 | 0x0002;
 const WAIT_OBJECT_0: u32 = 0;
 
@@ -63,14 +66,87 @@ impl std::fmt::Display for RunnerLogonError {
 
 impl std::error::Error for RunnerLogonError {}
 
+#[derive(Debug)]
+pub(crate) struct RunnerStartupError {
+    payload: ErrorPayload,
+}
+
+impl RunnerStartupError {
+    pub(crate) fn new(payload: ErrorPayload) -> Self {
+        Self { payload }
+    }
+}
+
+impl std::fmt::Display for RunnerStartupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "runner failed during {:?}: {}",
+            self.payload.stage, self.payload.message
+        )?;
+        if let Some(code) = self.payload.windows_error_code {
+            write!(f, " (Windows error {code})")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for RunnerStartupError {}
+
 pub(crate) struct RunnerTransport {
     pipe_write: File,
     pipe_read: File,
 }
 
-pub(crate) fn is_stale_sandbox_creds_error(err: &anyhow::Error) -> bool {
-    err.downcast_ref::<RunnerLogonError>()
-        .is_some_and(|err| err.code == ERROR_LOGON_FAILURE)
+fn is_refreshable_windows_error(code: u32) -> bool {
+    matches!(
+        code,
+        ERROR_ACCOUNT_DISABLED | ERROR_LOGON_FAILURE | ERROR_NO_SUCH_LOGON_SESSION
+    )
+}
+
+fn command_targets_windows_apps(command: &[String]) -> bool {
+    command.first().is_some_and(|program| {
+        Path::new(program).components().any(|component| {
+            component
+                .as_os_str()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("WindowsApps")
+        })
+    })
+}
+
+pub(crate) fn is_refreshable_sandbox_creds_error(err: &anyhow::Error, command: &[String]) -> bool {
+    if err
+        .downcast_ref::<RunnerLogonError>()
+        .is_some_and(|err| is_refreshable_windows_error(err.code))
+    {
+        return true;
+    }
+
+    err.downcast_ref::<RunnerStartupError>().is_some_and(|err| {
+        err.payload.stage == ErrorStage::SpawnChild
+            && err.payload.windows_error_code.is_some_and(|code| {
+                // AppX activation can return 1312 for a healthy sandbox token. Rotating the
+                // account password cannot make the same WindowsApps command launch.
+                is_refreshable_windows_error(code)
+                    && (code != ERROR_NO_SUCH_LOGON_SESSION
+                        || !command_targets_windows_apps(command))
+            })
+    })
+}
+
+pub(crate) fn retry_runner_spawn_once<T>(
+    sandbox_creds: SandboxCreds,
+    command: &[String],
+    mut spawn: impl FnMut(SandboxCreds) -> Result<T>,
+    refresh: impl FnOnce() -> Result<SandboxCreds>,
+) -> Result<T> {
+    match spawn(sandbox_creds) {
+        Ok(result) => Ok(result),
+        Err(err) if is_refreshable_sandbox_creds_error(&err, command) => spawn(refresh()?),
+        Err(err) => Err(err),
+    }
 }
 
 impl RunnerTransport {
@@ -85,12 +161,16 @@ impl RunnerTransport {
     }
 
     pub(crate) fn read_spawn_ready(&mut self) -> Result<()> {
-        wait_for_complete_frame(&self.pipe_read, RUNNER_SPAWN_READY_TIMEOUT)?;
+        crate::framed_io::wait_for_complete_frame(
+            &self.pipe_read,
+            Instant::now() + RUNNER_SPAWN_READY_TIMEOUT,
+        )
+        .context("wait for runner spawn_ready")?;
         let msg = read_frame(&mut self.pipe_read)?
             .ok_or_else(|| anyhow::anyhow!("runner pipe closed before spawn_ready"))?;
         match msg.message {
             Message::SpawnReady { .. } => Ok(()),
-            Message::Error { payload } => Err(anyhow::anyhow!("runner error: {}", payload.message)),
+            Message::Error { payload } => Err(RunnerStartupError::new(payload).into()),
             other => Err(anyhow::anyhow!(
                 "expected spawn_ready from runner, got {other:?}"
             )),
@@ -240,8 +320,12 @@ pub(crate) fn spawn_runner_transport(
     cwd: &Path,
     sandbox_creds: &SandboxCreds,
     log_dir: Option<&Path>,
-    spawn_request: SpawnRequest,
+    mut spawn_request: SpawnRequest,
+    desktop_policy: Option<&DesktopPolicy>,
 ) -> Result<RunnerTransport> {
+    spawn_request.private_desktop_name = desktop_policy
+        .map(|policy| shared_private_desktop_for_user(&sandbox_creds.username, policy, log_dir))
+        .transpose()?;
     let (pipe_in_name, pipe_out_name) = pipe_pair();
     let h_pipe_in =
         create_named_pipe(&pipe_in_name, PIPE_ACCESS_OUTBOUND, &sandbox_creds.username)?;
@@ -267,16 +351,18 @@ pub(crate) fn spawn_runner_transport(
     let password_w = to_wide(&sandbox_creds.password);
     let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
     si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    si.dwFlags = STARTF_FORCEOFFFEEDBACK;
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let env_block: Option<Vec<u16>> = None;
 
     let previous_error_mode = unsafe { SetErrorMode(RUNNER_ERROR_MODE_FLAGS) };
+    // Sandbox users have no profile state that commands should inherit.
     let spawn_res = unsafe {
         CreateProcessWithLogonW(
             user_w.as_ptr(),
             domain_w.as_ptr(),
             password_w.as_ptr(),
-            LOGON_WITH_PROFILE,
+            /*dwlogonflags*/ 0,
             exe_w.as_ptr(),
             cmdline_vec.as_mut_ptr(),
             windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
@@ -367,69 +453,72 @@ pub(crate) fn spawn_runner_transport(
     Ok(transport)
 }
 
-fn wait_for_complete_frame(pipe_read: &File, timeout: Duration) -> Result<()> {
-    let handle = pipe_read.as_raw_handle() as HANDLE;
-    let deadline = Instant::now() + timeout;
-    let mut len_buf = [0u8; 4];
-
-    loop {
-        let mut bytes_read = 0u32;
-        let mut total_available = 0u32;
-        let ok = unsafe {
-            PeekNamedPipe(
-                handle,
-                len_buf.as_mut_ptr() as *mut c_void,
-                len_buf.len() as u32,
-                &mut bytes_read,
-                &mut total_available,
-                ptr::null_mut(),
-            )
-        };
-        if ok == 0 {
-            let err = unsafe { GetLastError() } as i32;
-            return Err(anyhow::anyhow!(
-                "PeekNamedPipe failed while waiting for spawn_ready: {err}"
-            ));
-        }
-
-        if bytes_read == len_buf.len() as u32 {
-            let frame_len = u32::from_le_bytes(len_buf) as usize;
-            let total_len = frame_len
-                .checked_add(len_buf.len())
-                .ok_or_else(|| anyhow::anyhow!("runner frame length overflow"))?;
-            if total_available as usize >= total_len {
-                return Ok(());
-            }
-        }
-
-        if Instant::now() >= deadline {
-            return Err(anyhow::anyhow!(
-                "timed out after {}ms waiting for runner spawn_ready",
-                timeout.as_millis()
-            ));
-        }
-
-        std::thread::sleep(RUNNER_SPAWN_READY_POLL_INTERVAL);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::RunnerLogonError;
-    use super::is_stale_sandbox_creds_error;
+    use super::RunnerStartupError;
+    use super::is_refreshable_sandbox_creds_error;
+    use crate::ipc_framed::ErrorPayload;
+    use crate::ipc_framed::ErrorStage;
     use pretty_assertions::assert_eq;
+    use windows_sys::Win32::Foundation::ERROR_ACCOUNT_DISABLED;
     use windows_sys::Win32::Foundation::ERROR_LOGON_FAILURE;
+    use windows_sys::Win32::Foundation::ERROR_NO_SUCH_LOGON_SESSION;
     use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
 
     #[test]
-    fn stale_sandbox_creds_error_recognizes_logon_failures() {
+    fn refreshable_sandbox_creds_error_recognizes_credential_and_child_start_failures() {
         assert_eq!(
-            [ERROR_LOGON_FAILURE, ERROR_NOT_FOUND].map(|code| {
+            [
+                ERROR_ACCOUNT_DISABLED,
+                ERROR_LOGON_FAILURE,
+                ERROR_NO_SUCH_LOGON_SESSION,
+                ERROR_NOT_FOUND,
+            ]
+            .map(|code| {
                 let err =
                     anyhow::Error::new(RunnerLogonError { code }).context("runner launch failed");
-                is_stale_sandbox_creds_error(&err)
+                is_refreshable_sandbox_creds_error(&err, &[])
             }),
-            [true, false]
+            [true, true, true, false]
+        );
+
+        assert_eq!(
+            [
+                (ErrorStage::SpawnChild, ERROR_NO_SUCH_LOGON_SESSION),
+                (ErrorStage::SpawnChild, ERROR_NOT_FOUND),
+                (ErrorStage::ReadSpawnRequest, ERROR_NO_SUCH_LOGON_SESSION),
+            ]
+            .map(|(stage, windows_error_code)| {
+                let err = anyhow::Error::new(RunnerStartupError::new(ErrorPayload {
+                    message: "runner startup failed".to_string(),
+                    stage,
+                    windows_error_code: Some(windows_error_code),
+                }));
+                is_refreshable_sandbox_creds_error(&err, &["cmd.exe".to_string()])
+            }),
+            [true, false, false]
+        );
+
+        let windows_apps_commands = [
+            vec![
+                r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\pwsh.exe".to_string(),
+            ],
+            vec![
+                r"C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.3.0_x64__8wekyb3d8bbwe\pwsh.exe"
+                    .to_string(),
+            ],
+        ];
+        assert_eq!(
+            windows_apps_commands.map(|command| {
+                let err = anyhow::Error::new(RunnerStartupError::new(ErrorPayload {
+                    message: "runner startup failed".to_string(),
+                    stage: ErrorStage::SpawnChild,
+                    windows_error_code: Some(ERROR_NO_SUCH_LOGON_SESSION),
+                }));
+                is_refreshable_sandbox_creds_error(&err, &command)
+            }),
+            [false, false]
         );
     }
 }

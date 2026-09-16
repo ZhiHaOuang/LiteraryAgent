@@ -3,8 +3,10 @@ mod client_tracker;
 mod clients;
 mod desired_state;
 mod enroll;
+mod host_device;
 mod protocol;
 mod segment;
+mod server_api;
 mod websocket;
 
 use self::auth::load_remote_control_auth;
@@ -12,10 +14,10 @@ use self::auth::recover_remote_control_auth;
 use self::desired_state::RemoteControlDesiredState;
 use self::desired_state::acquire_persistence_lock;
 use self::enroll::RemoteControlEnrollment;
-use self::enroll::enroll_remote_control_server;
 use self::enroll::load_persisted_remote_control_enrollment;
-use self::enroll::refresh_remote_control_server;
 use self::enroll::update_persisted_remote_control_enrollment;
+use self::server_api::enroll_remote_control_server;
+use self::server_api::refresh_remote_control_server;
 use crate::transport::remote_control::websocket::RemoteControlChannels;
 use crate::transport::remote_control::websocket::RemoteControlStatusPublisher;
 use crate::transport::remote_control::websocket::RemoteControlWebsocket;
@@ -104,6 +106,7 @@ pub(super) struct QueuedServerEnvelope {
 #[derive(Clone)]
 pub struct RemoteControlHandle {
     policy: RemoteControlPolicy,
+    shutdown_token: CancellationToken,
     desired_state_tx: Arc<watch::Sender<RemoteControlDesiredState>>,
     desired_state_rpc_lock: Arc<Semaphore>,
     desired_state_persistence_lock: Arc<Semaphore>,
@@ -590,14 +593,23 @@ impl RemoteControlHandle {
             RemoteControlEnrollmentSelection::ReplaceExisting => {}
         }
 
-        let enrollment = enroll_pairing_server(
-            &self.auth_manager,
-            auth,
-            &remote_control_target,
-            installation_id,
-            server_name,
-        )
-        .await?;
+        // Reused enrollments must still reach durable persistence during shutdown.
+        let enrollment = tokio::select! {
+            biased;
+            _ = self.shutdown_token.cancelled() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "remote control is shutting down",
+                ));
+            }
+            result = enroll_pairing_server(
+                &self.auth_manager,
+                auth,
+                &remote_control_target,
+                installation_id,
+                server_name,
+            ) => result?,
+        };
         Ok((enrollment, true))
     }
 
@@ -825,27 +837,39 @@ async fn refresh_pairing_enrollment(
     installation_id: &str,
     enrollment: &mut RemoteControlEnrollment,
 ) -> io::Result<()> {
-    if let Err(err) = refresh_remote_control_server(auth, installation_id, enrollment).await {
-        if err.kind() != io::ErrorKind::PermissionDenied {
-            return Err(err);
-        }
+    let mut refresh_result = refresh_remote_control_server(auth, installation_id, enrollment).await;
+    if refresh_result
+        .as_ref()
+        .is_err_and(|err| err.kind() == io::ErrorKind::PermissionDenied)
+    {
         let mut auth_recovery = auth_manager.unauthorized_recovery();
         let mut auth_change_rx = auth_manager.auth_change_receiver();
-        if !recover_remote_control_auth(&mut auth_recovery, &mut auth_change_rx).await {
-            return Err(err);
+        if recover_remote_control_auth(&mut auth_recovery, &mut auth_change_rx).await {
+            match load_remote_control_auth(auth_manager).await {
+                Ok(recovered_auth) if recovered_auth.account_id == enrollment.account_id => {
+                    *auth = recovered_auth;
+                    refresh_result =
+                        refresh_remote_control_server(auth, installation_id, enrollment).await;
+                }
+                Ok(_) | Err(_) => {
+                    enrollment.clear_server_token();
+                    refresh_result = Err(pairing_unavailable_error());
+                }
+            }
+        } else {
+            enrollment.clear_server_token();
         }
-        *auth = load_remote_control_auth(auth_manager)
-            .await
-            .map_err(|_| pairing_unavailable_error())?;
-        if auth.account_id != enrollment.account_id {
-            return Err(pairing_unavailable_error());
-        }
-        refresh_remote_control_server(auth, installation_id, enrollment).await?
     }
-    if replace_current_enrollment(current_enrollment, enrollment) {
-        Ok(())
-    } else {
+    if refresh_result
+        .as_ref()
+        .is_err_and(|err| err.kind() == io::ErrorKind::PermissionDenied)
+    {
+        enrollment.clear_server_token();
+    }
+    if !replace_current_enrollment(current_enrollment, enrollment) {
         Err(pairing_unavailable_error())
+    } else {
+        refresh_result
     }
 }
 
@@ -991,6 +1015,7 @@ pub async fn start_remote_control(
     let installation_id_for_log = installation_id.clone();
     let server_name_for_log = server_name.clone();
     let shutdown_token_for_log = shutdown_token.clone();
+    let handle_shutdown_token = shutdown_token.clone();
     let join_handle = tokio::spawn(async move {
         info!(
             remote_control_url = %remote_control_url_for_log,
@@ -1056,6 +1081,7 @@ pub async fn start_remote_control(
         join_handle,
         RemoteControlHandle {
             policy,
+            shutdown_token: handle_shutdown_token,
             desired_state_tx,
             desired_state_rpc_lock,
             desired_state_persistence_lock,

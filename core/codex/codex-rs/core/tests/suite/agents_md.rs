@@ -2,21 +2,29 @@ use anyhow::Result;
 use anyhow::anyhow;
 use codex_core::ForkSnapshot;
 use codex_core::StartThreadOptions;
+use codex_core::TurnInputRequest;
 use codex_exec_server::CreateDirectoryOptions;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_exec_server::REMOTE_ENVIRONMENT_ID;
 use codex_features::Feature;
+use codex_history::RolloutItem;
 use codex_home::CodexHomeUserInstructionsProvider;
+use codex_protocol::config_types::TrustLevel;
+use codex_protocol::models::PermissionProfile;
+use codex_protocol::permissions::FileSystemAccessMode;
+use codex_protocol::permissions::FileSystemSandboxEntry;
+use codex_protocol::permissions::FileSystemSandboxPolicy;
+use codex_protocol::permissions::NetworkSandboxPolicy;
+use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
 use core_test_support::create_directory_symlink;
-use core_test_support::get_remote_test_env;
 use core_test_support::load_default_config_for_test;
 use core_test_support::responses;
 use core_test_support::responses::ev_completed;
@@ -25,13 +33,18 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::skip_if_wine_exec;
+use core_test_support::skip_if_no_remote_env;
+use core_test_support::skip_if_sandbox;
+use core_test_support::skip_if_target_windows;
 use core_test_support::test_codex::RecordingUserInstructionsProvider;
 use core_test_support::test_codex::TestCodexBuilder;
+use core_test_support::test_codex::executor_path_uri;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -58,7 +71,7 @@ async fn agents_instructions(mut builder: TestCodexBuilder) -> Result<String> {
     )
     .await;
 
-    let test = builder.build_with_remote_env(&server).await?;
+    let test = builder.build_with_auto_env(&server).await?;
     test.submit_turn("hello").await?;
 
     let request = resp_mock.single_request();
@@ -79,6 +92,32 @@ fn write_global_file(
     Ok(path.abs())
 }
 
+fn remove_agents_md_world_state_section(rollout_path: &Path) -> Result<()> {
+    let rollout = std::fs::read_to_string(rollout_path)?;
+    let mut removed_section = false;
+    let retained = rollout
+        .lines()
+        .map(codex_rollout::parse_rollout_line)
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|mut line| {
+            if let RolloutItem::WorldState(world_state) = &mut line.item
+                && world_state.state.remove("agents_md").is_some()
+            {
+                removed_section = true;
+            }
+            serde_json::to_string(&line)
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .join("\n");
+    anyhow::ensure!(
+        removed_section,
+        "rollout did not contain a persisted AGENTS.md WorldState section"
+    );
+    std::fs::write(rollout_path, format!("{retained}\n"))?;
+    Ok(())
+}
+
 fn instruction_fragments(request: &responses::ResponsesRequest) -> Vec<String> {
     request
         .message_input_texts("user")
@@ -87,13 +126,33 @@ fn instruction_fragments(request: &responses::ResponsesRequest) -> Vec<String> {
         .collect()
 }
 
-fn expected_instruction_fragment(cwd: &AbsolutePathBuf, contents: &str) -> String {
-    let cwd = cwd.as_path().display();
+fn expected_instruction_fragment(cwd: &PathUri, contents: &str) -> String {
+    let cwd = cwd.inferred_native_path_string();
     format!("# AGENTS.md instructions for {cwd}\n\n<INSTRUCTIONS>\n{contents}\n</INSTRUCTIONS>")
 }
 
 fn expected_provider_only_instruction_fragment(contents: &str) -> String {
     format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{contents}\n</INSTRUCTIONS>")
+}
+
+fn assert_instruction_replacement_once(
+    requests: &[responses::ResponsesRequest],
+    initial_contents: &str,
+    replacement_contents: &str,
+) {
+    let initial = expected_provider_only_instruction_fragment(initial_contents);
+    let replacement = expected_provider_only_instruction_fragment(&format!(
+        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{replacement_contents}"
+    ));
+    assert_eq!(instruction_fragments(&requests[0]), vec![initial.clone()]);
+    assert_eq!(
+        instruction_fragments(&requests[1]),
+        vec![initial.clone(), replacement.clone()]
+    );
+    assert_eq!(
+        instruction_fragments(&requests[2]),
+        vec![initial, replacement]
+    );
 }
 
 fn assert_single_instruction_fragment(request: &responses::ResponsesRequest, expected: &str) {
@@ -102,16 +161,10 @@ fn assert_single_instruction_fragment(request: &responses::ResponsesRequest, exp
 
 async fn submit_thread_turn(thread: &Arc<codex_core::CodexThread>, prompt: &str) -> Result<()> {
     thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: prompt.to_string(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            responsesapi_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: prompt.to_string(),
+            text_elements: Vec::new(),
+        }]))
         .await?;
     wait_for_event(thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     Ok(())
@@ -138,19 +191,23 @@ fn request_body_contains(request: &wiremock::Request, text: &str) -> bool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agents_override_is_preferred_over_agents_md() -> Result<()> {
-    // TODO(anp): Remove after instruction-source helpers use target-native paths.
-    skip_if_wine_exec!(Ok(()), "requires native cross-OS instruction-source paths");
     let instructions =
         agents_instructions(test_codex().with_workspace_setup(|cwd, fs| async move {
             let agents_md = cwd.join("AGENTS.md");
             let override_md = cwd.join("AGENTS.override.md");
-            let agents_md_uri = PathUri::from_path(&agents_md)?;
-            let override_md_uri = PathUri::from_path(&override_md)?;
-            fs.write_file(&agents_md_uri, b"base doc".to_vec(), /*sandbox*/ None)
-                .await?;
+            let agents_md_uri = executor_path_uri(&agents_md)?;
+            let override_md_uri = executor_path_uri(&override_md)?;
+            fs.write_file(
+                &agents_md_uri,
+                b"base doc".to_vec(),
+                Default::default(),
+                /*sandbox*/ None,
+            )
+            .await?;
             fs.write_file(
                 &override_md_uri,
                 b"override doc".to_vec(),
+                Default::default(),
                 /*sandbox*/ None,
             )
             .await?;
@@ -172,8 +229,6 @@ async fn agents_override_is_preferred_over_agents_md() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn configured_fallback_is_used_when_agents_candidate_is_directory() -> Result<()> {
-    // TODO(anp): Remove after instruction-source helpers use target-native paths.
-    skip_if_wine_exec!(Ok(()), "requires native cross-OS instruction-source paths");
     let instructions = agents_instructions(
         test_codex()
             .with_config(|config| {
@@ -182,17 +237,21 @@ async fn configured_fallback_is_used_when_agents_candidate_is_directory() -> Res
             .with_workspace_setup(|cwd, fs| async move {
                 let agents_dir = cwd.join("AGENTS.md");
                 let fallback = cwd.join("WORKFLOW.md");
-                let agents_dir_uri = PathUri::from_path(&agents_dir)?;
-                let fallback_uri = PathUri::from_path(&fallback)?;
+                let agents_dir_uri = executor_path_uri(&agents_dir)?;
+                let fallback_uri = executor_path_uri(&fallback)?;
                 fs.create_directory(
                     &agents_dir_uri,
-                    CreateDirectoryOptions { recursive: true },
+                    CreateDirectoryOptions {
+                        recursive: true,
+                        follow_symlinks: true,
+                    },
                     /*sandbox*/ None,
                 )
                 .await?;
                 fs.write_file(
                     &fallback_uri,
                     b"fallback doc".to_vec(),
+                    Default::default(),
                     /*sandbox*/ None,
                 )
                 .await?;
@@ -225,32 +284,38 @@ async fn agents_docs_are_concatenated_from_project_root_to_cwd() -> Result<()> {
                 let root_agents = root.join("AGENTS.md");
                 let git_marker = root.join(".git");
                 let nested_agents = nested.join("AGENTS.md");
-                let nested_uri = PathUri::from_path(&nested)?;
-                let root_agents_uri = PathUri::from_path(&root_agents)?;
-                let git_marker_uri = PathUri::from_path(&git_marker)?;
-                let nested_agents_uri = PathUri::from_path(&nested_agents)?;
+                let nested_uri = executor_path_uri(&nested)?;
+                let root_agents_uri = executor_path_uri(&root_agents)?;
+                let git_marker_uri = executor_path_uri(&git_marker)?;
+                let nested_agents_uri = executor_path_uri(&nested_agents)?;
 
                 fs.create_directory(
                     &nested_uri,
-                    CreateDirectoryOptions { recursive: true },
+                    CreateDirectoryOptions {
+                        recursive: true,
+                        follow_symlinks: true,
+                    },
                     /*sandbox*/ None,
                 )
                 .await?;
                 fs.write_file(
                     &root_agents_uri,
                     b"root doc".to_vec(),
+                    Default::default(),
                     /*sandbox*/ None,
                 )
                 .await?;
                 fs.write_file(
                     &git_marker_uri,
                     b"gitdir: /tmp/mock-git-dir\n".to_vec(),
+                    Default::default(),
                     /*sandbox*/ None,
                 )
                 .await?;
                 fs.write_file(
                     &nested_agents_uri,
                     b"child doc".to_vec(),
+                    Default::default(),
                     /*sandbox*/ None,
                 )
                 .await?;
@@ -334,8 +399,8 @@ async fn symlinked_cwd_uses_logical_parent_for_agents_discovery() -> Result<()> 
     assert_eq!(
         test.codex.instruction_sources().await,
         vec![
-            logical_root.join("AGENTS.md"),
-            test.config.cwd.join("AGENTS.md")
+            PathUri::from_abs_path(&logical_root.join("AGENTS.md")),
+            PathUri::from_abs_path(&test.config.cwd.join("AGENTS.md"))
         ]
     );
 
@@ -355,8 +420,6 @@ async fn symlinked_cwd_uses_logical_parent_for_agents_discovery() -> Result<()> 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn selected_environment_sources_match_model_visible_instructions() -> Result<()> {
-    // TODO(anp): Remove after instruction-source helpers use target-native paths.
-    skip_if_wine_exec!(Ok(()), "requires native cross-OS instruction-source paths");
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(
         &server,
@@ -370,22 +433,25 @@ async fn selected_environment_sources_match_model_visible_instructions() -> Resu
     let mut builder = test_codex()
         .with_home(home)
         .with_workspace_setup(|cwd, fs| async move {
-            let agents_md_uri = PathUri::from_path(cwd.join("AGENTS.md"))?;
+            let agents_md_uri = executor_path_uri(cwd.join("AGENTS.md"))?;
             fs.write_file(
                 &agents_md_uri,
                 b"project doc".to_vec(),
+                Default::default(),
                 /*sandbox*/ None,
             )
             .await?;
             Ok::<(), anyhow::Error>(())
         });
-    let test = builder.build_with_remote_env(&server).await?;
-    let project_agents = test.config.cwd.join("AGENTS.md");
+    let test = builder.build_with_auto_env(&server).await?;
     let global_agents = global_agents.abs();
 
     assert_eq!(
         test.codex.instruction_sources().await,
-        vec![global_agents, project_agents]
+        vec![
+            PathUri::from_abs_path(&global_agents),
+            test.workspace_path_uri("AGENTS.md")?,
+        ]
     );
 
     test.submit_turn("hello").await?;
@@ -396,6 +462,362 @@ async fn selected_environment_sources_match_model_visible_instructions() -> Resu
         .find(|text| text.starts_with("# AGENTS.md instructions"))
         .expect("instructions message");
     assert!(instructions.contains("global doc\n\n--- project-doc ---\n\nproject doc"));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn untrusted_project_excludes_project_instructions() -> Result<()> {
+    let server = start_mock_server().await;
+    let resp_mock = mount_sse_once(
+        &server,
+        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
+    )
+    .await;
+    let home = Arc::new(TempDir::new()?);
+    let global_agents =
+        write_global_file(home.as_ref(), GLOBAL_AGENTS_FILENAME, GLOBAL_INSTRUCTIONS)?;
+
+    let mut builder = test_codex()
+        .with_home(home)
+        .with_config(|config| {
+            config.active_project.trust_level = Some(TrustLevel::Untrusted);
+        })
+        .with_workspace_setup(|cwd, fs| async move {
+            fs.write_file(
+                &executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?,
+                PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
+                Default::default(),
+                /*sandbox*/ None,
+            )
+            .await?;
+            Ok::<(), anyhow::Error>(())
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+
+    assert_eq!(
+        test.codex.instruction_sources().await,
+        vec![PathUri::from_abs_path(&global_agents)]
+    );
+
+    test.submit_turn("hello").await?;
+    let instructions = resp_mock
+        .single_request()
+        .message_input_texts("user")
+        .into_iter()
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
+        .expect("global instructions message");
+    assert!(instructions.contains(GLOBAL_INSTRUCTIONS));
+    assert!(!instructions.contains(PROJECT_INSTRUCTIONS));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runtime_trust_reload_refreshes_project_instructions() -> Result<()> {
+    let server = start_mock_server().await;
+    let response_mock = responses::mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
+            sse(vec![ev_response_created("resp2"), ev_completed("resp2")]),
+            sse(vec![ev_response_created("resp3"), ev_completed("resp3")]),
+        ],
+    )
+    .await;
+    let home = Arc::new(TempDir::new()?);
+    let global_agents =
+        write_global_file(home.as_ref(), GLOBAL_AGENTS_FILENAME, GLOBAL_INSTRUCTIONS)?;
+    let mut builder = test_codex()
+        .with_home(home)
+        .with_config(|config| {
+            config.active_project.trust_level = Some(TrustLevel::Trusted);
+        })
+        .with_workspace_setup(|cwd, fs| async move {
+            fs.write_file(
+                &executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?,
+                PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
+                Default::default(),
+                /*sandbox*/ None,
+            )
+            .await?;
+            Ok::<(), anyhow::Error>(())
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    let project_agents = test.workspace_path_uri(GLOBAL_AGENTS_FILENAME)?;
+    let global_agents = PathUri::from_abs_path(&global_agents);
+
+    test.submit_turn("trusted project").await?;
+    assert_eq!(
+        test.codex.instruction_sources().await,
+        vec![global_agents.clone(), project_agents.clone()]
+    );
+
+    let mut untrusted_config = (*test.codex.config().await).clone();
+    untrusted_config.active_project.trust_level = Some(TrustLevel::Untrusted);
+    test.codex.refresh_runtime_config(untrusted_config).await;
+    test.submit_turn("untrusted project").await?;
+    assert_eq!(
+        test.codex.instruction_sources().await,
+        vec![global_agents.clone()]
+    );
+
+    let mut trusted_config = (*test.codex.config().await).clone();
+    trusted_config.active_project.trust_level = Some(TrustLevel::Trusted);
+    test.codex.refresh_runtime_config(trusted_config).await;
+    test.submit_turn("trusted again").await?;
+    assert_eq!(
+        test.codex.instruction_sources().await,
+        vec![global_agents, project_agents]
+    );
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 3);
+    let latest_instruction_fragments = requests
+        .iter()
+        .map(instruction_fragments)
+        .map(|fragments| fragments.last().cloned().expect("instructions message"))
+        .collect::<Vec<_>>();
+    assert!(latest_instruction_fragments[0].contains(PROJECT_INSTRUCTIONS));
+    assert!(!latest_instruction_fragments[1].contains(PROJECT_INSTRUCTIONS));
+    assert!(latest_instruction_fragments[2].contains(PROJECT_INSTRUCTIONS));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restricted_project_without_instructions_starts_successfully() -> Result<()> {
+    skip_if_target_windows!(
+        Ok(()),
+        "Windows restricted-token sandbox cannot enforce deny-read policies"
+    );
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let response_mock = mount_sse_once(
+        &server,
+        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
+    )
+    .await;
+    let mut builder = test_codex().with_config(|config| {
+        let mut file_system_policy = FileSystemSandboxPolicy::read_only();
+        file_system_policy.entries.push(FileSystemSandboxEntry::new(
+            config.cwd.join("private.txt").into(),
+            FileSystemAccessMode::Deny,
+        ));
+        config
+            .permissions
+            .set_permission_profile(PermissionProfile::from_runtime_permissions(
+                &file_system_policy,
+                NetworkSandboxPolicy::Restricted,
+            ))
+            .expect("test config should allow a restricted read policy");
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+
+    assert_eq!(
+        test.codex.instruction_sources().await,
+        Vec::<PathUri>::new()
+    );
+    test.submit_text_turn("continue without project instructions")
+        .await?;
+    response_mock.single_request();
+
+    Ok(())
+}
+
+/// Thread creation fails when sandboxing prevents project instructions from loading.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn denied_project_instructions_fail_thread_creation() -> Result<()> {
+    skip_if_target_windows!(
+        Ok(()),
+        "Windows restricted-token sandbox cannot enforce deny-read policies"
+    );
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+    write_global_file(home.as_ref(), GLOBAL_AGENTS_FILENAME, GLOBAL_INSTRUCTIONS)?;
+
+    let mut builder = test_codex()
+        .with_home(home)
+        .with_config(|config| {
+            let mut file_system_policy = FileSystemSandboxPolicy::read_only();
+            file_system_policy.entries.push(FileSystemSandboxEntry::new(
+                config.cwd.join(GLOBAL_AGENTS_FILENAME).into(),
+                FileSystemAccessMode::Deny,
+            ));
+            config
+                .permissions
+                .set_permission_profile(PermissionProfile::from_runtime_permissions(
+                    &file_system_policy,
+                    NetworkSandboxPolicy::Restricted,
+                ))
+                .expect("test config should allow a restricted read policy");
+        })
+        .with_workspace_setup(|cwd, fs| async move {
+            fs.write_file(
+                &executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?,
+                PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
+                Default::default(),
+                /*sandbox*/ None,
+            )
+            .await?;
+            Ok(())
+        });
+    let error = match builder.build_with_auto_env(&server).await {
+        Ok(_) => {
+            anyhow::bail!("thread creation must fail when project instructions are unreadable")
+        }
+        Err(error) => error,
+    };
+    let error = format!("{error:#}");
+    assert!(
+        error.contains("AGENTS.md"),
+        "thread creation should report the unreadable project instructions: {error}"
+    );
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn symlinked_writable_root_reports_sandbox_failure_instead_of_session_corruption()
+-> Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+    let home_path = home.path().display().to_string();
+    let canonical_home_path = home.path().canonicalize()?.display().to_string();
+    let visualization_target = home.path().join("visualization-target");
+    std::fs::create_dir(&visualization_target)?;
+    let visualization_root = home.path().join("visualizations");
+    create_directory_symlink(&visualization_target, &visualization_root);
+
+    let mut builder = test_codex().with_home(home).with_config(move |config| {
+        config.project_doc_max_bytes = 1;
+        let mut file_system_policy = FileSystemSandboxPolicy::read_only();
+        file_system_policy.entries.push(FileSystemSandboxEntry::new(
+            config.cwd.join("private.txt").into(),
+            FileSystemAccessMode::Deny,
+        ));
+        file_system_policy.entries.push(FileSystemSandboxEntry::new(
+            visualization_root.abs().into(),
+            FileSystemAccessMode::Write,
+        ));
+        config
+            .permissions
+            .set_permission_profile(PermissionProfile::from_runtime_permissions(
+                &file_system_policy,
+                NetworkSandboxPolicy::Restricted,
+            ))
+            .expect("test config should allow the restricted filesystem policy");
+    });
+
+    let error = match builder.build(&server).await {
+        Ok(_) => anyhow::bail!("thread creation must reject the symlinked writable root"),
+        Err(error) => format!("{error:#}"),
+    };
+
+    assert!(
+        error.contains("failed to prepare fs sandbox"),
+        "thread creation should report the sandbox preparation failure: {error}"
+    );
+    assert!(
+        error.contains("symlinked writable roots are not supported"),
+        "thread creation should preserve the rejected writable root: {error}"
+    );
+    assert!(
+        !error.contains("Session data under"),
+        "sandbox preparation failure should not be diagnosed as session corruption: {error}"
+    );
+    let error = error
+        .replace(&canonical_home_path, "$CODEX_HOME")
+        .replace(&home_path, "$CODEX_HOME");
+    insta::assert_snapshot!(error, @"
+    Fatal error: Failed to initialize session: failed to load AGENTS.md instructions for environment `local`: failed to prepare fs sandbox: failed to prepare Seatbelt sandbox: writable root $CODEX_HOME/visualizations contains symlink component $CODEX_HOME/visualizations; symlinked writable roots are not supported.
+    If this writable root is at or beneath CODEX_HOME and you trust its symlink targets, set `allow_symlinked_codex_home = true` at the top level of `$CODEX_HOME/config.toml` (normally `~/.codex/config.toml`) on the execution host, then restart Codex or its executor. This opt-out trusts targets outside CODEX_HOME and targets changed between commands. It does not apply to other writable roots.
+    ");
+
+    Ok(())
+}
+
+/// Tightening permissions fails the turn before stale project instructions reach the model.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tightening_environment_read_permissions_invalidates_cached_project_instructions()
+-> Result<()> {
+    skip_if_target_windows!(
+        Ok(()),
+        "Windows restricted-token sandbox cannot enforce deny-read policies"
+    );
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let response_mock = mount_sse_once(
+        &server,
+        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
+    )
+    .await;
+    let mut builder = test_codex().with_workspace_setup(|cwd, fs| async move {
+        fs.write_file(
+            &executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?,
+            PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
+            Default::default(),
+            /*sandbox*/ None,
+        )
+        .await?;
+        Ok(())
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+
+    assert_eq!(
+        test.codex.instruction_sources().await,
+        vec![test.workspace_path_uri(GLOBAL_AGENTS_FILENAME)?]
+    );
+
+    let mut file_system_policy = FileSystemSandboxPolicy::read_only();
+    file_system_policy.entries.push(FileSystemSandboxEntry::new(
+        test.config.cwd.join(GLOBAL_AGENTS_FILENAME).into(),
+        FileSystemAccessMode::Deny,
+    ));
+    let permission_profile = PermissionProfile::from_runtime_permissions(
+        &file_system_policy,
+        NetworkSandboxPolicy::Restricted,
+    );
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(permission_profile, test.config.cwd.as_path());
+    test.codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "inspect instructions after tightening permissions".to_string(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                ..Default::default()
+            }),
+        )
+        .await?;
+
+    let EventMsg::Error(error) =
+        wait_for_event(&test.codex, |event| matches!(event, EventMsg::Error(_))).await
+    else {
+        unreachable!();
+    };
+    assert!(
+        error.message.contains("AGENTS.md"),
+        "turn should report the unreadable project instructions: {}",
+        error.message
+    );
+
+    assert_eq!(
+        test.codex.instruction_sources().await,
+        Vec::<PathUri>::new()
+    );
+    assert!(
+        response_mock.requests().is_empty(),
+        "the denied turn must fail before sending a model request"
+    );
 
     Ok(())
 }
@@ -424,50 +846,38 @@ async fn loads_user_instructions_without_a_primary_environment() -> Result<()> {
         .with_home(Arc::clone(&home))
         .with_user_instructions_provider(provider.clone())
         .with_workspace_setup(|cwd, fs| async move {
-            let project_agents_uri = PathUri::from_path(cwd.join(GLOBAL_AGENTS_FILENAME))?;
+            let project_agents_uri = executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?;
             fs.write_file(
                 &project_agents_uri,
                 PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
+                Default::default(),
                 /*sandbox*/ None,
             )
             .await?;
             Ok(())
         });
-    let test = builder.build_with_remote_env(&server).await?;
+    let test = builder.build_with_auto_env(&server).await?;
     assert_eq!(provider.load_count(), 1);
 
     let no_environment_thread = test
         .thread_manager
-        .start_thread_with_options(StartThreadOptions {
-            config: test.config.clone(),
-            initial_history: InitialHistory::New,
-            session_source: None,
-            thread_source: None,
-            dynamic_tools: Vec::new(),
-            metrics_service_name: None,
-            parent_trace: None,
-            environments: Vec::new(),
-            thread_extension_init: Default::default(),
+        .start_thread(StartThreadOptions {
+            environments: Some(Vec::new()),
+            ..StartThreadOptions::new(test.config.clone())
         })
         .await?;
     assert_eq!(provider.load_count(), 2);
     assert_eq!(
         no_environment_thread.thread.instruction_sources().await,
-        vec![global_source]
+        vec![PathUri::from_abs_path(&global_source)]
     );
 
     no_environment_thread
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "inspect global instructions without an environment".to_string(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            responsesapi_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "inspect global instructions without an environment".to_string(),
+            text_elements: Vec::new(),
+        }]))
         .await?;
     wait_for_event(&no_environment_thread.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
@@ -484,8 +894,6 @@ async fn loads_user_instructions_without_a_primary_environment() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fresh_thread_composes_global_before_project_and_reports_sources() -> Result<()> {
-    // TODO(anp): Remove after instruction-source helpers use target-native paths.
-    skip_if_wine_exec!(Ok(()), "requires native cross-OS instruction-source paths");
     // Set up one global source, one project source, and two ordinary model turns.
     let server = responses::start_mock_server().await;
     let response_mock = responses::mount_sse_sequence(
@@ -509,18 +917,21 @@ async fn fresh_thread_composes_global_before_project_and_reports_sources() -> Re
     let mut builder = test_codex()
         .with_home(Arc::clone(&home))
         .with_workspace_setup(|cwd, fs| async move {
-            let agents_md_uri = PathUri::from_path(cwd.join("AGENTS.md"))?;
+            let agents_md_uri = executor_path_uri(cwd.join("AGENTS.md"))?;
             fs.write_file(
                 &agents_md_uri,
                 PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
+                Default::default(),
                 /*sandbox*/ None,
             )
             .await?;
             Ok(())
         });
-    let test = builder.build_with_remote_env(&server).await?;
-    let project_source = test.config.cwd.join(GLOBAL_AGENTS_FILENAME);
-    let creation_sources = vec![global_source.clone(), project_source.clone()];
+    let test = builder.build_with_auto_env(&server).await?;
+    let creation_sources = vec![
+        PathUri::from_abs_path(&global_source),
+        test.workspace_path_uri(GLOBAL_AGENTS_FILENAME)?,
+    ];
 
     // Confirm the thread records both creation-time sources in composition order.
     assert_eq!(test.codex.instruction_sources().await, creation_sources);
@@ -535,8 +946,9 @@ async fn fresh_thread_composes_global_before_project_and_reports_sources() -> Re
     )?;
     test.fs()
         .write_file(
-            &PathUri::from_path(&project_source)?,
+            &test.workspace_path_uri(GLOBAL_AGENTS_FILENAME)?,
             NEW_PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
+            Default::default(),
             /*sandbox*/ None,
         )
         .await?;
@@ -552,7 +964,10 @@ async fn fresh_thread_composes_global_before_project_and_reports_sources() -> Re
     assert_eq!(requests.len(), 2);
     let expected_contents =
         format!("{GLOBAL_INSTRUCTIONS}\n\n{PROJECT_SEPARATOR}\n\n{PROJECT_INSTRUCTIONS}");
-    let expected_fragment = expected_instruction_fragment(&test.config.cwd, &expected_contents);
+    let expected_fragment = expected_instruction_fragment(
+        &test.executor_environment().selection().cwd,
+        &expected_contents,
+    );
     let fragments = instruction_fragments(&requests[0]);
     assert_eq!(fragments, vec![expected_fragment.clone()]);
     assert_single_instruction_fragment(&requests[1], &expected_fragment);
@@ -595,13 +1010,76 @@ async fn fresh_thread_composes_global_before_project_and_reports_sources() -> Re
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn multi_environment_thread_loads_every_project_and_keeps_creation_snapshot() -> Result<()> {
-    // TODO(anp): Remove after instruction-source helpers use target-native paths.
-    skip_if_wine_exec!(Ok(()), "requires native cross-OS instruction-source paths");
+async fn multi_environment_project_instructions_share_one_byte_budget() -> Result<()> {
     skip_if_no_network!(Ok(()));
-    let Some(_remote_env) = get_remote_test_env() else {
-        return Ok(());
-    };
+    skip_if_no_remote_env!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let response_mock = responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("multi-env-budget-response"),
+            responses::ev_completed("multi-env-budget-response"),
+        ]),
+    )
+    .await;
+    let local_root = TempDir::new()?;
+    std::fs::write(local_root.path().join(GLOBAL_AGENTS_FILENAME), "VWXYZ")?;
+    let mut builder = test_codex()
+        .with_config(|config| config.project_doc_max_bytes = 7)
+        .with_workspace_setup(|cwd, fs| async move {
+            fs.write_file(
+                &executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?,
+                b"ABCDE".to_vec(),
+                Default::default(),
+                /*sandbox*/ None,
+            )
+            .await?;
+            Ok(())
+        });
+    let test = builder.build_with_remote_and_local_env(&server).await?;
+    let thread = test
+        .thread_manager
+        .start_thread(StartThreadOptions {
+            environments: Some(vec![
+                TurnEnvironmentSelection {
+                    environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
+                    cwd: test.executor_environment().selection().cwd.clone(),
+                    workspace_roots: vec![test.executor_environment().selection().cwd.clone()],
+                    config: EnvironmentConfigState::FromThread,
+                },
+                TurnEnvironmentSelection {
+                    environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
+                    cwd: PathUri::from_host_native_path(local_root.path())?,
+                    workspace_roots: vec![PathUri::from_host_native_path(local_root.path())?],
+                    config: EnvironmentConfigState::FromThread,
+                },
+            ]),
+            ..StartThreadOptions::new(test.config.clone())
+        })
+        .await?;
+
+    submit_thread_turn(&thread.thread, "inspect the shared AGENTS.md budget").await?;
+
+    let contents = format!(
+        "for `{REMOTE_ENVIRONMENT_ID}` with root {}\n\nABCDE\n\nfor `{LOCAL_ENVIRONMENT_ID}` with root {}\n\nVW",
+        test.executor_environment()
+            .selection()
+            .cwd
+            .inferred_native_path_string(),
+        local_root.path().display(),
+    );
+    let expected =
+        format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{contents}\n</INSTRUCTIONS>");
+    assert_single_instruction_fragment(&response_mock.single_request(), &expected);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn multi_environment_thread_loads_every_project_and_keeps_creation_snapshot() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_no_remote_env!(Ok(()));
 
     let server = responses::start_mock_server().await;
     let response_mock = responses::mount_sse_sequence(
@@ -634,8 +1112,9 @@ async fn multi_environment_thread_loads_every_project_and_keeps_creation_snapsho
         .with_user_instructions_provider(provider.clone())
         .with_workspace_setup(|cwd, fs| async move {
             fs.write_file(
-                &PathUri::from_path(cwd.join(GLOBAL_AGENTS_FILENAME))?,
+                &executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?,
                 b"remote project instructions".to_vec(),
+                Default::default(),
                 /*sandbox*/ None,
             )
             .await?;
@@ -645,34 +1124,31 @@ async fn multi_environment_thread_loads_every_project_and_keeps_creation_snapsho
     let remote_source = test.config.cwd.join(GLOBAL_AGENTS_FILENAME);
     let thread = test
         .thread_manager
-        .start_thread_with_options(StartThreadOptions {
-            config: test.config.clone(),
-            initial_history: InitialHistory::New,
-            session_source: None,
-            thread_source: None,
-            dynamic_tools: Vec::new(),
-            metrics_service_name: None,
-            parent_trace: None,
-            environments: vec![
+        .start_thread(StartThreadOptions {
+            environments: Some(vec![
                 TurnEnvironmentSelection {
                     environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
-                    cwd: PathUri::from_abs_path(&test.config.cwd),
+                    cwd: test.executor_environment().selection().cwd.clone(),
+                    workspace_roots: vec![test.executor_environment().selection().cwd.clone()],
+                    config: EnvironmentConfigState::FromThread,
                 },
                 TurnEnvironmentSelection {
                     environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
-                    cwd: PathUri::from_path(local_root.path())?,
+                    cwd: PathUri::from_host_native_path(local_root.path())?,
+                    workspace_roots: vec![PathUri::from_host_native_path(local_root.path())?],
+                    config: EnvironmentConfigState::FromThread,
                 },
-            ],
-            thread_extension_init: Default::default(),
+            ]),
+            ..StartThreadOptions::new(test.config.clone())
         })
         .await?;
     assert_eq!(provider.load_count(), 2);
     assert_eq!(
         thread.thread.instruction_sources().await,
         vec![
-            global_source.clone(),
-            remote_source.clone(),
-            local_source.clone().try_into()?,
+            PathUri::from_abs_path(&global_source),
+            executor_path_uri(&remote_source)?,
+            PathUri::from_host_native_path(&local_source)?,
         ]
     );
 
@@ -685,8 +1161,9 @@ async fn multi_environment_thread_loads_every_project_and_keeps_creation_snapsho
     )?;
     test.fs()
         .write_file(
-            &PathUri::from_path(test.config.cwd.join(GLOBAL_AGENTS_OVERRIDE_FILENAME))?,
+            &executor_path_uri(test.config.cwd.join(GLOBAL_AGENTS_OVERRIDE_FILENAME))?,
             b"new remote project instructions".to_vec(),
+            Default::default(),
             /*sandbox*/ None,
         )
         .await?;
@@ -698,7 +1175,10 @@ async fn multi_environment_thread_loads_every_project_and_keeps_creation_snapsho
 
     let contents = format!(
         "{GLOBAL_INSTRUCTIONS}\n\nfor `{REMOTE_ENVIRONMENT_ID}` with root {}\n\nremote project instructions\n\nfor `{LOCAL_ENVIRONMENT_ID}` with root {}\n\nlocal project instructions",
-        test.config.cwd.display(),
+        test.executor_environment()
+            .selection()
+            .cwd
+            .inferred_native_path_string(),
         local_root.path().display(),
     );
     let expected =
@@ -710,7 +1190,11 @@ async fn multi_environment_thread_loads_every_project_and_keeps_creation_snapsho
     assert_eq!(provider.load_count(), 2);
     assert_eq!(
         thread.thread.instruction_sources().await,
-        vec![global_source, remote_source, local_source.try_into()?]
+        vec![
+            PathUri::from_abs_path(&global_source),
+            executor_path_uri(&remote_source)?,
+            PathUri::from_host_native_path(&local_source)?,
+        ]
     );
 
     Ok(())
@@ -739,7 +1223,10 @@ async fn invalid_utf8_global_instructions_are_lossy() -> Result<()> {
     test.submit_turn("inspect lossy global instructions")
         .await?;
 
-    assert_eq!(test.codex.instruction_sources().await, vec![source.clone()]);
+    assert_eq!(
+        test.codex.instruction_sources().await,
+        vec![PathUri::from_abs_path(&source)]
+    );
     let expected_fragment =
         expected_provider_only_instruction_fragment("global\u{FFFD}instructions");
     assert_single_instruction_fragment(&response_mock.single_request(), &expected_fragment);
@@ -747,11 +1234,8 @@ async fn invalid_utf8_global_instructions_are_lossy() -> Result<()> {
     Ok(())
 }
 
-// TODO(anp): Align cold-resume instruction sources with the historical instructions replayed to
-// the model so the API source list and model-visible context describe the same files.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cold_resume_replays_rendered_instructions_but_reports_current_config_sources() -> Result<()>
-{
+async fn cold_resume_invalidates_deleted_legacy_agents_md_once() -> Result<()> {
     // Set up an initial turn and a later cold-resumed turn against the same rollout.
     let server = responses::start_mock_server().await;
     let response_mock = responses::mount_sse_sequence(
@@ -764,6 +1248,10 @@ async fn cold_resume_replays_rendered_instructions_but_reports_current_config_so
             responses::sse(vec![
                 responses::ev_response_created("resumed-response"),
                 responses::ev_completed("resumed-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("second-resumed-response"),
+                responses::ev_completed("second-resumed-response"),
             ]),
         ],
     )
@@ -782,7 +1270,7 @@ async fn cold_resume_replays_rendered_instructions_but_reports_current_config_so
     // Assert the pre-resume thread reports the source used to create its snapshot.
     assert_eq!(
         initial.codex.instruction_sources().await,
-        vec![old_source.clone()],
+        vec![PathUri::from_abs_path(&old_source)],
         "initial thread reports the creation-time global source"
     );
     initial.submit_turn("persist instructions").await?;
@@ -797,29 +1285,27 @@ async fn cold_resume_replays_rendered_instructions_but_reports_current_config_so
     })
     .await;
 
-    // Add a preferred override source, then cold-resume with freshly loaded configuration.
-    let new_source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_OVERRIDE_FILENAME,
-        NEW_GLOBAL_INSTRUCTIONS,
-    )?;
-    assert_ne!(old_source, new_source);
+    // Simulate a rollout written before AGENTS.md had a persisted WorldState section.
+    remove_agents_md_world_state_section(&rollout_path)?;
+
+    std::fs::remove_file(old_source.as_path())?;
     let mut resume_builder = test_codex().with_home(Arc::clone(&home));
     let resumed = resume_builder
         .resume(&server, Arc::clone(&home), rollout_path)
         .await?;
 
-    // Assert the API reports the new source while model history replays the old structured prefix.
+    // Model history still contains the old fragment, but the source no longer exists.
     assert_eq!(
         resumed.codex.instruction_sources().await,
-        vec![new_source],
-        "resume reports sources from the newly loaded config"
+        Vec::<PathUri>::new(),
+        "resume reports no deleted instruction source"
     );
 
     resumed.submit_turn("continue resumed thread").await?;
+    resumed.submit_turn("continue again").await?;
 
     let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     let initial_input = requests[0].input();
     let resumed_input = requests[1].input();
     assert_eq!(
@@ -827,15 +1313,22 @@ async fn cold_resume_replays_rendered_instructions_but_reports_current_config_so
         Some(initial_input.as_slice()),
         "cold resume should replay the original structured input prefix"
     );
-    let expected_fragment = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
-    assert_single_instruction_fragment(&requests[0], &expected_fragment);
-    assert_single_instruction_fragment(&requests[1], &expected_fragment);
+    let initial = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
+    let removal = expected_provider_only_instruction_fragment(
+        "The previously provided AGENTS.md instructions no longer apply.",
+    );
+    assert_eq!(instruction_fragments(&requests[0]), vec![initial.clone()]);
+    assert_eq!(
+        instruction_fragments(&requests[1]),
+        vec![initial.clone(), removal.clone()]
+    );
+    assert_eq!(instruction_fragments(&requests[2]), vec![initial, removal]);
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fork_replays_rendered_instructions_from_shared_history() -> Result<()> {
+async fn fork_injects_changed_agents_md_once() -> Result<()> {
     // Set up a parent turn and a later fork turn against the parent's rollout.
     let server = responses::start_mock_server().await;
     let response_mock = responses::mount_sse_sequence(
@@ -848,6 +1341,10 @@ async fn fork_replays_rendered_instructions_from_shared_history() -> Result<()> 
             responses::sse(vec![
                 responses::ev_response_created("fork-response"),
                 responses::ev_completed("fork-response"),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("second-fork-response"),
+                responses::ev_completed("second-fork-response"),
             ]),
         ],
     )
@@ -866,7 +1363,7 @@ async fn fork_replays_rendered_instructions_from_shared_history() -> Result<()> 
     // Assert the parent reports the source used to create its snapshot.
     assert_eq!(
         parent.codex.instruction_sources().await,
-        vec![source.clone()],
+        vec![PathUri::from_abs_path(&source)],
         "parent reports the creation-time global source"
     );
     parent.submit_turn("persist instructions").await?;
@@ -887,6 +1384,10 @@ async fn fork_replays_rendered_instructions_from_shared_history() -> Result<()> 
     fork_config.model_provider = parent.config.model_provider.clone();
     fork_config.model_catalog = parent.config.model_catalog.clone();
     fork_config.codex_self_exe = parent.config.codex_self_exe.clone();
+    fork_config
+        .features
+        .enable(Feature::ContentItemKinds)
+        .expect("test config should allow ContentItemKinds override");
     let forked = parent
         .thread_manager
         .fork_thread(
@@ -901,31 +1402,16 @@ async fn fork_replays_rendered_instructions_from_shared_history() -> Result<()> 
     // Assert the fork reports the new source before issuing its first turn.
     assert_eq!(
         forked.thread.instruction_sources().await,
-        vec![new_source],
+        vec![PathUri::from_abs_path(&new_source)],
         "fork config should reflect the newly loaded global source"
     );
 
-    forked
-        .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "continue fork".to_string(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            responsesapi_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
-        .await?;
-    wait_for_event(&forked.thread, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+    submit_thread_turn(&forked.thread, "continue fork").await?;
+    submit_thread_turn(&forked.thread, "continue fork again").await?;
 
     // Assert the forked model request replays the parent's exact structured history.
     let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     let parent_input = requests[0].input();
     let fork_input = requests[1].input();
     assert_eq!(
@@ -933,9 +1419,11 @@ async fn fork_replays_rendered_instructions_from_shared_history() -> Result<()> 
         Some(parent_input.as_slice()),
         "fork should replay the parent's original structured input prefix"
     );
-    let expected_fragment = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
-    assert_single_instruction_fragment(&requests[0], &expected_fragment);
-    assert_single_instruction_fragment(&requests[1], &expected_fragment);
+    assert_instruction_replacement_once(
+        &requests,
+        OLD_GLOBAL_INSTRUCTIONS,
+        NEW_GLOBAL_INSTRUCTIONS,
+    );
 
     Ok(())
 }
@@ -1031,7 +1519,7 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
     // Assert the parent reports the creation-time source before spawning.
     assert_eq!(
         test.codex.instruction_sources().await,
-        vec![source.clone()],
+        vec![PathUri::from_abs_path(&source)],
         "parent reports the creation-time global source before spawning"
     );
     test.submit_turn(SPAWN_SEED_PROMPT).await?;
@@ -1074,12 +1562,12 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
     assert_single_instruction_fragment(&child_request, &expected_fragment);
     assert_eq!(
         test.codex.instruction_sources().await,
-        vec![source.clone()],
+        vec![PathUri::from_abs_path(&source)],
         "running parent retains the creation-time global source after spawning"
     );
     assert_eq!(
         child_thread.instruction_sources().await,
-        vec![source],
+        vec![PathUri::from_abs_path(&source)],
         "subagent reports the parent's creation-time source"
     );
     if fork_context {

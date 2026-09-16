@@ -35,19 +35,25 @@ pub enum SlashCommand {
     Delete,
     Resume,
     Fork,
+    Worktree,
     App,
     Init,
     Compact,
+    Recap,
     Plan,
     Goal,
-    Agent,
+    Agents,
     Side,
     Btw,
     Copy,
+    Export,
     Raw,
     Diff,
     Mention,
     Status,
+    Cd,
+    #[strum(to_string = "pwd", serialize = "cwd")]
+    Pwd,
     Usage,
     DebugConfig,
     Title,
@@ -86,6 +92,7 @@ impl SlashCommand {
             SlashCommand::New => "start a new chat during a conversation",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
+            SlashCommand::Recap => "summarize the current conversation now",
             SlashCommand::Review => "review my current changes and find issues",
             SlashCommand::Rename => "rename the current thread",
             SlashCommand::Resume => "resume a saved chat",
@@ -93,9 +100,11 @@ impl SlashCommand {
             SlashCommand::Delete => "permanently delete this session and exit",
             SlashCommand::Clear => "clear the terminal and start a new chat",
             SlashCommand::Fork => "fork the current chat",
-            SlashCommand::App => "continue this session in Codex Desktop",
+            SlashCommand::Worktree => "start or continue a conversation in a new worktree",
+            SlashCommand::App => "continue this session in the Desktop app",
             SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
-            SlashCommand::Copy => "copy last response as markdown",
+            SlashCommand::Copy => "copy the last response or part of it",
+            SlashCommand::Export => "export the conversation as markdown",
             SlashCommand::Raw => "toggle raw scrollback mode for copy-friendly terminal selection",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
@@ -103,7 +112,9 @@ impl SlashCommand {
             SlashCommand::Import => "import setup, this project, and recent chats from Claude Code",
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Status => "show current session configuration and token usage",
-            SlashCommand::Usage => "view account usage or use a rate-limit reset",
+            SlashCommand::Cd => "change the current working directory",
+            SlashCommand::Pwd => "show the current working directory",
+            SlashCommand::Usage => "view account usage or use a usage limit reset",
             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
@@ -120,7 +131,8 @@ impl SlashCommand {
             SlashCommand::Personality => "choose a communication style for Codex",
             SlashCommand::Plan => "switch to Plan mode",
             SlashCommand::Goal => "set or view the goal for a long-running task",
-            SlashCommand::Agent | SlashCommand::MultiAgents => "switch the active agent thread",
+            SlashCommand::Agents => "view and switch between all active agent sessions",
+            SlashCommand::MultiAgents => "switch between this session's subagents",
             SlashCommand::Side | SlashCommand::Btw => {
                 "start a side conversation in an ephemeral fork"
             }
@@ -155,12 +167,18 @@ impl SlashCommand {
             self,
             SlashCommand::Review
                 | SlashCommand::Rename
+                | SlashCommand::New
+                | SlashCommand::Clear
+                | SlashCommand::Fork
                 | SlashCommand::Plan
                 | SlashCommand::Goal
                 | SlashCommand::Ide
                 | SlashCommand::Keymap
                 | SlashCommand::Mcp
+                | SlashCommand::Export
                 | SlashCommand::Raw
+                | SlashCommand::Cd
+                | SlashCommand::Pwd
                 | SlashCommand::Usage
                 | SlashCommand::Pets
                 | SlashCommand::Side
@@ -175,10 +193,13 @@ impl SlashCommand {
         matches!(
             self,
             SlashCommand::Copy
+                | SlashCommand::Agents
+                | SlashCommand::Export
                 | SlashCommand::Raw
                 | SlashCommand::Diff
                 | SlashCommand::Mention
                 | SlashCommand::Status
+                | SlashCommand::Pwd
                 | SlashCommand::Usage
                 | SlashCommand::Ide
         )
@@ -190,13 +211,12 @@ impl SlashCommand {
             SlashCommand::New
             | SlashCommand::Archive
             | SlashCommand::Delete
-            | SlashCommand::Resume
             | SlashCommand::Fork
+            | SlashCommand::Worktree
             | SlashCommand::Init
             | SlashCommand::Compact
-            | SlashCommand::Model
-            | SlashCommand::Personality
-            | SlashCommand::Permissions
+            | SlashCommand::Recap
+            | SlashCommand::Export
             | SlashCommand::Keymap
             | SlashCommand::Vim
             | SlashCommand::ElevateSandbox
@@ -206,11 +226,16 @@ impl SlashCommand {
             | SlashCommand::Import
             | SlashCommand::Review
             | SlashCommand::Plan
+            | SlashCommand::Cd
             | SlashCommand::Clear
             | SlashCommand::Logout
             | SlashCommand::MemoryDrop
             | SlashCommand::MemoryUpdate => false,
             SlashCommand::Diff
+            | SlashCommand::Resume
+            | SlashCommand::Model
+            | SlashCommand::Personality
+            | SlashCommand::Permissions
             | SlashCommand::Copy
             | SlashCommand::Raw
             | SlashCommand::Rename
@@ -218,6 +243,7 @@ impl SlashCommand {
             | SlashCommand::Skills
             | SlashCommand::Hooks
             | SlashCommand::Status
+            | SlashCommand::Pwd
             | SlashCommand::Usage
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
@@ -238,7 +264,7 @@ impl SlashCommand {
             | SlashCommand::Btw => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
-            SlashCommand::Agent | SlashCommand::MultiAgents => true,
+            SlashCommand::Agents | SlashCommand::MultiAgents => true,
             SlashCommand::Theme | SlashCommand::Pets => false,
         }
     }

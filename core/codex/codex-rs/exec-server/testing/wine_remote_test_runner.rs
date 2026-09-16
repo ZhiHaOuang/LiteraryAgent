@@ -16,10 +16,10 @@ const DOCKER_CONTAINER_ENV_VAR: &str = "CODEX_TEST_REMOTE_ENV_CONTAINER_NAME";
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<()> {
-    let test_binary = PathBuf::from(
-        std::env::var_os(TEST_BINARY_ENV_VAR)
-            .with_context(|| format!("{TEST_BINARY_ENV_VAR} must be set by the Bazel test rule"))?,
-    );
+    let test_binary =
+        PathBuf::from(std::env::var_os(TEST_BINARY_ENV_VAR).with_context(|| {
+            format!("{TEST_BINARY_ENV_VAR} must be set by the Bazel test rule")
+        })?);
     let forwarded_args = std::env::args_os().skip(1).collect::<Vec<_>>();
 
     if is_terse_list_request(&forwarded_args) {
@@ -28,12 +28,15 @@ async fn main() -> Result<()> {
             .status()
             .await
             .context("list integration tests")?;
-        anyhow::ensure!(status.success(), "listing integration tests exited with {status}");
+        anyhow::ensure!(
+            status.success(),
+            "listing integration tests exited with {status}"
+        );
         return Ok(());
     }
 
     WineExecServer
-        .scope(|exec_server_url| async move {
+        .scope(|exec_server_url, _wine_prefix| async move {
             let mut command = Command::new(test_binary);
             command
                 .env(TEST_ENVIRONMENT_ENV_VAR, "wine-exec")
