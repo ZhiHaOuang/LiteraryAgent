@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REMOTE="${LG_CODEX_REMOTE:-upstream}"
-REF="${LG_CODEX_REF:-main}"
+REF="${LG_CODEX_REF:-}"
 PREFIX="${LG_CODEX_PREFIX:-core/codex}"
 PIN_FILE="${LG_CODEX_PIN_FILE:-CODEX_CORE_COMMIT}"
 MODE="check"
@@ -19,7 +19,7 @@ Usage:
 
 Environment overrides:
   LG_CODEX_REMOTE=upstream
-  LG_CODEX_REF=main
+  LG_CODEX_REF=rust-v0.154.0  # optional; defaults to latest stable release
   LG_CODEX_PREFIX=core/codex
   LG_CODEX_PIN_FILE=CODEX_CORE_COMMIT
 
@@ -118,6 +118,16 @@ if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ -z "$REF" ]]; then
+  REF="$(curl --fail --silent --show-error --max-time 30 \
+    https://api.github.com/repos/openai/codex/releases/latest \
+    | python3 -c 'import json,sys; r=json.load(sys.stdin); assert not r["draft"] and not r["prerelease"]; print(r["tag_name"])')"
+  if [[ ! "$REF" =~ ^rust-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Unexpected stable release tag: $REF" >&2
+    exit 1
+  fi
+fi
+
 echo "LiteraryAgent repo: $repo_root"
 echo "Codex prefix:       $PREFIX"
 echo "Pinned commit:      $pinned_sha"
@@ -125,7 +135,7 @@ echo "Codex upstream:     $REMOTE/$REF ($(git remote get-url "$REMOTE"))"
 echo
 
 git fetch "$REMOTE" "$REF"
-remote_ref="$REMOTE/$REF"
+remote_ref="$(git rev-parse 'FETCH_HEAD^{commit}')"
 remote_sha="$(git rev-parse "$remote_ref")"
 head_sha="$(git rev-parse HEAD)"
 
@@ -174,10 +184,15 @@ fi
 verify_committed_core
 
 echo "Applying subtree merge into $PREFIX..."
-git merge -s subtree --no-ff --no-commit "$remote_ref"
+git merge -s ort -Xsubtree="$PREFIX" --no-ff --no-commit "$remote_ref"
 
 printf '%s\n' "$remote_sha" > "$PIN_FILE"
 git add "$PIN_FILE"
+bundled_pin="lg-cli/lg_cli/resources/CODEX_CORE_COMMIT.txt"
+if [[ -f "$bundled_pin" ]]; then
+  printf '%s\n' "$remote_sha" > "$bundled_pin"
+  git add "$bundled_pin"
+fi
 
 if ! verify_index_core "$remote_sha"; then
   echo "Updated core tree does not match upstream $remote_sha; aborting commit." >&2
