@@ -1,0 +1,14 @@
+# User-local location: ~/.literarygiant/environments/sandbox/config.toml
+# Keep API keys in `literary --environment sandbox auth add NAME`, not here.
+[model]
+provider = "deepseek-anthropic"
+base_url = "https://api.deepseek.com/anthropic"
+default = "deepseek-flash"
+max_output_tokens = 8192
+
+[agent]
+enable_shell = false
+
+# Set the actual verified runtime manifest path on each machine.
+# [runtime]
+# manifest = "/absolute/path/to/runtime.json"

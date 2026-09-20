@@ -16,6 +16,7 @@ from . import __version__
 from .catalog import load_task_modes
 from .config import LGConfig, load_config
 from .core_adapter import inspect_core
+from .credentials import add_auth_parser, dispatch_auth
 from .dashboard import render_dashboard
 from .definitions import DefinitionRegistry
 from .doctor import run_doctor
@@ -39,6 +40,8 @@ TOP_LEVEL_COMMANDS = {
     "agents",
     "modes",
     "run",
+    "native",
+    "auth",
 }
 
 
@@ -49,7 +52,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(normalized_argv)
     setattr(args, "natural", natural)
     try:
-        config = load_config(Path(args.cwd).resolve() if args.cwd else None)
+        if args.command == "auth":
+            return dispatch_auth(args, args.environment or "sandbox")
+        config = load_config(Path(args.cwd).resolve() if args.cwd else None, environment=args.environment)
         config = _apply_runtime_overrides(config, args)
         return _dispatch(args, parser, config)
     except Exception as exc:
@@ -70,14 +75,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"LiteraryGiant {__version__}")
     parser.add_argument("-C", "--cwd", help="Workspace root. Defaults to current directory.")
+    parser.add_argument("--environment", help="Isolated LG credential/config space; ignores inherited model keys.")
     parser.add_argument("--debug", action="store_true", help="Show tracebacks and model events.")
     _add_runtime_options(parser)
     sub = parser.add_subparsers(dest="command")
+    add_auth_parser(sub)
 
     sub.add_parser("init", help="Initialize the LG project workspace.")
+    native = sub.add_parser("native", help="Launch the separately built LG native terminal.")
+    native.add_argument("prompt", nargs="*")
+    native.add_argument("--manifest", help="Path to the verified native-runtime.json.")
     status = sub.add_parser("status", help="Show workspace, core, knowledge, and run status.")
     _add_json_option(status)
     doctor = sub.add_parser("doctor", help="Run actionable installation and project diagnostics.")
+    doctor.add_argument("--probe", action="store_true", help="Explicitly send one small request through the configured model runtime.")
     _add_json_option(doctor)
     skills = sub.add_parser("skills", help="List resolved LG skills.")
     _add_json_option(skills)
@@ -158,6 +169,9 @@ def _add_json_option(parser: argparse.ArgumentParser) -> None:
 
 
 def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config: LGConfig) -> int:
+    if args.command == "native":
+        from .native import launch_native
+        return launch_native(config, prompt=" ".join(args.prompt), manifest=args.manifest)
     if args.command is None:
         if not sys.stdin.isatty():
             prompt = sys.stdin.read().strip()
@@ -181,7 +195,7 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
     if args.command == "status":
         return print_status(config, json_mode=args.json)
     if args.command == "doctor":
-        return print_doctor(config, json_mode=args.json)
+        return print_doctor(config, json_mode=args.json, probe=args.probe)
     if args.command == "skills":
         return print_skills(config, json_mode=args.json)
     if args.command == "agents":
@@ -360,7 +374,7 @@ def interactive_loop(config: LGConfig, *, debug: bool = False) -> int:
 
 
 def print_status(config: LGConfig, *, json_mode: bool = False) -> int:
-    core = inspect_core()
+    core = inspect_core(runtime_manifest=config.runtime_manifest)
     registry = DefinitionRegistry(config.workspace)
     gateway = KnowledgeGateway(config)
     runs = RunStore(config.workspace).list_runs(limit=1)
@@ -433,8 +447,8 @@ def print_status(config: LGConfig, *, json_mode: bool = False) -> int:
     return 0
 
 
-def print_doctor(config: LGConfig, *, json_mode: bool = False) -> int:
-    report = run_doctor(config)
+def print_doctor(config: LGConfig, *, json_mode: bool = False, probe: bool = False) -> int:
+    report = run_doctor(config, probe=probe)
     if json_mode:
         print(
             json.dumps(
@@ -565,14 +579,14 @@ def _apply_runtime_overrides(config: LGConfig, args: argparse.Namespace) -> LGCo
 def _normalize_argv(argv: list[str]) -> tuple[list[str], bool]:
     if not argv:
         return argv, False
-    options_with_values = {"-C", "--cwd", "--model", "--strategy"}
+    options_with_values = {"-C", "--cwd", "--model", "--strategy", "--environment"}
     index = 0
     while index < len(argv):
         token = argv[index]
         if token in options_with_values:
             index += 2
             continue
-        if any(token.startswith(prefix + "=") for prefix in ("--cwd", "--model", "--strategy")):
+        if any(token.startswith(prefix + "=") for prefix in ("--cwd", "--model", "--strategy", "--environment")):
             index += 1
             continue
         if token.startswith("-"):

@@ -20,7 +20,7 @@ LG product logic belongs in:
 - `lg-output/`
 - `docs/`
 
-LG CLI must not trigger Codex login. Validate `LITERARYGIANT_API_KEY`, `LG_API_KEY`, `CODEX_API_KEY`, `OPENAI_API_KEY`, or the compatibility config key before delegating to model adapters.
+LG CLI must not trigger Codex login. Validate provider-scoped credentials before delegation: `DEEPSEEK_API_KEY` for DeepSeek Anthropic, `ANTHROPIC_API_KEY` for Anthropic, or explicit `LITERARYGIANT_API_KEY`/`LG_API_KEY` overrides. Never forward OpenAI credentials to an Anthropic endpoint. Keep real provider keys out of Codex child environments; use the process-local bridge token instead.
 
 Use `KnowledgeGateway` for reference retrieval. Search `AbstractLibrary` first, then the project reference library and `BridgeIndex`. Never scan `Bridges` directly, and require explicit opt-in before reading `TaciturnRaw`.
 

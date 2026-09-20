@@ -8,6 +8,10 @@ version = "0.3.0"
 description = "LiteraryGiant literary agent runtime and CLI."
 requires-python = ">=3.10"
 dependencies = [
+    "anthropic>=0.125,<1",
+    "mcp>=1.28,<2",
+    "jsonschema>=4.20,<5",
+    "typing-extensions>=4.9,<5",
     "prompt-toolkit>=3.0.48,<4",
     "rich>=13.9,<15",
     "tomli>=2.2.1; python_version < '3.11'",

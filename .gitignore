@@ -8,3 +8,8 @@ ReferenceLibrary/
 dist/
 build/
 *.egg-info/
+.env
+.env.*
+!.env.example
+credentials.json
+.credentials-*/

@@ -10,6 +10,21 @@ from lg_cli.config import ConfigError, load_config
 
 
 class ConfigTests(unittest.TestCase):
+    def test_deepseek_credentials_are_provider_scoped(self):
+        with tempfile.TemporaryDirectory() as raw:
+            with patch.dict(os.environ, {"HOME": raw, "LG_PROVIDER": "deepseek-anthropic", "OPENAI_API_KEY": "wrong-provider"}, clear=True):
+                config = load_config(Path(raw))
+                self.assertIsNone(config.api_key)
+                self.assertEqual(config.default_model, "deepseek-flash")
+                self.assertEqual(config.base_url, "https://api.deepseek.com/anthropic")
+                with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "deepseek-secret"}):
+                    config = load_config(Path(raw))
+                    self.assertEqual(config.api_key_source, "env:DEEPSEEK_API_KEY")
+                    self.assertNotIn("deepseek-secret", repr(config))
+                with patch.dict(os.environ, {"LG_BASE_URL": "https://secret@example.com"}):
+                    with self.assertRaises(ConfigError):
+                        load_config(Path(raw))
+
     def test_standard_toml_env_priority_and_model_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

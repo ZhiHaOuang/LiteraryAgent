@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -11,12 +12,16 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from contextlib import nullcontext
 from importlib import resources
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from .config import LGConfig
 from .paths import core_codex_root
+
+if TYPE_CHECKING:
+    from .anthropic_bridge import AnthropicBridge
 
 
 EngineEventCallback = Callable[[dict[str, Any]], None]
@@ -90,17 +95,33 @@ class CodexExecAdapter:
     ) -> CoreExecutionResult:
         if not config.api_key:
             return _failure(
-                "no API key configured; set LITERARYGIANT_API_KEY, LG_API_KEY, "
-                "CODEX_API_KEY, or OPENAI_API_KEY",
+                "no API key configured; set DEEPSEEK_API_KEY for DeepSeek, "
+                "ANTHROPIC_API_KEY for Anthropic, or LG_API_KEY",
                 used_stub=True,
             )
 
-        candidates = discover_core_commands(self.root, probe=True)
+        candidates = discover_core_commands(self.root, probe=True, runtime_manifest=config.runtime_manifest)
         available = [item for item in candidates if item.available]
         if not available:
             detail = "; ".join(f"{item.name}: {item.reason}" for item in candidates)
             return _failure(f"no healthy Codex runtime is available ({detail})", used_stub=True)
 
+        from .anthropic_bridge import AnthropicBridge
+
+        with AnthropicBridge(config) if config.uses_anthropic else nullcontext() as bridge:
+            return self._run_available(available, prompt, config, mode, model_profile, output_schema, on_event, bridge)
+
+    def _run_available(
+        self,
+        available: list[CoreCommandCandidate],
+        prompt: str,
+        config: LGConfig,
+        mode: str,
+        model_profile: str | None,
+        output_schema: Path | None,
+        on_event: EngineEventCallback | None,
+        bridge: AnthropicBridge | None,
+    ) -> CoreExecutionResult:
         attempts: list[str] = []
         for candidate in available:
             attempts.append(candidate.name)
@@ -113,6 +134,7 @@ class CodexExecAdapter:
                 output_schema=output_schema,
                 on_event=on_event,
                 attempts=attempts,
+                bridge=bridge,
             )
             if result.returncode is None and result.error and "failed to launch" in result.error:
                 continue
@@ -134,6 +156,7 @@ class CodexExecAdapter:
         output_schema: Path | None,
         on_event: EngineEventCallback | None,
         attempts: list[str],
+        bridge: AnthropicBridge | None = None,
     ) -> CoreExecutionResult:
         temp_dir = config.workspace / ".literarygiant" / "tmp"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -146,9 +169,16 @@ class CodexExecAdapter:
                 model_profile=model_profile,
                 final_path=final_path,
                 output_schema=output_schema,
+                provider_args=bridge.codex_args() if bridge else None,
             ),
         ]
         env = _adapter_env(config)
+        if bridge:
+            env.pop("CODEX_API_KEY", None)
+            env["LG_BRIDGE_TOKEN"] = bridge.token
+            no_proxy = ",".join(filter(None, [env.get("NO_PROXY", ""), env.get("no_proxy", ""), "127.0.0.1,localhost,::1"]))
+            env["NO_PROXY"] = no_proxy
+            env["no_proxy"] = no_proxy
         started = time.monotonic()
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
@@ -317,9 +347,9 @@ class CodexExecAdapter:
         )
 
 
-def inspect_core(root: Path | None = None) -> CoreStatus:
+def inspect_core(root: Path | None = None, *, runtime_manifest: Path | None = None) -> CoreStatus:
     root = root or core_codex_root()
-    candidates = tuple(discover_core_commands(root, probe=True))
+    candidates = tuple(discover_core_commands(root, probe=True, runtime_manifest=runtime_manifest))
     source_available = (root / "codex-rs" / "Cargo.toml").exists()
     runtime_available = any(item.available for item in candidates)
     notes: list[str] = []
@@ -341,8 +371,11 @@ def inspect_core(root: Path | None = None) -> CoreStatus:
     )
 
 
-def discover_core_commands(root: Path | None = None, *, probe: bool = True) -> list[CoreCommandCandidate]:
+def discover_core_commands(root: Path | None = None, *, probe: bool = True, runtime_manifest: Path | None = None) -> list[CoreCommandCandidate]:
     root = root or core_codex_root()
+    manifest = os.environ.get("LG_CODEX_RUNTIME_MANIFEST", "").strip() or runtime_manifest
+    if manifest:
+        return [_locked_runtime(Path(manifest).expanduser(), root, probe=probe)]
     raw: list[tuple[str, list[str], str, bool]] = []
 
     env_command = os.environ.get("LG_CODEX_COMMAND", "").strip()
@@ -409,6 +442,40 @@ def discover_core_commands(root: Path | None = None, *, probe: bool = True) -> l
             )
         )
     return candidates
+
+
+def _locked_runtime(path: Path, root: Path, *, probe: bool) -> CoreCommandCandidate:
+    name = "pinned Codex runtime"
+    command: tuple[str, ...] = ()
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+            raise ValueError("unsupported runtime manifest")
+        pin = _read_core_pin(root.parent.parent / "CODEX_CORE_COMMIT") or _bundled_core_pin()
+        if not pin or manifest.get("commit") != pin:
+            raise ValueError("runtime commit does not match CODEX_CORE_COMMIT")
+        binary = Path(manifest["binary"])
+        if not binary.is_absolute():
+            raise ValueError("runtime binary path must be absolute")
+        command = (str(binary),)
+        checksum = hashlib.sha256()
+        with binary.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                checksum.update(chunk)
+        if checksum.hexdigest() != manifest.get("binary_sha256"):
+            raise ValueError("runtime binary checksum mismatch")
+        expected = manifest.get("version")
+        tag = manifest.get("tag")
+        if not isinstance(tag, str) or not tag.startswith("rust-v") or expected != f"codex-cli {tag[6:]}":
+            raise ValueError("runtime tag and version mismatch")
+        candidate = _evaluate_candidate(
+            name=name, command=list(command), source="pinned-runtime", root=root, probe=probe
+        )
+        if candidate.available and probe and candidate.version != expected:
+            raise ValueError("runtime version probe does not match manifest")
+        return candidate
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return CoreCommandCandidate(name, command, False, f"runtime verification failed: {exc}", "pinned-runtime")
 
 
 def run_model_turn(
@@ -503,6 +570,7 @@ def _exec_args(
     model_profile: str | None,
     final_path: Path,
     output_schema: Path | None,
+    provider_args: list[str] | None = None,
 ) -> list[str]:
     args = [
         "exec",
@@ -522,8 +590,10 @@ def _exec_args(
     model = config.model_for_profile(model_profile or "", mode=mode)
     if model:
         args.extend(["--model", model])
-    if config.provider and config.provider != "openai":
-        args.extend(["-c", f'model_provider="{config.provider}"'])
+    if provider_args:
+        args.extend(provider_args)
+    elif config.provider and config.provider != "openai":
+        args.extend(["-c", f'model_provider={json.dumps(config.provider)}'])
     if output_schema is not None:
         args.extend(["--output-schema", str(output_schema)])
     args.extend(["--cd", str(config.workspace), "-"])
@@ -532,7 +602,7 @@ def _exec_args(
 
 def _adapter_env(config: LGConfig) -> dict[str, str]:
     env = dict(os.environ)
-    for name in ("LITERARYGIANT_API_KEY", "LG_API_KEY", "OPENAI_API_KEY"):
+    for name in ("LITERARYGIANT_API_KEY", "LG_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
         env.pop(name, None)
     env["CODEX_API_KEY"] = config.api_key or ""
     codex_home = config.workspace / ".literarygiant" / "codex-home"

@@ -2,6 +2,9 @@
 
 Status: implementation in progress; not an acceptance report.
 
+DeepSeek Anthropic is now the selected provider. See
+[provider implementation and verification status](deepseek-anthropic.md).
+
 ## Confirmed Product Contract
 
 - Reuse the Codex native terminal UI, shortcuts, streaming, tool progress,
@@ -50,3 +53,24 @@ must fail explicitly. Do not advertise compatibility from version probes alone.
 
 Real Anthropic generation and interactive terminal acceptance remain pending
 until exercised against a configured provider and the built native application.
+
+## Pinned Runtime Baseline
+
+The current upstream baseline is rust-v0.154.0 at
+6b9826e3aa83b1a5947db50f4332cb9c65f1b340. The source prefix is pristine.
+Install its official executable separately from the system Codex:
+
+```bash
+python scripts/install_codex_runtime.py --tag rust-v0.154.0 --destination /opt/conda/envs/LitIsLand/lg-runtime
+export LG_CODEX_RUNTIME_MANIFEST=/opt/conda/envs/LitIsLand/lg-runtime/rust-v0.154.0/runtime.json
+literary doctor
+```
+
+When LG_CODEX_RUNTIME_MANIFEST is set, the adapter only considers that runtime.
+It verifies the pinned commit, binary SHA-256, manifest version, and executable
+version before model execution. Invalid manifests fail closed, including when
+LG_CODEX_COMMAND or a system Codex is available. Without this explicit setting,
+legacy runtime discovery remains enabled for existing installations.
+
+This upstream runtime is a baseline, not the branded LG build. Installing it
+does not implement Anthropic translation or switch the CLI to native TUI.

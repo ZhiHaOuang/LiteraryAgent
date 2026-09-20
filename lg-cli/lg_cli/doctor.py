@@ -3,12 +3,12 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .catalog import load_workflows
 from .config import LGConfig
-from .core_adapter import inspect_core
+from .core_adapter import CodexExecAdapter, inspect_core
 from .definitions import DefinitionRegistry
 from .knowledge import KnowledgeGateway
 from .paths import product_root
@@ -38,7 +38,7 @@ class DoctorReport:
         return 0 if self.ok else 1
 
 
-def run_doctor(config: LGConfig) -> DoctorReport:
+def run_doctor(config: LGConfig, *, probe: bool = False) -> DoctorReport:
     checks: list[DoctorCheck] = []
     lg_root = config.workspace / ".literarygiant"
     checks.append(
@@ -85,7 +85,13 @@ def run_doctor(config: LGConfig) -> DoctorReport:
         )
     )
 
-    core = inspect_core()
+    if config.uses_anthropic:
+        try:
+            import anthropic
+            checks.append(DoctorCheck("provider-bridge", "PASS", f"Anthropic SDK {anthropic.__version__}; Messages bridge ready (API not probed)"))
+        except ImportError:
+            checks.append(DoctorCheck("provider-bridge", "FAIL", "Anthropic SDK missing; reinstall literarygiant-cli with dependencies"))
+    core = inspect_core(runtime_manifest=config.runtime_manifest)
     checks.append(
         DoctorCheck(
             "core-runtime",
@@ -137,7 +143,23 @@ def run_doctor(config: LGConfig) -> DoctorReport:
             f"writable parent: {output_parent}" if writable else f"not writable: {config.output_path}",
         )
     )
+    if probe:
+        checks.append(probe_provider(config))
     return DoctorReport(tuple(checks))
+
+
+def probe_provider(config: LGConfig) -> DoctorCheck:
+    if not config.api_key:
+        return DoctorCheck("provider-probe", "FAIL", "No provider API key configured; no request sent")
+    result = CodexExecAdapter().run(
+        prompt="This is a connectivity check, not a writing task. Do not call tools. Reply only LG_READY.",
+        config=replace(config, max_output_tokens=64, timeout_seconds=60, enable_shell=False),
+        mode="chat", model_profile="default",
+    )
+    ready = result.ok and not result.used_stub and "LG_READY" in result.output_text
+    return DoctorCheck("provider-probe", "PASS" if ready else "FAIL",
+        "Real model roundtrip passed through the configured Codex runtime" if ready
+        else result.error or "Model did not return the expected connectivity marker")
 
 
 def _runtime_summary(core) -> str:

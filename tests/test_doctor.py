@@ -3,14 +3,21 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from lg_cli.doctor import run_doctor
+from lg_cli.doctor import probe_provider, run_doctor
 from lg_cli.project_store import ProjectStore
 
 from .helpers import make_config
 
 
 class DoctorTests(unittest.TestCase):
+    def test_probe_without_key_does_not_launch_runtime(self):
+        with tempfile.TemporaryDirectory() as raw, patch("lg_cli.doctor.CodexExecAdapter.run") as run:
+            result = probe_provider(make_config(Path(raw), api_key=None))
+            self.assertEqual(result.status, "FAIL")
+            run.assert_not_called()
+
     def test_story_database_check_changes_from_warning_to_pass(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -39,6 +40,39 @@ print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "t
 
 
 class AdapterTests(unittest.TestCase):
+    def test_locked_runtime_fails_closed_on_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw)
+            core = project / "core" / "codex"
+            core.mkdir(parents=True)
+            (project / "CODEX_CORE_COMMIT").write_text("a" * 40)
+            binary = project / "codex"
+            binary.write_text("#!/bin/sh\nprintf 'codex-cli 0.154.0\\n'\n")
+            binary.chmod(0o755)
+            data = {
+                "schema_version": 1, "commit": "a" * 40,
+                "binary": str(binary), "tag": "rust-v0.154.0",
+                "version": "codex-cli 0.154.0",
+                "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            }
+            manifest = project / "runtime.json"
+            manifest.write_text(json.dumps(data))
+            with patch.dict(os.environ, {"LG_CODEX_RUNTIME_MANIFEST": str(manifest)}):
+                candidates = discover_core_commands(core)
+                self.assertEqual(len(candidates), 1)
+                self.assertTrue(candidates[0].available, candidates[0].reason)
+                for field, value, reason in (
+                    ("commit", "b" * 40, "commit"),
+                    ("binary_sha256", "0" * 64, "checksum"),
+                    ("version", "codex-cli 0.1.0", "version"),
+                ):
+                    with self.subTest(field=field):
+                        manifest.write_text(json.dumps({**data, field: value}))
+                        candidates = discover_core_commands(core)
+                        self.assertEqual(len(candidates), 1)
+                        self.assertFalse(candidates[0].available)
+                        self.assertIn(reason, candidates[0].reason)
+
     def test_prompt_uses_stdin_and_candidate_is_health_checked(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

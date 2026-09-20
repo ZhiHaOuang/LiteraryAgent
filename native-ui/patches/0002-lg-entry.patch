@@ -1,0 +1,5 @@
+diff --git a/codex-rs/tui/src/main.rs b/codex-rs/tui/src/main.rs
+--- a/codex-rs/tui/src/main.rs
++++ b/codex-rs/tui/src/main.rs
+@@ -12,0 +13 @@
++#[command(name = "literary", version, about = "LiteraryGiant writing terminal")]

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+from .credentials import environment_dir, read_profiles
 
 try:
     import tomllib
@@ -12,9 +15,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10
 
 
 DEFAULT_CONFIG_TEXT = """[model]
-provider = "openai"
-# Leave model names empty to use the current Codex default.
-default = ""
+provider = "deepseek-anthropic"
+base_url = "https://api.deepseek.com/anthropic"
+max_output_tokens = 8192
+default = "deepseek-flash"
 writer = ""
 coder = ""
 critic = ""
@@ -64,10 +68,17 @@ class LGConfig:
     enable_reference: bool
     timeout_seconds: int
     max_stage_context_chars: int
-    api_key: str | None
+    api_key: str | None = field(repr=False)
     api_key_source: str
     loaded_files: tuple[Path, ...]
     warnings: tuple[str, ...]
+    base_url: str = ""
+    max_output_tokens: int = 8192
+    runtime_manifest: Path | None = None
+
+    @property
+    def uses_anthropic(self) -> bool:
+        return self.provider in {"anthropic", "deepseek-anthropic"}
 
     @property
     def model_label(self) -> str:
@@ -99,14 +110,15 @@ def user_config_path() -> Path:
     return Path.home() / ".literarygiant" / "config.toml"
 
 
-def load_config(workspace: Path | None = None) -> LGConfig:
+def load_config(workspace: Path | None = None, *, environment: str | None = None) -> LGConfig:
     root = (workspace or Path.cwd()).resolve()
     data: dict[str, Any] = {}
     loaded: list[Path] = []
     warnings: list[str] = []
 
     # The requested order is environment > user config > project config.
-    for path in (project_config_path(root), user_config_path()):
+    user_path = environment_dir(environment) / "config.toml" if environment else user_config_path()
+    for path in (project_config_path(root), user_path):
         if path.exists():
             _merge(data, _read_toml(path))
             loaded.append(path)
@@ -115,9 +127,28 @@ def load_config(workspace: Path | None = None) -> LGConfig:
     paths = _section(data, "paths")
     knowledge = _section(data, "knowledge")
     agent = _section(data, "agent")
+    runtime = _section(data, "runtime")
 
-    api_key, api_source = _api_key_from_env()
-    if not api_key:
+    # An explicitly selected space must not inherit production model credentials.
+    env_string = (lambda *names: "") if environment else _env_string
+    saved = read_profiles(environment or "sandbox")
+    active = saved.get("active")
+    profile = saved["profiles"].get(active) if active else None
+    if profile:
+        model = {"provider": profile["provider"], "default": "deepseek-flash",
+                 "base_url": "https://api.deepseek.com/anthropic"}
+        env_string = lambda *names: ""
+
+    provider = (env_string("LITERARYGIANT_PROVIDER", "LG_PROVIDER")
+                or _string(model.get("provider")) or "deepseek-anthropic")
+    if provider in {"anthropic", "deepseek-anthropic"} and model.get("provider") and provider != model["provider"]:
+        # Models, endpoint, and compatibility credentials belong to a provider.
+        model = {"provider": provider}
+        warnings.append("provider override: previous provider's models, endpoint, and config key ignored")
+    api_key, api_source = (None, "not configured") if environment or profile else _api_key_from_env(provider)
+    if profile:
+        api_key, api_source = profile["key"], f"profile:{environment or 'sandbox'}/{active}"
+    if not api_key and not environment:
         configured_key = _string(model.get("api_key"))
         if configured_key:
             api_key = configured_key
@@ -126,7 +157,21 @@ def load_config(workspace: Path | None = None) -> LGConfig:
                 "model.api_key is supported for compatibility; environment variables are safer for secrets."
             )
 
-    default_model = _env_string("LITERARYGIANT_MODEL", "LG_MODEL") or _string(model.get("default"))
+    default_model = env_string("LITERARYGIANT_MODEL", "LG_MODEL") or _string(model.get("default"))
+    base_url = env_string("LG_BASE_URL") or _string(model.get("base_url"))
+    if provider in {"anthropic", "deepseek-anthropic"}:
+        base_url = base_url or env_string("ANTHROPIC_BASE_URL") or (
+            "https://api.deepseek.com/anthropic" if provider == "deepseek-anthropic"
+            else "https://api.anthropic.com"
+        )
+        parsed = urlsplit(base_url)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+                or parsed.password or parsed.query or parsed.fragment):
+            raise ConfigError("Anthropic base_url must be an HTTPS URL without credentials, query, or fragment")
+        if provider == "deepseek-anthropic" and not default_model:
+            default_model = "deepseek-flash"
+        if not default_model:
+            raise ConfigError("Anthropic requires an explicit model.default or LG_MODEL")
     writer_model = _string(model.get("writer"))
     coder_model = _string(model.get("coder"))
     critic_model = _string(model.get("critic"))
@@ -134,9 +179,7 @@ def load_config(workspace: Path | None = None) -> LGConfig:
 
     return LGConfig(
         workspace=root,
-        provider=_env_string("LITERARYGIANT_PROVIDER", "LG_PROVIDER")
-        or _string(model.get("provider"))
-        or "openai",
+        provider=provider,
         default_model=default_model,
         writer_model=writer_model,
         coder_model=coder_model,
@@ -161,6 +204,9 @@ def load_config(workspace: Path | None = None) -> LGConfig:
         api_key_source=api_source,
         loaded_files=tuple(loaded),
         warnings=tuple(warnings),
+        base_url=base_url.rstrip("/"),
+        max_output_tokens=_bounded_int(model.get("max_output_tokens"), 8192, 1, 65536),
+        runtime_manifest=_workspace_path(root, runtime["manifest"]) if _string(runtime.get("manifest")) else None,
     )
 
 
@@ -197,8 +243,15 @@ def _workspace_path(root: Path, raw: str) -> Path:
     return path.resolve() if path.is_absolute() else (root / path).resolve()
 
 
-def _api_key_from_env() -> tuple[str | None, str]:
-    for name in ("LITERARYGIANT_API_KEY", "LG_API_KEY", "CODEX_API_KEY", "OPENAI_API_KEY"):
+def _api_key_from_env(provider: str = "openai") -> tuple[str | None, str]:
+    names = ["LITERARYGIANT_API_KEY", "LG_API_KEY"]
+    if provider == "deepseek-anthropic":
+        names.extend(["DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY"])
+    elif provider == "anthropic":
+        names.append("ANTHROPIC_API_KEY")
+    else:
+        names.extend(["CODEX_API_KEY", "OPENAI_API_KEY"])
+    for name in names:
         value = os.environ.get(name, "").strip()
         if value:
             return value, f"env:{name}"

@@ -532,6 +532,24 @@ class ProjectStore:
                 self._activate_version(connection, document_id, version_id, state=normalized_state)
             return self._get_version(connection, version_id)
 
+    def edit_active_document(
+        self, reference: str | int, *, content: str, expected_version_id: int, reason: str
+    ) -> DocumentVersion:
+        """Activate a revision only if the author/model read the current version."""
+        self._require_initialized()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            document_id = self._resolve_document_id(connection, reference)
+            document = self._get_document(connection, document_id)
+            if document.active_version_id != expected_version_id:
+                raise ProjectStoreError("Document changed since it was read; reload before editing.")
+            version_id = self._insert_version(
+                connection, document_id=document_id, content=content, state=document.state,
+                reason=reason or "Author-directed edit", metadata={"previous_version_id": expected_version_id},
+            )
+            self._activate_version(connection, document_id, version_id, state=document.state)
+            return self._get_version(connection, version_id)
+
     def list_versions(self, reference: str | int, *, limit: int = 100) -> list[DocumentVersion]:
         self._require_initialized()
         with self._connection() as connection:

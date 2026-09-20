@@ -1,6 +1,8 @@
 [model]
-provider = "openai"
-default = ""
+provider = "deepseek-anthropic"
+base_url = "https://api.deepseek.com/anthropic"
+max_output_tokens = 8192
+default = "deepseek-flash"
 writer = ""
 coder = ""
 critic = ""

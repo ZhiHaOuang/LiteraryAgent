@@ -1,0 +1,32 @@
+diff --git a/codex-rs/tui/src/history_cell/session.rs b/codex-rs/tui/src/history_cell/session.rs
+--- a/codex-rs/tui/src/history_cell/session.rs
++++ b/codex-rs/tui/src/history_cell/session.rs
+@@ -328 +328 @@
+-            Span::from("OpenAI Codex").bold(),
++            Span::from("LiteraryGiant LG").bold(),
+diff --git a/codex-rs/tui/src/status/card.rs b/codex-rs/tui/src/status/card.rs
+--- a/codex-rs/tui/src/status/card.rs
++++ b/codex-rs/tui/src/status/card.rs
+@@ -745 +745 @@
+-            Span::from("OpenAI Codex").bold(),
++            Span::from("LiteraryGiant LG").bold(),
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -275,0 +276 @@
++            SlashCommand::Logout => false,
+diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+--- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
++++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+@@ -429 +429 @@
+-                self.app_event_tx.send(AppEvent::Logout);
++                self.add_error_message("LG uses API credentials; account login and logout are disabled.".to_string());
+diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
+--- a/codex-rs/tui/src/lib.rs
++++ b/codex-rs/tui/src/lib.rs
+@@ -1218 +1218,4 @@
+-    let should_show_onboarding = should_show_onboarding(
++    if requires_openai_auth {
++        anyhow::bail!("LG requires an API provider; OpenAI account login is disabled.");
++    }
++    let should_show_onboarding = should_show_onboarding(
