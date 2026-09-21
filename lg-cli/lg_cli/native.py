@@ -10,7 +10,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from .anthropic_bridge import AnthropicBridge
+from .provider_transport import provider_bridge
 from .config import ConfigError, LGConfig
 from .core_adapter import _adapter_env, _bundled_core_pin
 from .paths import product_root
@@ -98,20 +98,26 @@ def launch_native(
             "Set LG_NATIVE_RUNTIME_MANIFEST to a successfully built native-runtime.json"
         )
     binary = native_binary(Path(path).expanduser())
-    if not config.uses_anthropic:
+    if not (config.uses_anthropic or config.uses_responses or config.auth_mode == "chatgpt"):
         raise ConfigError(
-            "This native launcher requires an Anthropic Messages provider"
+            "This native launcher requires a configured Messages or Responses provider"
         )
-    if not config.api_key:
-        raise ConfigError("Set DEEPSEEK_API_KEY before starting the writing session")
+    if not config.credentials_configured:
+        raise ConfigError("Configure credentials with literary auth add before starting the writing session")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         raise ConfigError("Native mode requires an interactive terminal")
     if not ProjectStore(config.workspace).initialized:
         raise ConfigError("Initialize the novel project with literary init first")
-    with AnthropicBridge(config) as bridge:
+    if config.auth_mode == "chatgpt":
+        from .subscription_auth import subscription_args, subscription_status
+        ok, message = subscription_status(config)
+        if not ok:
+            raise ConfigError(message)
+    with provider_bridge(config) as bridge:
         env = _adapter_env(config)
         env.pop("CODEX_API_KEY", None)
-        env["LG_BRIDGE_TOKEN"] = bridge.token
+        if bridge:
+            env["LG_BRIDGE_TOKEN"] = bridge.token
         env["NO_PROXY"] = env["no_proxy"] = ",".join(
             filter(
                 None,
@@ -124,15 +130,14 @@ def launch_native(
         )
         command = [
             str(binary),
-            "--model",
-            config.default_model,
+            *(["--model", config.default_model] if config.default_model else []),
             "--cd",
             str(config.workspace),
             "--sandbox",
             "read-only",
             "--ask-for-approval",
             "on-request",
-            *bridge.codex_args(),
+            *(bridge.codex_args() if bridge else subscription_args()),
             *writing_args(config),
         ]
         if prompt:

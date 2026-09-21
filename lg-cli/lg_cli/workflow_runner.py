@@ -267,14 +267,14 @@ class WorkflowRunner:
                 EXIT_OK,
             )
 
-        if not self.config.api_key:
+        if not self.config.credentials_configured:
             return self._fail(
                 handle,
                 workflow_name,
                 emit,
                 error=(
-                    "No API key is configured. Set LITERARYGIANT_API_KEY, LG_API_KEY, "
-                    "CODEX_API_KEY, or OPENAI_API_KEY; use --dry-run to inspect the workflow."
+                    "No API key or subscription login is configured. Use literary auth add "
+                    "for API access or literary auth login for ChatGPT; use --dry-run to inspect the workflow."
                 ),
                 exit_code=EXIT_CONFIGURATION,
             )

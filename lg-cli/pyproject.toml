@@ -9,6 +9,8 @@ description = "LiteraryGiant literary agent runtime and CLI."
 requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.125,<1",
+    "httpx>=0.28,<1",
+    "httpx-sse>=0.4,<1",
     "mcp>=1.28,<2",
     "jsonschema>=4.20,<5",
     "typing-extensions>=4.9,<5",

@@ -12,7 +12,6 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from contextlib import nullcontext
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -93,22 +92,30 @@ class CodexExecAdapter:
         output_schema: Path | None = None,
         on_event: EngineEventCallback | None = None,
     ) -> CoreExecutionResult:
-        if not config.api_key:
+        if not config.credentials_configured:
             return _failure(
-                "no API key configured; set DEEPSEEK_API_KEY for DeepSeek, "
-                "ANTHROPIC_API_KEY for Anthropic, or LG_API_KEY",
+                "no API key configured; use literary auth add PROVIDER or a provider-scoped environment variable",
                 used_stub=True,
             )
 
+        if config.auth_mode == "chatgpt":
+            from .subscription_auth import pinned_command, subscription_status
+            try:
+                command = pinned_command(config)
+            except ValueError as exc:
+                return _failure(str(exc), used_stub=True)
+            ok, message = subscription_status(config, command=command)
+            if not ok:
+                return _failure(message, used_stub=True)
         candidates = discover_core_commands(self.root, probe=True, runtime_manifest=config.runtime_manifest)
         available = [item for item in candidates if item.available]
         if not available:
             detail = "; ".join(f"{item.name}: {item.reason}" for item in candidates)
             return _failure(f"no healthy Codex runtime is available ({detail})", used_stub=True)
 
-        from .anthropic_bridge import AnthropicBridge
+        from .provider_transport import provider_bridge
 
-        with AnthropicBridge(config) if config.uses_anthropic else nullcontext() as bridge:
+        with provider_bridge(config) as bridge:
             return self._run_available(available, prompt, config, mode, model_profile, output_schema, on_event, bridge)
 
     def _run_available(
@@ -125,17 +132,26 @@ class CodexExecAdapter:
         attempts: list[str] = []
         for candidate in available:
             attempts.append(candidate.name)
-            result = self._run_candidate(
-                candidate=candidate,
-                prompt=prompt,
-                config=config,
-                mode=mode,
-                model_profile=model_profile,
-                output_schema=output_schema,
-                on_event=on_event,
-                attempts=attempts,
-                bridge=bridge,
-            )
+            self._active_process = None
+            try:
+                result = self._run_candidate(
+                    candidate=candidate,
+                    prompt=prompt,
+                    config=config,
+                    mode=mode,
+                    model_profile=model_profile,
+                    output_schema=output_schema,
+                    on_event=on_event,
+                    attempts=attempts,
+                    bridge=bridge,
+                )
+            except KeyboardInterrupt:
+                if self._active_process is not None:
+                    _terminate_process(self._active_process)
+                    _wait_quietly(self._active_process)
+                raise
+            finally:
+                self._active_process = None
             if result.returncode is None and result.error and "failed to launch" in result.error:
                 continue
             return result
@@ -198,6 +214,7 @@ class CodexExecAdapter:
                 bufsize=1,
                 start_new_session=os.name != "nt",
             )
+            self._active_process = process
         except OSError as exc:
             return _failure(
                 f"failed to launch {candidate.name}: {exc}",
@@ -302,7 +319,7 @@ class CodexExecAdapter:
             )
 
         if process.returncode != 0:
-            detail = _stderr_summary(stderr)
+            detail = _engine_error_summary(events) or _stderr_summary(stderr)
             message = f"Codex process exited with code {process.returncode}"
             if detail:
                 message += f": {detail}"
@@ -592,8 +609,22 @@ def _exec_args(
         args.extend(["--model", model])
     if provider_args:
         args.extend(provider_args)
+    elif config.auth_mode == "chatgpt":
+        from .subscription_auth import subscription_args
+        args.extend(subscription_args())
     elif config.provider and config.provider != "openai":
         args.extend(["-c", f'model_provider={json.dumps(config.provider)}'])
+    # LG already schedules these stages; an unattended exec must not start a
+    # second collaboration workflow with unconfigured models or interactive input.
+    stage_settings = {
+        "model_instructions_file": str(resources.files("lg_cli.resources").joinpath("workflow-stage.txt")),
+        "features.multi_agent": False,
+        "features.multi_agent_v2": False,
+        "features.collaboration_modes": False,
+        "features.default_mode_request_user_input": False,
+    }
+    for key, value in stage_settings.items():
+        args.extend(["-c", f"{key}={json.dumps(value)}"])
     if output_schema is not None:
         args.extend(["--output-schema", str(output_schema)])
     args.extend(["--cd", str(config.workspace), "-"])
@@ -602,10 +633,17 @@ def _exec_args(
 
 def _adapter_env(config: LGConfig) -> dict[str, str]:
     env = dict(os.environ)
-    for name in ("LITERARYGIANT_API_KEY", "LG_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+    from .providers import PROVIDERS
+    secrets = {"LITERARYGIANT_API_KEY", "LG_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "LG_BRIDGE_TOKEN", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_ORGANIZATION", "OPENAI_PROJECT_ID"}
+    secrets.update(name for preset in PROVIDERS.values() for name in preset.key_envs)
+    secrets.update(name for name, value in env.items() if config.api_key and value == config.api_key)
+    for name in secrets:
         env.pop(name, None)
-    env["CODEX_API_KEY"] = config.api_key or ""
-    codex_home = config.workspace / ".literarygiant" / "codex-home"
+    if not config.uses_anthropic and not config.uses_responses and config.auth_mode != "chatgpt":
+        env["CODEX_API_KEY"] = config.api_key or ""
+    codex_home = config.codex_auth_home if config.auth_mode == "chatgpt" else config.workspace / ".literarygiant" / "codex-home"
+    if codex_home is None or codex_home.is_symlink():
+        raise ValueError("A private LG Codex home is required")
     codex_home.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
         codex_home.chmod(0o700)
@@ -697,6 +735,16 @@ def _failure(
         events=events,
         attempted_candidates=attempted_candidates,
     )
+
+
+def _engine_error_summary(events: list[dict]) -> str:
+    for event in reversed(events):
+        error = event.get("error") if event.get("type") == "turn.failed" else event
+        if event.get("type") in {"error", "turn.failed"} and isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str) and message.strip():
+                return " ".join(message.split())[:280]
+    return ""
 
 
 def _stderr_summary(stderr: str, limit: int = 280) -> str:

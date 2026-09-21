@@ -1,7 +1,9 @@
-# Persistent DeepSeek Keys
+# Persistent Provider Profiles
 
-LG profiles are independent from Codex login and shell startup files. Commands
-run in the installed LitIsLand environment. No account login is required.
+LG profiles are independent from production Codex login and shell startup files.
+Commands run in the installed LitIsLand environment. Company API profiles need no
+account login. ChatGPT subscription profiles use an explicit official Codex login
+in a separate LG auth directory. See [model providers](model-providers.md).
 
 The sandbox environment configuration is stored at
 `~/.literarygiant/environments/sandbox/config.toml`, outside Git. The portable,
@@ -21,9 +23,13 @@ literary auth add personal --replace
 `add` prompts for a hidden key and activates the saved profile. Never put keys
 in command arguments. Automation may use `--key-env VARIABLE_NAME` to read an
 already supplied environment variable. The default profile space is `sandbox`.
-New processes automatically use its active profile; running sessions keep their
-existing key until restarted. Profiles currently target DeepSeek's Anthropic
-endpoint and `deepseek-flash`. They override inherited model keys and endpoints.
+New processes automatically use its active profile. In the Python writing terminal,
+`/auth use NAME` reloads configuration for the next turn; an already running turn
+keeps its existing provider. The native TUI requires restarting to switch providers.
+Old profiles and arbitrary new names without `--provider` retain DeepSeek defaults.
+Recognized provider names such as `glm` and `stepfun` select their respective
+presets. Profiles bind key, endpoint, protocol, and model together and override
+inherited model keys and endpoints. Key rotation preserves the existing settings.
 
 Use `--environment NAME` before the command for separate spaces:
 
@@ -37,11 +43,19 @@ An explicitly selected space never falls back to inherited model credentials or
 inline project keys. Without an explicit space or active sandbox profile, legacy
 environment-variable configuration remains available.
 
-Credentials live outside the repository at
+API credentials live outside the repository at
 `~/.literarygiant/environments/NAME/credentials.json`, with directory permissions
 700 and file permissions 600. Keys are plaintext, not encrypted; root and programs
 running as the same user can read them. Do not commit or share these files or
 include them in unencrypted backups. Listing profiles never displays key fragments.
+The old DeepSeek-only format is read without rewriting; the next explicit change
+saves the versioned format and preserves the existing profiles.
+
+ChatGPT subscription credentials stay in
+`~/.literarygiant/environments/NAME/codex-auth/PROFILE/auth.json` and are managed by
+the pinned Codex executable. LG stores only the profile metadata, not a duplicate
+OAuth token or browser cookie. API keys and subscription access never fall back
+to one another. Re-login may update the selected profile's official auth cache.
 
 Configuration isolation is not a security sandbox. Project data still follows
 `-C`; use a separate workspace for experiments. The prepared sandbox workspace is
@@ -52,6 +66,7 @@ literary --environment sandbox -C ~/.literarygiant/environments/sandbox/workspac
 literary --environment sandbox -C ~/.literarygiant/environments/sandbox/workspace
 ```
 
-`--probe` explicitly makes a small billable model request. Adding, switching and
-listing credentials do not make network requests. This does not update the native
-TUI build status or change the default interface.
+`--probe` explicitly makes a small model request, consuming API or subscription
+usage as applicable. Adding API keys, switching and listing profiles do not make
+network requests. `auth login` explicitly starts the official login network flow.
+This does not complete the native TUI build or change the default writing interface.

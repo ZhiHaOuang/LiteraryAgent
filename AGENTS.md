@@ -20,7 +20,9 @@ LG product logic belongs in:
 - `lg-output/`
 - `docs/`
 
-LG CLI must not trigger Codex login. Validate provider-scoped credentials before delegation: `DEEPSEEK_API_KEY` for DeepSeek Anthropic, `ANTHROPIC_API_KEY` for Anthropic, or explicit `LITERARYGIANT_API_KEY`/`LG_API_KEY` overrides. Never forward OpenAI credentials to an Anthropic endpoint. Keep real provider keys out of Codex child environments; use the process-local bridge token instead.
+LG must not automatically trigger Codex login during writing. Only an explicit `literary auth login` or the corresponding auth-manager selection may start official ChatGPT login, using the verified pinned runtime and an isolated LG-owned CODEX_HOME. Never copy browser cookies or another Codex installation's auth cache. Distinguish ChatGPT subscription access from paid OpenAI API access and explicitly configured proxies.
+
+Validate provider-scoped credentials before delegation. API profiles bind the provider, protocol, endpoint, and model to their key; never fall back across providers. Keep real API keys out of Codex child environments; use the process-local bridge token instead. Stored credentials and subscription auth caches must stay outside Git.
 
 Use `KnowledgeGateway` for reference retrieval. Search `AbstractLibrary` first, then the project reference library and `BridgeIndex`. Never scan `Bridges` directly, and require explicit opt-in before reading `TaciturnRaw`.
 

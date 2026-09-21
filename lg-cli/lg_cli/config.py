@@ -4,9 +4,9 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from .credentials import environment_dir, read_profiles
+from .providers import PROVIDERS, provider_id, validate_endpoint, validate_model
 
 try:
     import tomllib
@@ -75,10 +75,28 @@ class LGConfig:
     base_url: str = ""
     max_output_tokens: int = 8192
     runtime_manifest: Path | None = None
+    protocol: str = ""
+    environment: str | None = None
+    profile_name: str | None = None
+    auth_mode: str = "api_key"
+    codex_auth_home: Path | None = None
+
+    @property
+    def credentials_configured(self) -> bool:
+        if self.auth_mode == "chatgpt":
+            return bool(self.codex_auth_home and not self.codex_auth_home.is_symlink()
+                        and (self.codex_auth_home / "auth.json").is_file()
+                        and not (self.codex_auth_home / "auth.json").is_symlink())
+        return bool(self.api_key)
 
     @property
     def uses_anthropic(self) -> bool:
-        return self.provider in {"anthropic", "deepseek-anthropic"}
+        preset = PROVIDERS.get(provider_id(self.provider))
+        return self.protocol == "anthropic" or bool(preset and preset.protocol == "anthropic")
+
+    @property
+    def uses_responses(self) -> bool:
+        return self.protocol == "responses"
 
     @property
     def model_label(self) -> str:
@@ -117,6 +135,11 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
     warnings: list[str] = []
 
     # The requested order is environment > user config > project config.
+    saved = read_profiles(environment or "sandbox")
+    active = saved.get("active")
+    profile = saved["profiles"].get(active) if active else None
+    if profile and environment is None:
+        environment = "sandbox"
     user_path = environment_dir(environment) / "config.toml" if environment else user_config_path()
     for path in (project_config_path(root), user_path):
         if path.exists():
@@ -131,23 +154,22 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
 
     # An explicitly selected space must not inherit production model credentials.
     env_string = (lambda *names: "") if environment else _env_string
-    saved = read_profiles(environment or "sandbox")
-    active = saved.get("active")
-    profile = saved["profiles"].get(active) if active else None
     if profile:
-        model = {"provider": profile["provider"], "default": "deepseek-flash",
-                 "base_url": "https://api.deepseek.com/anthropic"}
+        # Role models can belong to another account: only retain the token budget.
+        model = {"provider": profile["provider"], "default": profile["model"],
+                 "base_url": profile["base_url"], "protocol": profile["protocol"],
+                 "max_output_tokens": model.get("max_output_tokens", 8192)}
         env_string = lambda *names: ""
 
     provider = (env_string("LITERARYGIANT_PROVIDER", "LG_PROVIDER")
                 or _string(model.get("provider")) or "deepseek-anthropic")
-    if provider in {"anthropic", "deepseek-anthropic"} and model.get("provider") and provider != model["provider"]:
+    if provider_id(provider) in PROVIDERS and model.get("provider") and provider_id(provider) != provider_id(model["provider"]):
         # Models, endpoint, and compatibility credentials belong to a provider.
         model = {"provider": provider}
         warnings.append("provider override: previous provider's models, endpoint, and config key ignored")
     api_key, api_source = (None, "not configured") if environment or profile else _api_key_from_env(provider)
     if profile:
-        api_key, api_source = profile["key"], f"profile:{environment or 'sandbox'}/{active}"
+        api_key, api_source = profile.get("key"), f"profile:{environment or 'sandbox'}/{active}"
     if not api_key and not environment:
         configured_key = _string(model.get("api_key"))
         if configured_key:
@@ -159,19 +181,20 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
 
     default_model = env_string("LITERARYGIANT_MODEL", "LG_MODEL") or _string(model.get("default"))
     base_url = env_string("LG_BASE_URL") or _string(model.get("base_url"))
-    if provider in {"anthropic", "deepseek-anthropic"}:
-        base_url = base_url or env_string("ANTHROPIC_BASE_URL") or (
-            "https://api.deepseek.com/anthropic" if provider == "deepseek-anthropic"
-            else "https://api.anthropic.com"
-        )
-        parsed = urlsplit(base_url)
-        if (parsed.scheme != "https" or not parsed.hostname or parsed.username
-                or parsed.password or parsed.query or parsed.fragment):
-            raise ConfigError("Anthropic base_url must be an HTTPS URL without credentials, query, or fragment")
-        if provider == "deepseek-anthropic" and not default_model:
-            default_model = "deepseek-flash"
-        if not default_model:
-            raise ConfigError("Anthropic requires an explicit model.default or LG_MODEL")
+    preset = PROVIDERS.get(provider_id(provider))
+    protocol = _string(model.get("protocol")) or (preset.protocol if preset else "")
+    if preset:
+        if protocol != preset.protocol:
+            raise ConfigError("Configured protocol does not match provider")
+        if provider in {"anthropic", "deepseek-anthropic", "deepseek"}:
+            base_url = base_url or env_string("ANTHROPIC_BASE_URL")
+        base_url = base_url or preset.base_url
+        default_model = default_model or preset.default_model
+        try:
+            base_url = validate_endpoint(base_url)
+            default_model = validate_model(default_model)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from None
     writer_model = _string(model.get("writer"))
     coder_model = _string(model.get("coder"))
     critic_model = _string(model.get("critic"))
@@ -207,6 +230,11 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
         base_url=base_url.rstrip("/"),
         max_output_tokens=_bounded_int(model.get("max_output_tokens"), 8192, 1, 65536),
         runtime_manifest=_workspace_path(root, runtime["manifest"]) if _string(runtime.get("manifest")) else None,
+        protocol=protocol,
+        environment=environment,
+        profile_name=active,
+        auth_mode=profile.get("auth_mode", "api_key") if profile else "api_key",
+        codex_auth_home=environment_dir(environment or "sandbox") / "codex-auth" / active if profile and profile.get("auth_mode") == "chatgpt" else None,
     )
 
 
@@ -245,10 +273,10 @@ def _workspace_path(root: Path, raw: str) -> Path:
 
 def _api_key_from_env(provider: str = "openai") -> tuple[str | None, str]:
     names = ["LITERARYGIANT_API_KEY", "LG_API_KEY"]
-    if provider == "deepseek-anthropic":
+    if provider in {"deepseek-anthropic", "deepseek"}:
         names.extend(["DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY"])
-    elif provider == "anthropic":
-        names.append("ANTHROPIC_API_KEY")
+    elif provider_id(provider) in PROVIDERS:
+        names.extend(PROVIDERS[provider_id(provider)].key_envs)
     else:
         names.extend(["CODEX_API_KEY", "OPENAI_API_KEY"])
     for name in names:

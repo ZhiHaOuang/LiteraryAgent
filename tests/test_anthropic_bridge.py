@@ -46,6 +46,27 @@ def message_events(block=None, delta=None, stop="end_turn"):
 
 
 class BridgeTests(unittest.TestCase):
+    def test_structured_result_after_progress_message(self):
+        request = {"model": "test", "input": "hello", "text": {"format": {
+            "type": "json_schema", "schema": {"type": "object", "required": ["answer"]}
+        }}}
+        _, mapping = translate_request(request, 1024)
+        progress = list(message_events())
+        final = list(message_events(
+            {"type": "tool_use", "id": "c", "name": "lg_structured_output", "input": {}},
+            {"type": "input_json_delta", "partial_json": '{"answer":"hello"}'},
+            "tool_use",
+        ))
+        for event in final[1:-2]:
+            event["index"] = 1
+        events = list(translate_stream(progress[:-2] + final[1:], mapping))
+        response = events[-1]["response"]
+        self.assertEqual(len(response["output"]), 2)
+        AnthropicBridge.validate_final_schema(request, response)
+        response["output"][-1]["content"][0]["text"] = '{}'
+        with self.assertRaises(ProtocolError):
+            AnthropicBridge.validate_final_schema(request, response)
+
     def test_official_sdk_sends_anthropic_request(self):
         import httpx
 

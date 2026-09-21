@@ -247,6 +247,7 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
                 if spec["type"] == "structured":
                     item = {
                         "type": "message",
+                        "phase": "final_answer",
                         "id": item_id,
                         "role": "assistant",
                         "status": "in_progress",
@@ -346,7 +347,7 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
             usage.update(
                 {k: v for k, v in source.get("usage", {}).items() if v is not None}
             )
-            stop_reason = source.get("delta", {}).get("stop_reason", stop_reason)
+            stop_reason = source.get("delta", {}).get("stop_reason", source.get("stop_reason", stop_reason))
         elif kind == "message_stop":
             if (
                 not started
@@ -400,15 +401,7 @@ class AnthropicBridge:
 
     def __enter__(self) -> Self:
         if self.stream_factory is None:
-            from anthropic import Anthropic, DefaultHttpxClient
-
-            self.client = Anthropic(
-                api_key=self.config.api_key,
-                base_url=self.config.base_url,
-                timeout=self.config.timeout_seconds,
-                max_retries=0,
-                http_client=DefaultHttpxClient(follow_redirects=False, trust_env=False),
-            )
+            self.client = self.open_client()
         bridge = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -438,9 +431,6 @@ class AnthropicBridge:
                         raise ProtocolError(
                             "only streaming Responses requests are supported"
                         )
-                    payload, mapping = translate_request(
-                        request, bridge.config.max_output_tokens
-                    )
                     models = {
                         bridge.config.default_model,
                         bridge.config.writer_model,
@@ -448,7 +438,7 @@ class AnthropicBridge:
                         bridge.config.coder_model,
                     }
                     models.discard("")
-                    if models and payload["model"] not in models:
+                    if models and request.get("model") not in models:
                         raise ProtocolError(
                             "requested model is not configured for this LG provider"
                         )
@@ -457,7 +447,7 @@ class AnthropicBridge:
                     self.send_header("Cache-Control", "no-store")
                     self.end_headers()
                     streaming = True
-                    for event in translate_stream(bridge.events(payload), mapping):
+                    for event in bridge.response_events(request):
                         self.emit(event)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
@@ -466,7 +456,7 @@ class AnthropicBridge:
                     message = (
                         str(exc)
                         if isinstance(exc, ProtocolError)
-                        else "Anthropic upstream request failed; check credentials, endpoint, and provider availability"
+                        else "Provider upstream request failed; check credentials, endpoint, and provider availability"
                     )
                     if streaming:
                         try:
@@ -497,6 +487,48 @@ class AnthropicBridge:
         self.base_url = f"http://127.0.0.1:{self.server.server_port}/v1"
         return self
 
+    def open_client(self):
+        from anthropic import Anthropic, DefaultHttpxClient
+
+        return Anthropic(
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+            timeout=self.config.timeout_seconds,
+            max_retries=0,
+            http_client=DefaultHttpxClient(follow_redirects=False, trust_env=False),
+        )
+
+    def response_events(self, request: dict) -> Iterable[dict]:
+        payload, mapping = translate_request(request, self.config.max_output_tokens)
+        if self.config.provider == "stepfun":
+            # Only documented StepFun Messages fields may cross this boundary.
+            payload.pop("thinking", None)
+            payload.pop("tool_choice", None)
+            if request.get("tool_choice", "auto") != "auto":
+                raise ProtocolError("StepFun Messages does not document forced tool_choice")
+        for event in translate_stream(self.events(payload), mapping):
+            if event["type"] == "response.completed":
+                self.validate_final_schema(request, event["response"])
+            yield event
+
+    @staticmethod
+    def validate_final_schema(request: dict, response: dict) -> None:
+        spec = (request.get("text") or {}).get("format") or {}
+        output = response.get("output", [])
+        if spec.get("type") != "json_schema" or any(i.get("type") in {"function_call", "custom_tool_call"} for i in output):
+            return
+        from jsonschema import Draft202012Validator
+
+        # A schema tool result may follow a separate progress message.
+        finals = [i for i in output if i.get("phase") == "final_answer"]
+        content = "".join(p.get("text", "") for i in (finals or output) if i.get("type") == "message" for p in i.get("content", []) if p.get("type") == "output_text")
+        try:
+            value = json.loads(content)
+        except (ValueError, TypeError):
+            raise ProtocolError("Provider did not return the required structured final result") from None
+        if not Draft202012Validator(spec["schema"]).is_valid(value):
+            raise ProtocolError("Provider final result does not match the requested schema")
+
     def events(self, payload: dict) -> Iterable[dict]:
         if self.stream_factory is not None:
             yield from self.stream_factory(payload)
@@ -517,7 +549,7 @@ class AnthropicBridge:
     def codex_args(self) -> list[str]:
         settings = {
             "model_provider": "lg_anthropic",
-            "model_providers.lg_anthropic.name": "LiteraryGiant / DeepSeek Anthropic",
+            "model_providers.lg_anthropic.name": f"LiteraryGiant / {self.config.provider}",
             "model_providers.lg_anthropic.base_url": self.base_url,
             "model_providers.lg_anthropic.env_key": "LG_BRIDGE_TOKEN",
             "model_providers.lg_anthropic.wire_api": "responses",
@@ -565,7 +597,7 @@ class AnthropicBridge:
             {
                 "slug": name,
                 "display_name": name,
-                "description": "LG writing model via Anthropic Messages",
+                "description": f"LG writing model / {self.config.provider}",
                 "default_reasoning_level": "none",
                 "supported_reasoning_levels": [
                     {"effort": "none", "description": "Standard writing"}

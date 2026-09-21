@@ -4,13 +4,12 @@ import argparse
 import json
 import shlex
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from prompt_toolkit.application import run_in_terminal
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.history import FileHistory
 
 from . import __version__
 from .catalog import load_task_modes
@@ -26,6 +25,8 @@ from .project_store import ProjectStore
 from .run_store import RunStore
 from .story_cli import STORY_COMMANDS, add_story_commands, dispatch_story_command
 from .ui import RunEventRenderer
+from .terminal_input import LiteraryInput
+from .slash_commands import command_catalog
 from .workflow_runner import COMMAND_TO_WORKFLOW, WorkflowExecutionResult, WorkflowRunner
 
 
@@ -57,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(Path(args.cwd).resolve() if args.cwd else None, environment=args.environment)
         config = _apply_runtime_overrides(config, args)
         return _dispatch(args, parser, config)
+    except (KeyboardInterrupt, EOFError):
+        return 130
     except Exception as exc:
         if getattr(args, "debug", False):
             raise
@@ -177,6 +180,8 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
             prompt = sys.stdin.read().strip()
             if prompt:
                 return _run_task(_infer_command(prompt), prompt, config, args)
+        if sys.stdin.isatty():
+            return interactive_loop(config, debug=args.debug)
         registry = DefinitionRegistry(config.workspace)
         print(
             render_dashboard(
@@ -186,8 +191,6 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
                 agents_count=len(registry.agents),
             )
         )
-        if sys.stdin.isatty():
-            return interactive_loop(config, debug=args.debug)
         return 0
 
     if args.command == "init":
@@ -329,48 +332,74 @@ def _print_workflow_result(result: WorkflowExecutionResult, *, json_mode: bool) 
 def interactive_loop(config: LGConfig, *, debug: bool = False) -> int:
     history_path = config.workspace / ".literarygiant" / "history"
     history_path.parent.mkdir(parents=True, exist_ok=True)
-    session: PromptSession[str] = PromptSession(
-        history=FileHistory(str(history_path)),
-        auto_suggest=AutoSuggestFromHistory(),
+    animation_started: float | None = None
+
+    def welcome(width: int) -> str:
+        nonlocal animation_started
+        now = time.monotonic()
+        if animation_started is None:
+            animation_started = now
+        return render_dashboard(
+            config, mode="interactive", skills_count=0, agents_count=0,
+            terminal_width=width, animation_time=now - animation_started,
+        )
+
+    session = LiteraryInput(
+        history_path,
+        welcome=welcome,
+        compact_welcome=lambda width: render_dashboard(
+            config, mode="interactive", skills_count=0, agents_count=0,
+            terminal_width=width, compact=True,
+        ),
+        commands=command_catalog(build_parser()),
     )
-    while True:
-        try:
-            raw = session.prompt("literary> ").strip()
-        except KeyboardInterrupt:
-            continue
-        except EOFError:
-            print()
-            return 0
-        if not raw:
-            continue
+
+    async def handle(raw: str) -> bool:
+        nonlocal config
+        if raw in {"resume", "/resume"}:
+            session.append("Resume a workflow: /run resume <run-id> (not conversation restore)\n")
+            for run in RunStore(config.workspace).list_runs(limit=5):
+                session.append(f"  {run.get('run_id')}  {run.get('status')}  {run.get('command')}\n")
+            return True
         if raw in {"/exit", "exit", "quit"}:
-            return 0
+            return False
+        if raw == "/clear":
+            session.clear()
+            return True
         if raw in {"/help", "help"}:
-            print(
-                "/project /bible /document /chapter /scene /version /review /edit "
-                "/timeline /foreshadowing /export /search /outline /world /character "
-                "/plot /write /check /ref /doctor /status /run /exit"
-            )
-            continue
+            session.append("\n".join(f"{command.text}  {command.description}" for command in command_catalog(build_parser()) if " " not in command.text) + "\n")
+            return True
         if raw.startswith("/"):
             try:
                 nested = shlex.split(raw[1:])
             except ValueError as exc:
-                print(f"Cannot parse command: {exc}")
-                continue
+                session.append(f"Cannot parse command: {exc}\n")
+                return True
+            if nested and nested[0] == "model":
+                nested = ["auth", "model", *nested[1:]] if len(nested) > 1 else ["auth"]
             if not nested or nested[0] not in TOP_LEVEL_COMMANDS:
-                print(f"Unknown command: {raw}")
-                continue
-            main(["-C", str(config.workspace), *( ["--debug"] if debug else [] ), *nested])
-            continue
-        args = argparse.Namespace(
-            json=False,
-            quiet=False,
-            debug=debug,
-            dry_run=False,
-            raw=False,
-        )
-        _run_task(_infer_command(raw), raw, config, args)
+                session.append(f"Unknown command: {raw}\n")
+                return True
+        else:
+            nested = [_infer_command(raw), raw]
+        env_args = ["--environment", config.environment] if config.environment else []
+        argv = ["-C", str(config.workspace), *env_args, *(["--debug"] if debug else []), *nested]
+        if nested[0] in {"auth", "edit", "native"}:
+            def external_command():
+                try:
+                    return main(argv)
+                except SystemExit as exc:
+                    return exc.code
+            result = await run_in_terminal(external_command)
+            if result == 0 and nested[0] == "auth":
+                config = load_config(config.workspace, environment=config.environment)
+                session.model, session.provider = config.model_label, config.provider
+                session.append(f"Active model: {config.provider} / {config.model_label}\n")
+        else:
+            await session.run_command([sys.executable, "-u", "-m", "lg_cli", *argv])
+        return True
+
+    return session.run(handle, config.model_label, config.provider)
 
 
 def print_status(config: LGConfig, *, json_mode: bool = False) -> int:
@@ -423,7 +452,7 @@ def print_status(config: LGConfig, *, json_mode: bool = False) -> int:
     print(f"  workspace: {payload['workspace']}")
     print(f"  initialized: {'yes' if payload['initialized'] else 'no'}")
     print(f"  provider/model: {config.provider} / {config.model_label}")
-    print(f"  api key: {config.api_key_source if config.api_key else 'not configured'}")
+    print(f"  auth: {config.api_key_source if config.credentials_configured else 'not configured'} ({config.auth_mode})")
     print(f"  strategy: {config.execution_strategy}")
     print(f"  memory: {config.memory_path}")
     print(f"  output: {config.output_path}")

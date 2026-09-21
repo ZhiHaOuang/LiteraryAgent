@@ -20,13 +20,13 @@ diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/ch
 +++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
 @@ -429 +429 @@
 -                self.app_event_tx.send(AppEvent::Logout);
-+                self.add_error_message("LG uses API credentials; account login and logout are disabled.".to_string());
++                self.add_error_message("Manage LG credentials with literary auth outside the writing session.".to_string());
 diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
 --- a/codex-rs/tui/src/lib.rs
 +++ b/codex-rs/tui/src/lib.rs
 @@ -1218 +1218,4 @@
 -    let should_show_onboarding = should_show_onboarding(
-+    if requires_openai_auth {
-+        anyhow::bail!("LG requires an API provider; OpenAI account login is disabled.");
++    if should_show_login_screen(login_status, requires_openai_auth) {
++        anyhow::bail!("Configure LG credentials explicitly with literary auth before starting a writing session.");
 +    }
 +    let should_show_onboarding = should_show_onboarding(

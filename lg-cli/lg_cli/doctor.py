@@ -80,17 +80,27 @@ def run_doctor(config: LGConfig, *, probe: bool = False) -> DoctorReport:
     checks.append(
         DoctorCheck(
             "api-key",
-            "PASS" if config.api_key else "WARN",
-            config.api_key_source if config.api_key else "not configured; dry-run remains available",
+            "PASS" if config.credentials_configured else "WARN",
+            config.api_key_source if config.credentials_configured else "not configured; dry-run remains available",
         )
     )
 
-    if config.uses_anthropic:
+    if config.auth_mode == "chatgpt":
+        from .subscription_auth import subscription_status
+        ok, message = subscription_status(config)
+        checks.append(DoctorCheck("subscription-auth", "PASS" if ok else "FAIL", message))
+    elif config.uses_anthropic:
         try:
             import anthropic
             checks.append(DoctorCheck("provider-bridge", "PASS", f"Anthropic SDK {anthropic.__version__}; Messages bridge ready (API not probed)"))
         except ImportError:
             checks.append(DoctorCheck("provider-bridge", "FAIL", "Anthropic SDK missing; reinstall literarygiant-cli with dependencies"))
+    elif config.uses_responses:
+        try:
+            from .provider_transport import ResponsesBridge
+            checks.append(DoctorCheck("provider-bridge", "PASS", "Responses streaming bridge ready (API not probed)"))
+        except ImportError:
+            checks.append(DoctorCheck("provider-bridge", "FAIL", "Responses transport dependency missing; reinstall literarygiant-cli with dependencies"))
     core = inspect_core(runtime_manifest=config.runtime_manifest)
     checks.append(
         DoctorCheck(
@@ -149,7 +159,7 @@ def run_doctor(config: LGConfig, *, probe: bool = False) -> DoctorReport:
 
 
 def probe_provider(config: LGConfig) -> DoctorCheck:
-    if not config.api_key:
+    if not config.credentials_configured:
         return DoctorCheck("provider-probe", "FAIL", "No provider API key configured; no request sent")
     result = CodexExecAdapter().run(
         prompt="This is a connectivity check, not a writing task. Do not call tools. Reply only LG_READY.",

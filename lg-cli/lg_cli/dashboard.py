@@ -1,69 +1,65 @@
 from __future__ import annotations
 
 import io
+import os
 import shutil
+import sys
 
+from rich import box
+from rich.align import Align
 from rich.console import Console, Group
 from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 from . import __version__
 from .config import LGConfig
 from .project_store import ProjectStore
 from .run_store import RunStore
+from .slime_animation import slime_mark
 
 
-def render_dashboard(config: LGConfig, *, mode: str, skills_count: int, agents_count: int) -> str:
-    terminal_width = shutil.get_terminal_size((96, 24)).columns
-    width = max(48, min(104, terminal_width))
+def render_dashboard(config: LGConfig, *, mode: str, skills_count: int, agents_count: int, terminal_width: int | None = None, animation_time: float | None = None, compact: bool = False) -> str:
+    terminal_width = terminal_width or shutil.get_terminal_size((96, 24)).columns
+    width = max(12, min(88, terminal_width))
+    color = sys.stdout.isatty() and "NO_COLOR" not in os.environ and os.environ.get("TERM") != "dumb"
     console = Console(
         record=True,
         file=io.StringIO(),
         width=width,
-        color_system=None,
-        force_terminal=False,
+        color_system="truecolor" if color else None,
+        force_terminal=color,
     )
 
-    heading = Text()
-    heading.append("LITERARYGIANT", style="bold")
-    heading.append("  /  LG\n")
-    heading.append("Literary agent workflow runtime", style="dim")
-
-    facts = Table.grid(expand=True, padding=(0, 1))
-    facts.add_column(style="bold", no_wrap=True)
-    facts.add_column(ratio=1, overflow="fold")
-    facts.add_row("Workspace", str(config.workspace))
-    facts.add_row("Model", f"{config.model_label}  |  {config.provider}")
-    facts.add_row("Runtime", f"{mode}  |  {skills_count} skills  |  {agents_count} subagents")
-    facts.add_row("API", config.api_key_source if config.api_key else "not configured (dry-run available)")
-
-    story = _story_status(config)
-    facts.add_row("Project", story["project"])
-    facts.add_row("Manuscript", story["manuscript"])
-    facts.add_row("Story Bible", story["bible"])
-    facts.add_row("Last run", story["last_run"])
-    facts.add_row("Next", story["next"])
-
-    commands = Table.grid(expand=True, padding=(0, 1))
-    commands.add_column(ratio=1)
-    commands.add_column(ratio=1)
-    commands.add_row("/project info   /bible list", "/chapter list   /scene list")
-    commands.add_row("/scene plan <id>   /scene draft <id>", "/version list <doc>   /review consistency")
-    commands.add_row("/outline   /world   /character", "/plot   /write   /check   /ref")
-    commands.add_row("/export manuscript   /status", "/run list   /run resume <id>")
-
-    content = Group(heading, Text(""), facts, Text(""), Text("Commands", style="bold"), commands)
+    welcome = "What shall we create today?"
+    model = "DeepSeek Flash" if config.provider == "deepseek" and config.model_label == "deepseek-flash" else f"{config.model_label} | {config.provider}"
+    auth = ("ChatGPT subscription configured" if config.auth_mode == "chatgpt" else "API profile configured") if config.credentials_configured else "No model configured | /auth"
+    mark = Text("LG", style="#dc795f") if os.environ.get("TERM") == "dumb" else slime_mark(None if compact else animation_time)
+    if compact:
+        lines = mark.split("\n")
+        occupied = [line for line in lines if line.plain.strip()]
+        if occupied:
+            left = min(len(line.plain) - len(line.plain.lstrip()) for line in occupied)
+            right = max(len(line.plain.rstrip()) for line in occupied)
+            mark = Text("\n").join(line[left:right] for line in occupied)
+    content = Group(
+        Align.center(Text(welcome, style="bold")),
+        Align.center(mark),
+        Text(""),
+        Align.center(Text(model)),
+        Align.center(Text(auth, style="dim")),
+        Align.center(Text(str(config.workspace), style="dim", overflow="fold")),
+    )
     console.print(
         Panel(
             content,
             title=f" LiteraryGiant {__version__} ",
-            subtitle="Type naturally to chat. /exit closes the session.",
-            border_style="cyan",
-            padding=(1, 2),
+            title_align="left",
+            border_style="#dc795f",
+            box=box.ASCII if os.environ.get("TERM") == "dumb" else box.ROUNDED,
+            padding=(1, 1),
         )
     )
-    return console.export_text().rstrip()
+    return console.file.getvalue().rstrip()
 
 
 def _story_status(config: LGConfig) -> dict[str, str]:

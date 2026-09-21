@@ -8,9 +8,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from lg_cli.core_adapter import CodexExecAdapter, discover_core_commands
+from lg_cli.core_adapter import CodexExecAdapter, _exec_args, _engine_error_summary, discover_core_commands
 
 from tests.helpers import make_config
 
@@ -40,6 +40,36 @@ print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "t
 
 
 class AdapterTests(unittest.TestCase):
+    def test_interrupt_stops_the_active_core_process_group(self):
+        adapter = CodexExecAdapter()
+        process = Mock()
+        def interrupted(**kwargs):
+            adapter._active_process = process
+            raise KeyboardInterrupt()
+        with tempfile.TemporaryDirectory() as raw, patch.object(adapter, "_run_candidate", side_effect=interrupted), patch("lg_cli.core_adapter._terminate_process") as terminate, patch("lg_cli.core_adapter._wait_quietly") as wait:
+            with self.assertRaises(KeyboardInterrupt):
+                adapter._run_available(available=[Mock(name="test")], prompt="test", config=make_config(Path(raw)), mode="chat", model_profile=None, output_schema=None, on_event=None, bridge=None)
+            terminate.assert_called_once_with(process)
+            wait.assert_called_once_with(process)
+            self.assertIsNone(adapter._active_process)
+
+    def test_stdout_error_is_not_lost(self):
+        self.assertEqual(_engine_error_summary([
+            {"type": "turn.failed", "error": {"message": "Invalid structured result"}}
+        ]), "Invalid structured result")
+        self.assertEqual(_engine_error_summary([{"type": "turn.started"}]), "")
+
+    def test_headless_stage_has_no_implicit_collaboration(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = _exec_args(config=make_config(Path(raw)), mode="write", model_profile="writer", final_path=Path(raw) / "final", output_schema=None)
+            self.assertIn("features.multi_agent=false", args)
+            self.assertIn("features.multi_agent_v2=false", args)
+            self.assertIn("features.collaboration_modes=false", args)
+            setting = next(arg for arg in args if arg.startswith("model_instructions_file="))
+            instructions = Path(json.loads(setting.split("=", 1)[1])).read_text()
+            self.assertIn("non-interactive workflow", instructions)
+            self.assertIn("Do not ask for approval", instructions)
+
     def test_locked_runtime_fails_closed_on_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)

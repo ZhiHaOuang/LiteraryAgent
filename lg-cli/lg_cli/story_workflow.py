@@ -146,7 +146,7 @@ class StoryWorkflowService:
         emit.emit(EventType.CONTEXT_COMPLETED, "Scene planning context is ready")
         if dry_run:
             return self._plan_only(handle, emit, "scene-plan", prompt, scene.document)
-        if not self.config.api_key:
+        if not self.config.credentials_configured:
             return self._fail(
                 handle,
                 emit,
@@ -212,7 +212,7 @@ class StoryWorkflowService:
         emit.emit(EventType.CONTEXT_COMPLETED, "Scene drafting context is ready")
         if dry_run:
             return self._plan_only(handle, emit, "scene-draft", prompt, scene.document)
-        if not self.config.api_key:
+        if not self.config.credentials_configured:
             return self._fail(
                 handle,
                 emit,
@@ -296,7 +296,7 @@ class StoryWorkflowService:
         emit.emit(EventType.CONTEXT_COMPLETED, f"Revision context is ready for {mode} mode")
         if dry_run:
             return self._plan_only(handle, emit, "revision", prompt, document)
-        if not self.config.api_key:
+        if not self.config.credentials_configured:
             return self._fail(
                 handle,
                 emit,
