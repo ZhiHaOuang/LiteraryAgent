@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-
 DEFAULT_MEMORY_FILES = [
     "STORY_BIBLE.md",
     "CHARACTERS.md",
@@ -58,21 +57,28 @@ def read_memory_context(
     max_total_chars: int = 16000,
     max_file_chars: int = 3000,
 ) -> MemoryContext:
-    root = memory_root or workspace / ".literarygiant" / "memory"
+    from .book_assets import asset_root
+
+    root = memory_root or asset_root(workspace, "memory")
     warnings: list[str] = []
     files: list[MemoryFile] = []
     remaining = max_total_chars
-    if not root.exists():
-        warnings.append(f"Memory root is missing: {root}. Run `lg init` to create it.")
-
     for name in DEFAULT_MEMORY_FILES:
         path = root / name
+        if not path.exists():
+            continue
+        if not path.resolve().is_relative_to(workspace.resolve()):
+            warnings.append(f"Skipped memory outside this project: {name}")
+            continue
         item, remaining = _read_memory_file(path, remaining=remaining, max_file_chars=max_file_chars)
         files.append(item)
 
     learnings = workspace / ".learnings"
     if learnings.exists() and learnings.is_dir() and remaining > 0:
         for path in sorted(learnings.glob("*.md"))[:8]:
+            if not path.resolve().is_relative_to(workspace.resolve()):
+                warnings.append(f"Skipped learning outside this project: {path.name}")
+                continue
             item, remaining = _read_memory_file(path, remaining=remaining, max_file_chars=max_file_chars)
             files.append(item)
             if remaining <= 0:

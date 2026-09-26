@@ -18,7 +18,11 @@ def command_catalog(parser: argparse.ArgumentParser) -> list[SlashCommand]:
         SlashCommand("/clear", "Clear the screen, keep saved history"),
         SlashCommand("/exit", "Close LiteraryGiant"),
         SlashCommand("/model", "Choose a model profile"),
-        SlashCommand("/resume", "List workflow runs to resume"),
+        SlashCommand("/resume", "Restore a conversation in this project"),
+        SlashCommand("/new", "Start a new conversation in this project"),
+        SlashCommand("/open", "Open a book project directory"),
+        SlashCommand("/focus", "Choose the active book project"),
+        SlashCommand("/shelf", "Select the bookshelf root directory"),
     ]
 
     def visit(current, prefix="", depth=0):

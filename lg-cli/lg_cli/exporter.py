@@ -114,7 +114,7 @@ def _render_manuscript(store: ProjectStore, project_name: str, *, include_drafts
             for scene in scenes
             if include_drafts or scene.status in {"accepted", "final"}
         ]
-        chapter_text = chapter.content.strip()
+        chapter_text = chapter.content.strip() if include_drafts or chapter.state in {"accepted", "final"} else ""
         if not chapter_text and not accepted_scenes:
             continue
         count += 1
@@ -185,7 +185,7 @@ def _is_world_fact(fact: StoryFact) -> bool:
 
 def _default_output_path(store: ProjectStore, target: str, format: str) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    return store.root / "output" / "exports" / f"{target}-{stamp}.{format}"
+    return store.workspace / "exports" / f"{target}-{stamp}.{format}"
 
 
 def _atomic_write(path: Path, text: str) -> None:

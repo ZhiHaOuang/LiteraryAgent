@@ -10,11 +10,11 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from .provider_transport import provider_bridge
 from .config import ConfigError, LGConfig
 from .core_adapter import _adapter_env, _bundled_core_pin
 from .paths import product_root
 from .project_store import ProjectStore
+from .provider_transport import provider_bridge
 
 
 def native_binary(manifest_path: Path) -> Path:
@@ -50,6 +50,10 @@ def native_binary(manifest_path: Path) -> Path:
 def writing_args(config: LGConfig) -> list[str]:
     instructions = resources.files("lg_cli.resources").joinpath("native-writing.txt")
     settings = {
+        "project_doc_max_bytes": 0,
+        "skills.bundled.enabled": False,
+        "include_apps_instructions": False,
+        "include_collaboration_mode_instructions": False,
         "model_instructions_file": str(instructions),
         "mcp_servers.lg_writing.command": sys.executable,
         "mcp_servers.lg_writing.args": [

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "entries", "findings"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "entries": {
+      "type": "array", "maxItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key", "label", "analysis", "evidence"],
+        "properties": {
+          "key": {"type": "string", "minLength": 1},
+          "label": {"type": "string", "minLength": 1},
+          "analysis": {"type": "string", "minLength": 1, "maxLength": 1200},
+          "evidence": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"$ref": "#/$defs/evidence"}}
+        }
+      }
+    },
+    "findings": {
+      "type": "array", "maxItems": 10,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["kind", "explanation", "evidence", "fact_id", "fact_quote"],
+        "properties": {
+          "kind": {"enum": ["canon_conflict", "style", "question"]},
+          "explanation": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "evidence": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"$ref": "#/$defs/evidence"}},
+          "fact_id": {"type": ["integer", "null"]},
+          "fact_quote": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["document_id", "version_id", "quote"],
+      "properties": {
+        "document_id": {"type": "integer"},
+        "version_id": {"type": "integer"},
+        "quote": {"type": "string", "minLength": 4, "maxLength": 1000}
+      }
+    }
+  }
+}

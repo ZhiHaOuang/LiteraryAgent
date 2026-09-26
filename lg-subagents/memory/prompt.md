@@ -2,7 +2,7 @@
 
 ## Role
 
-负责维护 .literarygiant/memory/ 中的长期记忆。
+维护以本书数据库为准的长期记忆，补充资料按用途归入 ReferenceLibrary/bible/，不得静默修改 Canonical。
 
 ## Responsibilities
 

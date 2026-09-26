@@ -24,12 +24,12 @@ coder = ""
 critic = ""
 
 [paths]
-memory = ".literarygiant/memory"
-output = ".literarygiant/output"
+memory = "ReferenceLibrary/bible"
+output = "ReferenceLibrary/drafts"
 reference = "ReferenceLibrary"
 
 [knowledge]
-# Set library to an explicit Library directory when automatic discovery is not suitable.
+# Discovery stays in this book. External libraries require agent.toml opt-in.
 library = ""
 top_k = 6
 allow_raw_reference = false
@@ -42,6 +42,23 @@ enable_reference = true
 timeout_seconds = 300
 max_stage_context_chars = 24000
 """
+
+PROJECT_AGENT_CONFIG = '''# Book-local agent context. Never store API keys here.
+[context]
+instructions = "" # Writing direction and rules for this book only.
+conversation_chars = 10000
+allow_external_reference = false # Explicit opt-in for shared libraries.
+'''
+
+
+def ensure_agent_config(workspace: Path) -> None:
+    path = workspace / ".literarygiant" / "agent.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as stream:
+            stream.write(PROJECT_AGENT_CONFIG)
+    except FileExistsError:
+        pass
 
 
 class ConfigError(ValueError):
@@ -80,6 +97,9 @@ class LGConfig:
     profile_name: str | None = None
     auth_mode: str = "api_key"
     codex_auth_home: Path | None = None
+    project_instructions: str = ""
+    conversation_chars: int = 10000
+    allow_external_reference: bool = False
 
     @property
     def credentials_configured(self) -> bool:
@@ -147,9 +167,18 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
             loaded.append(path)
 
     model = _section(data, "model")
-    paths = _section(data, "paths")
-    knowledge = _section(data, "knowledge")
-    agent = _section(data, "agent")
+    # Story behavior is book-owned. Global configuration supplies model/runtime only.
+    local_path = project_config_path(root)
+    local = _read_toml(local_path) if local_path.exists() else {}
+    paths = _section(local, "paths")
+    knowledge = _section(local, "knowledge")
+    agent = _section(local, "agent")
+    agent.setdefault("timeout_seconds", _section(data, "agent").get("timeout_seconds", 300))
+    policy_path = root / ".literarygiant" / "agent.toml"
+    policy = _section(_read_toml(policy_path), "context") if policy_path.exists() else {}
+    if policy_path.exists():
+        loaded.append(policy_path)
+    external = _boolean(policy.get("allow_external_reference"), False)
     runtime = _section(data, "runtime")
 
     # An explicitly selected space must not inherit production model credentials.
@@ -199,6 +228,18 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
     coder_model = _string(model.get("coder"))
     critic_model = _string(model.get("critic"))
     library_raw = _string(knowledge.get("library"))
+    reference = _workspace_path(root, _string(paths.get("reference")) or "ReferenceLibrary").resolve()
+    library = _workspace_path(root, library_raw).resolve() if library_raw else None
+    if not external and any(path and not path.is_relative_to(root) for path in (reference, library)):
+        raise ConfigError("External references require context.allow_external_reference=true in this book's .literarygiant/agent.toml")
+
+    from .book_assets import asset_root, organized
+
+    def local_asset(kind: str) -> Path:
+        raw = _string(paths.get(kind))
+        if not raw or (raw == f".literarygiant/{kind}" and organized(root)):
+            return asset_root(root, kind)
+        return _project_asset_path(root, raw)
 
     return LGConfig(
         workspace=root,
@@ -207,10 +248,13 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
         writer_model=writer_model,
         coder_model=coder_model,
         critic_model=critic_model,
-        memory_path=_workspace_path(root, _string(paths.get("memory")) or ".literarygiant/memory"),
-        output_path=_workspace_path(root, _string(paths.get("output")) or ".literarygiant/output"),
-        reference_path=_workspace_path(root, _string(paths.get("reference")) or "ReferenceLibrary"),
-        library_path=_workspace_path(root, library_raw) if library_raw else None,
+        memory_path=local_asset("memory"),
+        output_path=local_asset("output"),
+        reference_path=reference,
+        library_path=library,
+        project_instructions=_string(policy.get("instructions")),
+        conversation_chars=_bounded_int(policy.get("conversation_chars"), 10000, 0, 100000),
+        allow_external_reference=external,
         knowledge_top_k=_bounded_int(knowledge.get("top_k"), default=6, minimum=1, maximum=30),
         allow_raw_reference=_boolean(knowledge.get("allow_raw_reference"), False),
         default_mode=_string(agent.get("default_mode")) or "chat",
@@ -228,7 +272,10 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
         loaded_files=tuple(loaded),
         warnings=tuple(warnings),
         base_url=base_url.rstrip("/"),
-        max_output_tokens=_bounded_int(model.get("max_output_tokens"), 8192, 1, 65536),
+        max_output_tokens=_bounded_int(
+            _section(local, "model").get("max_output_tokens", model.get("max_output_tokens")),
+            8192, 1, 65536,
+        ),
         runtime_manifest=_workspace_path(root, runtime["manifest"]) if _string(runtime.get("manifest")) else None,
         protocol=protocol,
         environment=environment,
@@ -236,6 +283,13 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
         auth_mode=profile.get("auth_mode", "api_key") if profile else "api_key",
         codex_auth_home=environment_dir(environment or "sandbox") / "codex-auth" / active if profile and profile.get("auth_mode") == "chatgpt" else None,
     )
+
+
+def _project_asset_path(root: Path, raw: str) -> Path:
+    path = _workspace_path(root, raw).resolve()
+    if not path.is_relative_to(root):
+        raise ConfigError("Writing memory/output paths must stay inside the loaded project directory")
+    return path
 
 
 def _read_toml(path: Path) -> dict[str, Any]:

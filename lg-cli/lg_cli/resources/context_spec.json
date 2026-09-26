@@ -5,7 +5,7 @@
     "TaciturnRaw",
     "Bridges",
     "AbstractLibrary",
-    ".literarygiant/memory",
+    "ReferenceLibrary/bible",
     ".learnings"
   ],
   "degraded_mode": "Missing roots produce warnings, not fatal errors.",

@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from itertools import pairwise
 
 from rich.text import Text
-
-from . import slime_animation_legacy as legacy
 
 WIDTH, HEIGHT = 30, 22  # Two square pixels per terminal row; ground meets the bottom.
 FRAME_INTERVAL = 1 / 60
@@ -64,13 +61,6 @@ _CROWN_PIXELS = frozenset(
 _BODY_SPANS = ((4, 11), (3, 12), (2, 13), (1, 14), (0, 15), (0, 15), (1, 14), (2, 13))
 
 
-def animation_mode() -> str:
-    mode = os.environ.get("LG_ANIMATION", "smooth")
-    if mode not in {"smooth", "legacy"}:
-        raise ValueError("LG_ANIMATION must be smooth or legacy")
-    return mode
-
-
 @lru_cache(maxsize=1)
 def _tangents() -> tuple[Pose, ...]:
     intervals = [b[0] - a[0] for a, b in pairwise(_KEYS)]
@@ -97,13 +87,7 @@ def _tangents() -> tuple[Pose, ...]:
     )
 
 
-def pose_at(seconds: float, *, mode: str | None = None) -> Pose:
-    selected = mode or animation_mode()
-    if selected == "legacy":
-        original = legacy.pose_at(seconds)
-        return Pose(*(getattr(original, field) for field in Pose.__dataclass_fields__))
-    if selected != "smooth":
-        raise ValueError("Unknown animation mode")
+def pose_at(seconds: float) -> Pose:
     t = max(0.0, seconds) % DURATION
     tangents = _tangents()
     for i, ((start, a), (end, b)) in enumerate(pairwise(_KEYS)):
@@ -178,14 +162,12 @@ def face_pixels(pose: Pose) -> tuple[tuple[int, int], ...]:
 
 
 def frame_pixels(index: int) -> tuple[tuple[str | None, ...], ...]:
-    return _frame_pixels(index % FRAME_COUNT, animation_mode())
+    return _frame_pixels(index % FRAME_COUNT)
 
 
-@lru_cache(maxsize=FRAME_COUNT * 2)
-def _frame_pixels(index: int, mode: str) -> tuple[tuple[str | None, ...], ...]:
-    if mode == "legacy":
-        return legacy.frame_pixels(index)
-    pose = pose_at(index * FRAME_INTERVAL, mode=mode)
+@lru_cache(maxsize=FRAME_COUNT)
+def _frame_pixels(index: int) -> tuple[tuple[str | None, ...], ...]:
+    pose = pose_at(index * FRAME_INTERVAL)
     pixels: list[list[str | None]] = [[None] * WIDTH for _ in range(HEIGHT)]
     height = round(pose.height)
     top = round(pose.bottom) - height
@@ -204,9 +186,9 @@ def _frame_pixels(index: int, mode: str) -> tuple[tuple[str | None, ...], ...]:
     return tuple(tuple(row) for row in pixels)
 
 
-@lru_cache(maxsize=FRAME_COUNT * 2)
-def _frame_text(index: int, mode: str) -> Text:
-    pixels = _frame_pixels(index, mode)
+@lru_cache(maxsize=FRAME_COUNT)
+def _frame_text(index: int) -> Text:
+    pixels = _frame_pixels(index)
     result = Text()
     for row in range(0, HEIGHT, 2):
         for top, bottom in zip(pixels[row], pixels[row + 1]):
@@ -222,10 +204,9 @@ def _frame_text(index: int, mode: str) -> Text:
 
 
 def prepare_frames() -> None:
-    mode = animation_mode()
     for index in range(FRAME_COUNT):
-        _frame_text(index, mode)
+        _frame_text(index)
 
 
 def slime_mark(seconds: float | None = None) -> Text:
-    return _frame_text(frame_index(seconds), animation_mode()).copy()
+    return _frame_text(frame_index(seconds)).copy()

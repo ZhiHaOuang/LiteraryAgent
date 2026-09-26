@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import uuid
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -437,7 +438,9 @@ class ProjectStore:
             )
             self._replace_tags(connection, "document", document_id, normalized_tags)
             self._refresh_document_search(connection, document_id)
-            return self._get_document(connection, document_id)
+            document = self._get_document(connection, document_id)
+        self._sync_chapter_file(document)
+        return document
 
     def get_document(self, reference: str | int, *, kind: str | None = None) -> DocumentRecord:
         self._require_initialized()
@@ -504,7 +507,9 @@ class ProjectStore:
             if tags is not None:
                 self._replace_tags(connection, "document", document_id, _tags(tags))
             self._refresh_document_search(connection, document_id)
-            return self._get_document(connection, document_id)
+            document = self._get_document(connection, document_id)
+        self._sync_chapter_file(document)
+        return document
 
     def create_version(
         self,
@@ -530,7 +535,10 @@ class ProjectStore:
             )
             if activate:
                 self._activate_version(connection, document_id, version_id, state=normalized_state)
-            return self._get_version(connection, version_id)
+            version = self._get_version(connection, version_id)
+        if activate:
+            self._sync_chapter_file(self.get_document(document_id))
+        return version
 
     def edit_active_document(
         self, reference: str | int, *, content: str, expected_version_id: int, reason: str
@@ -548,7 +556,39 @@ class ProjectStore:
                 reason=reason or "Author-directed edit", metadata={"previous_version_id": expected_version_id},
             )
             self._activate_version(connection, document_id, version_id, state=document.state)
-            return self._get_version(connection, version_id)
+            version = self._get_version(connection, version_id)
+        self._sync_chapter_file(self.get_document(document_id))
+        return version
+
+    def edit_chapter_documents(
+        self, reference: str | int, *, expected_versions: dict[int, int | None], contents: dict[int, str],
+        reason: str = "Imported author edits from chapter file", origin: str = "chapter-file",
+    ) -> list[DocumentVersion]:
+        """Import an author's chapter edits atomically against the exported snapshot."""
+        self._require_initialized()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            chapter_id = self._resolve_document_id(connection, reference, kind="chapter")
+            rows = connection.execute(
+                "SELECT id, active_version_id FROM documents WHERE id = ? OR (parent_id = ? AND kind = 'scene')",
+                (chapter_id, chapter_id),
+            ).fetchall()
+            current = {row["id"]: row["active_version_id"] for row in rows}
+            if current != expected_versions or set(contents) != set(current):
+                raise ProjectStoreError("Chapter changed in the database; compare and reconcile before importing.")
+            revisions: list[DocumentVersion] = []
+            for document_id, content in contents.items():
+                document = self._get_document(connection, document_id)
+                if content == document.content:
+                    continue
+                version_id = self._insert_version(
+                    connection, document_id=document_id, content=content, state=document.state,
+                    reason=reason,
+                    metadata={"previous_version_id": document.active_version_id, "origin": origin},
+                )
+                self._activate_version(connection, document_id, version_id, state=document.state)
+                revisions.append(self._get_version(connection, version_id))
+            return revisions
 
     def list_versions(self, reference: str | int, *, limit: int = 100) -> list[DocumentVersion]:
         self._require_initialized()
@@ -580,11 +620,16 @@ class ProjectStore:
     ) -> DocumentRecord:
         self._require_initialized()
         target_state = "final" if final else "accepted"
+        from .supervision import candidate_reports, chapter_for, publish_accepted_reports
+
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             document_id = self._resolve_document_id(connection, reference)
+            source_document = self._get_document(connection, document_id)
             version_record = self._resolve_version(connection, document_id, version)
             if version_record.state == "rejected":
                 raise ProjectStoreError("A rejected version cannot be accepted; restore it as a new candidate first.")
+            reports = candidate_reports(self, source_document, version_record, final=final)
             self._activate_version(connection, document_id, version_record.id, state=target_state)
             if self._document_kind(connection, document_id) == "scene":
                 scene_state = "final" if final else "accepted"
@@ -593,7 +638,31 @@ class ProjectStore:
                     (scene_state, _utc_now(), document_id),
                 )
             self._refresh_document_search(connection, document_id)
-            return self._get_document(connection, document_id)
+            document = self._get_document(connection, document_id)
+        if reports:
+            try:
+                publish_accepted_reports(self, chapter_for(self, document), reports)
+            except (OSError, ValueError) as exc:
+                warnings.warn(f"Version accepted, but analysis publication needs attention: {exc}", UserWarning, stacklevel=2)
+        self._sync_chapter_file(document)
+        return document
+
+    def _sync_chapter_file(self, document: DocumentRecord) -> None:
+        if document.kind not in {"chapter", "scene"}:
+            return
+        chapter_id = document.id if document.kind == "chapter" else document.parent_id
+        if chapter_id is None:
+            return
+        from .chapter_sync import ChapterSync
+
+        try:
+            chapter = self.get_document(chapter_id, kind="chapter")
+            ChapterSync(self).export(chapter.slug)
+        except (OSError, ValueError) as exc:
+            warnings.warn(
+                f"Database saved; chapter file was preserved and needs attention: {exc}",
+                UserWarning, stacklevel=2,
+            )
 
     def reject_version(self, reference: str | int, version: int) -> DocumentVersion:
         self._require_initialized()
@@ -1105,6 +1174,38 @@ class ProjectStore:
             )
             return self._get_timeline_entry(connection, int(cursor.lastrowid))
 
+    def update_timeline_entry(
+        self,
+        entry_id: int,
+        *,
+        label: str | None = None,
+        event: str | None = None,
+        sort_key: str | None = None,
+        state: str | None = None,
+        tags: Iterable[str] | None = None,
+        source_document: str | int | None = None,
+    ) -> TimelineEntry:
+        self._require_initialized()
+        with self._connection() as connection:
+            entry = self._get_timeline_entry(connection, entry_id)
+            connection.execute(
+                """UPDATE timeline_entries
+                   SET label = ?, event = ?, sort_key = ?, state = ?, tags_json = ?,
+                       source_document_id = ?, updated_at = ? WHERE id = ?""",
+                (
+                    _required_text("Timeline label", label) if label is not None else entry.label,
+                    _required_text("Timeline event", event) if event is not None else entry.event,
+                    sort_key.strip() if sort_key is not None else entry.sort_key,
+                    _required_choice("timeline state", state, FACT_STATES) if state is not None else entry.state,
+                    _json(list(_tags(tags))) if tags is not None else _json(list(entry.tags)),
+                    self._resolve_document_id(connection, source_document)
+                    if source_document is not None else entry.source_document_id,
+                    _utc_now(),
+                    entry_id,
+                ),
+            )
+            return self._get_timeline_entry(connection, entry_id)
+
     def list_timeline(self, *, state: str | None = None, limit: int = 500) -> list[TimelineEntry]:
         self._require_initialized()
         with self._connection() as connection:
@@ -1286,16 +1387,41 @@ class ProjectStore:
         joined_query = " ".join(term for term in terms if term.strip())
         relevant_tags = selected_scene.characters if selected_scene is not None else ()
         canonical = self.list_facts(state="canonical", tags=relevant_tags, limit=max_facts)
-        if len(canonical) < min(max_facts, 20):
-            canonical = self.list_facts(state="canonical", query=joined_query, limit=max_facts)
+        if len(canonical) < max_facts:
+            seen_facts = {fact.id for fact in canonical}
+            canonical.extend(fact for fact in self.list_facts(state="canonical", limit=max_facts)
+                             if fact.id not in seen_facts)
+            canonical = canonical[:max_facts]
         ideas = self.list_facts(state="idea", query=joined_query, tags=relevant_tags, limit=30)
-        documents = self.search_documents(joined_query, tags=relevant_tags, limit=max_documents)
+        # Select nonempty active text in SQL: future chapter containers must not
+        # evict the design bible, and context assembly must not load the whole novel.
+        selection = """
+            SELECT d.id FROM documents d JOIN document_versions v ON v.id = d.active_version_id
+            WHERE TRIM(v.content) != '' AND d.state NOT IN ('archived', 'rejected')
+        """
+        documents: list[DocumentRecord] = []
+        with self._connection() as connection:
+            for kind in ("outline", "world", "character", "style"):
+                row = connection.execute(selection + " AND d.kind = ? ORDER BY d.updated_at DESC, d.id DESC LIMIT 1", (kind,)).fetchone()
+                if row:
+                    documents.append(self._get_document(connection, int(row["id"])))
+            rows = connection.execute(selection + " ORDER BY d.updated_at DESC, d.id DESC LIMIT ?", (max_documents,)).fetchall()
+            recent = [self._get_document(connection, int(row["id"])) for row in rows]
+        known = {document.id for document in documents}
+        matches = self.search_documents(joined_query, tags=relevant_tags, limit=max_documents)
+        for document in [*matches, *recent]:
+            if document.id not in known and document.content.strip() and document.state not in {"archived", "rejected"}:
+                documents.append(document)
+                known.add(document.id)
+        documents = documents[:max_documents]
         if selected_scene is not None:
             with self._connection() as connection:
                 siblings = self._scene_siblings_before(connection, selected_scene)
-            seen = {document.id for document in documents}
+            seen = {document.id for document in siblings}
             documents = [*siblings, *[document for document in documents if document.id not in seen]][:max_documents]
-        open_threads = self.list_foreshadowing(state="open", limit=40)
+        unresolved_threads = self.list_foreshadowing(state="open", limit=40)
+        if len(unresolved_threads) < 40:
+            unresolved_threads.extend(self.list_foreshadowing(state="planned", limit=40 - len(unresolved_threads)))
         timeline = self.list_timeline(state="canonical", limit=80)
         return {
             "project": self.project_info(),
@@ -1303,23 +1429,28 @@ class ProjectStore:
             "canonical_facts": canonical,
             "ideas": ideas,
             "documents": documents,
-            "foreshadowing": open_threads,
+            "foreshadowing": unresolved_threads,
             "timeline": timeline,
         }
 
     def _scene_siblings_before(self, connection: sqlite3.Connection, scene: SceneCard) -> list[DocumentRecord]:
         if scene.chapter_id is None:
             return []
+        chapter = self._get_document(connection, scene.chapter_id)
         rows = connection.execute(
             """
             SELECT d.id
             FROM documents d
             JOIN scene_cards s ON s.document_id = d.id
-            WHERE s.chapter_id = ? AND (d.sequence < ? OR (d.sequence = ? AND d.id < ?))
-            ORDER BY d.sequence DESC, d.id DESC
+            JOIN documents c ON c.id = s.chapter_id
+            LEFT JOIN document_versions v ON v.id = d.active_version_id
+            WHERE (s.chapter_id = ? AND (d.sequence < ? OR (d.sequence = ? AND d.id < ?)))
+               OR (c.sequence < ? AND d.state IN ('accepted', 'final') AND TRIM(v.content) != '')
+            ORDER BY c.sequence DESC, d.sequence DESC, d.id DESC
             LIMIT 2
             """,
-            (scene.chapter_id, scene.document.sequence or 999999, scene.document.sequence or 999999, scene.document.id),
+            (scene.chapter_id, scene.document.sequence or 999999, scene.document.sequence or 999999,
+             scene.document.id, chapter.sequence),
         ).fetchall()
         return [self._get_document(connection, int(row["id"])) for row in reversed(rows)]
 

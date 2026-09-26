@@ -1,6 +1,6 @@
 ---
 name: memory-updater
-description: "Update .literarygiant/memory for characters, places, setting, plot, timeline, relationships, foreshadowing, and error records. Use when after new outline, world, character, plot, chapter, check, or revision output creates durable story facts."
+description: "Propose source-linked database memory updates after writing or review creates durable story facts; classify supplemental notes in ReferenceLibrary/bible without silently changing Canonical facts."
 ---
 
 # Memory Updater
@@ -11,6 +11,9 @@ description: "Update .literarygiant/memory for characters, places, setting, plot
 2. Confirm the concrete reader or artifact outcome before expanding details.
 3. Apply this instruction: Only promote durable facts. Keep speculative ideas separate from established story bible facts. Do not overwrite existing facts silently.
 4. Return the requested outputs with explicit assumptions and unresolved risks.
+   LG persists the structured result immediately in its classified book directory.
+   Proposed file references belong under ReferenceLibrary/bible, never runtime
+   output or conversation folders. Notes and proposals are not authoritative canon.
 5. Run the quality gate before handing work to the next agent.
 
 ## Inputs

@@ -10,6 +10,22 @@ from lg_cli.config import ConfigError, load_config
 
 
 class ConfigTests(unittest.TestCase):
+    def test_book_output_budget_overrides_global_default_without_changing_provider(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            home = root / "home"
+            book = root / "book"
+            (home / ".literarygiant").mkdir(parents=True)
+            (book / ".literarygiant").mkdir(parents=True)
+            (home / ".literarygiant/config.toml").write_text(
+                '[model]\nprovider="stepfun"\ndefault="step-3.7-flash"\nmax_output_tokens=8192\n', encoding="utf-8")
+            (book / ".literarygiant/config.toml").write_text(
+                '[model]\nmax_output_tokens=32768\n', encoding="utf-8")
+            with patch.dict(os.environ, {"HOME": str(home)}, clear=True):
+                config = load_config(book)
+            self.assertEqual(config.max_output_tokens, 32768)
+            self.assertEqual(config.provider, "stepfun")
+
     def test_deepseek_credentials_are_provider_scoped(self):
         with tempfile.TemporaryDirectory() as raw:
             with patch.dict(os.environ, {"HOME": raw, "LG_PROVIDER": "deepseek-anthropic", "OPENAI_API_KEY": "wrong-provider"}, clear=True):

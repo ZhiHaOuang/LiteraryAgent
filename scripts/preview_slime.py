@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import struct
 import zlib
 from pathlib import Path
@@ -104,10 +103,7 @@ def png_sheet() -> bytes:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
-    parser.add_argument("--mode", choices=("smooth", "legacy"))
     args = parser.parse_args()
-    if args.mode:
-        os.environ["LG_ANIMATION"] = args.mode
     args.output.mkdir(parents=True, exist_ok=True)
     for name, content in (
         ("slime-preview.gif", gif_data()),

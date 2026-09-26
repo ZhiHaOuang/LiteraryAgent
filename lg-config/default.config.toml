@@ -8,8 +8,8 @@ coder = ""
 critic = ""
 
 [paths]
-memory = ".literarygiant/memory"
-output = ".literarygiant/output"
+memory = "ReferenceLibrary/bible"
+output = "ReferenceLibrary/drafts"
 reference = "ReferenceLibrary"
 
 [knowledge]

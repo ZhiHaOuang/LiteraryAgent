@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import fcntl
-import getpass
 import json
 import os
 import re
 import stat
 import sys
 import tempfile
-import warnings
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -151,7 +149,7 @@ def add_auth_parser(sub) -> None:
 
 def dispatch_auth(args, environment: str) -> int:
     if args.auth_command == "login":
-        from .subscription_auth import login_subscription
+        from .auth_ui import _login_subscription as login_subscription
         return login_subscription(environment, args.name, Path(args.cwd).resolve() if args.cwd else Path.cwd(), model=args.model, browser=args.browser)
     if args.auth_command == "status":
         from .config import load_config
@@ -184,7 +182,7 @@ def dispatch_auth(args, environment: str) -> int:
             if selected == "codex":
                 if args.base_url:
                     raise ValueError("Official subscription login does not accept a proxy Base URL")
-                from .subscription_auth import login_subscription
+                from .auth_ui import _login_subscription as login_subscription
                 return login_subscription(environment, args.name, Path(args.cwd).resolve() if args.cwd else Path.cwd(), model=args.model or "")
             args.provider = selected
         if args.name in {"gpt", "chatgpt", "cpa"} and not args.provider:
@@ -196,9 +194,15 @@ def dispatch_auth(args, environment: str) -> int:
         model = args.model or (previous.get("model") if provider == previous.get("provider") else None) or PROVIDERS[provider].default_model
         base_url = args.base_url or (previous.get("base_url") if provider == previous.get("provider") else None) or PROVIDERS[provider].base_url
         if not model and sys.stdin.isatty() and not args.key_env:
-            model = input(f"{PROVIDERS[provider].name} model ID: ").strip()
+            from .auth_ui import input_dialog
+            model = input_dialog(title=PROVIDERS[provider].name, text="Model ID").run()
+            if model is None:
+                return 0
         if not base_url and sys.stdin.isatty() and not args.key_env:
-            base_url = input("Provider Base URL: ").strip()
+            from .auth_ui import input_dialog
+            base_url = input_dialog(title=PROVIDERS[provider].name, text="Base URL").run()
+            if base_url is None:
+                return 0
         settings = profile_settings(provider, model, base_url)
         if previous and not args.replace:
             raise ValueError("Profile exists; use --replace to explicitly update its key")
@@ -208,9 +212,10 @@ def dispatch_auth(args, environment: str) -> int:
         else:
             if not sys.stdin.isatty():
                 raise ValueError("Hidden key input needs a terminal; alternatively use --key-env VARIABLE")
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", getpass.GetPassWarning)
-                key = getpass.getpass(f"{PROVIDERS[provider].name} API key (hidden): ")
+            from .auth_ui import input_dialog
+            key = input_dialog(title=PROVIDERS[provider].name, text="API key", password=True).run()
+            if key is None:
+                return 0
         save_profile(environment, args.name, key, replace=args.replace, provider=provider, model=model, base_url=base_url)
         print(f"Saved and activated: {environment}/{args.name}")
     elif args.auth_command == "use":
@@ -225,9 +230,11 @@ def dispatch_auth(args, environment: str) -> int:
     else:
         data = read_profiles(environment)
         print(f"LG environment: {environment}")
+        from .auth_ui import profile_label
+
         for name in sorted(data["profiles"]):
             profile = data["profiles"][name]
-            print(f"{'*' if name == data['active'] else ' '} {name} | {profile['provider']} | {profile['model']} | {profile['protocol']} | {profile['base_url']}")
+            print(profile_label(name, profile, data))
         if not data["profiles"]:
             print("No saved keys. Run auth add NAME.")
     return 0

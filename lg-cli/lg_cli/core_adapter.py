@@ -617,6 +617,10 @@ def _exec_args(
     # LG already schedules these stages; an unattended exec must not start a
     # second collaboration workflow with unconfigured models or interactive input.
     stage_settings = {
+        "project_doc_max_bytes": 0,
+        "skills.bundled.enabled": False,
+        "include_apps_instructions": False,
+        "include_collaboration_mode_instructions": False,
         "model_instructions_file": str(resources.files("lg_cli.resources").joinpath("workflow-stage.txt")),
         "features.multi_agent": False,
         "features.multi_agent_v2": False,

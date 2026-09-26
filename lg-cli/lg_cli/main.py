@@ -8,27 +8,33 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+
 from prompt_toolkit.application import run_in_terminal
 
-
 from . import __version__
+from .auth_ui import run_auth
+from .bookshelf import Bookshelf, remember_location, restore_location
 from .catalog import load_task_modes
-from .config import LGConfig, load_config
+from .config import LGConfig, ensure_agent_config, load_config
+from .conversation_store import ConversationStore
 from .core_adapter import inspect_core
 from .credentials import add_auth_parser, dispatch_auth
-from .dashboard import render_dashboard
+from .dashboard import render_dashboard, render_status_bar
 from .definitions import DefinitionRegistry
 from .doctor import run_doctor
 from .init_project import init_workspace
 from .knowledge import KnowledgeGateway
-from .project_store import ProjectStore
+from .project_store import ProjectRegistry, ProjectStore
 from .run_store import RunStore
-from .story_cli import STORY_COMMANDS, add_story_commands, dispatch_story_command
-from .ui import RunEventRenderer
-from .terminal_input import LiteraryInput
 from .slash_commands import command_catalog
-from .workflow_runner import COMMAND_TO_WORKFLOW, WorkflowExecutionResult, WorkflowRunner
-
+from .story_cli import STORY_COMMANDS, add_story_commands, dispatch_story_command
+from .terminal_input import LiteraryInput
+from .ui import RunEventRenderer
+from .workflow_runner import (
+    COMMAND_TO_WORKFLOW,
+    WorkflowExecutionResult,
+    WorkflowRunner,
+)
 
 TASK_COMMANDS = tuple(COMMAND_TO_WORKFLOW)
 TOP_LEVEL_COMMANDS = {
@@ -43,6 +49,8 @@ TOP_LEVEL_COMMANDS = {
     "run",
     "native",
     "auth",
+    "newbook",
+    "novel",
 }
 
 
@@ -55,7 +63,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "auth":
             return dispatch_auth(args, args.environment or "sandbox")
-        config = load_config(Path(args.cwd).resolve() if args.cwd else None, environment=args.environment)
+        if args.shelf and args.cwd:
+            raise ValueError("Use either --shelf or -C, not both")
+        root = Path(args.shelf or args.cwd).expanduser().resolve() if args.shelf or args.cwd else Path.cwd()
+        if args.command in {None, "novel"} and sys.stdin.isatty() and not args.shelf and not args.cwd:
+            root = restore_location(root, args.environment)
+        if args.shelf:
+            Bookshelf(root).initialize()
+        if args.command == "project" and args.project_command == "organize":
+            from .book_assets import organize_book, print_plan
+
+            print_plan(organize_book(root, apply=args.apply), json_mode=args.json)
+            return 0
+        config = load_config(root, environment=args.environment)
         config = _apply_runtime_overrides(config, args)
         return _dispatch(args, parser, config)
     except (KeyboardInterrupt, EOFError):
@@ -78,13 +98,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"LiteraryGiant {__version__}")
     parser.add_argument("-C", "--cwd", help="Workspace root. Defaults to current directory.")
+    parser.add_argument("--shelf", help="Bookshelf root containing independent book directories.")
     parser.add_argument("--environment", help="Isolated LG credential/config space; ignores inherited model keys.")
     parser.add_argument("--debug", action="store_true", help="Show tracebacks and model events.")
+    parser.add_argument("--conversation", help="Continue a conversation ID belonging to this workspace.")
     _add_runtime_options(parser)
     sub = parser.add_subparsers(dest="command")
     add_auth_parser(sub)
 
     sub.add_parser("init", help="Initialize the LG project workspace.")
+    newbook = sub.add_parser("newbook", help="Create a book inside the selected bookshelf.")
+    newbook.add_argument("name")
+    novel = sub.add_parser("novel", help="Read and edit chapters with save confirmation.")
+    novel.add_argument("chapter", nargs="?", help="Optional chapter slug.")
     native = sub.add_parser("native", help="Launch the separately built LG native terminal.")
     native.add_argument("prompt", nargs="*")
     native.add_argument("--manifest", help="Path to the verified native-runtime.json.")
@@ -112,6 +138,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_resume = run_sub.add_parser("resume", help="Resume a failed or interrupted run.")
     run_resume.add_argument("run_id")
     _add_runtime_options(run_resume, suppress_defaults=True)
+    adopt = run_sub.add_parser("adopt", help="Import a completed run as a versioned book document.")
+    adopt.add_argument("run_id")
+    adopt.add_argument("slug")
+    adopt.add_argument("--kind", choices=("outline", "world", "character", "note", "research", "style", "chapter", "scene"), default="note")
+    adopt.add_argument("--title", required=True)
+    adopt.add_argument("--accept", action="store_true", help="Explicitly activate the imported version.")
+    _add_json_option(adopt)
 
     add_story_commands(sub)
 
@@ -172,6 +205,21 @@ def _add_json_option(parser: argparse.ArgumentParser) -> None:
 
 
 def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config: LGConfig) -> int:
+    shelf = Bookshelf.discover(config.workspace)
+    if args.command == "novel":
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise ValueError("The novel editor requires an interactive terminal")
+        return interactive_loop(config, initial_command="/novel" + (" " + shlex.quote(args.chapter) if args.chapter else ""))
+    if args.command == "newbook":
+        if shelf is None:
+            raise ValueError("Select a bookshelf with --shelf /path/to/books first")
+        print(f"Created book: {shelf.create(args.name)}")
+        return 0
+    if shelf and shelf.root == config.workspace and args.command not in {
+        None, "status", "doctor", "skills", "agents", "modes"
+    }:
+        if args.command != "project" or args.project_command not in {"create", "list"}:
+            raise ValueError("Select a book first: /newbook or /focus; use -C /path/to/book for CLI tasks")
     if args.command == "native":
         from .native import launch_native
         return launch_native(config, prompt=" ".join(args.prompt), manifest=args.manifest)
@@ -181,7 +229,7 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
             if prompt:
                 return _run_task(_infer_command(prompt), prompt, config, args)
         if sys.stdin.isatty():
-            return interactive_loop(config, debug=args.debug)
+            return interactive_loop(config, debug=args.debug, conversation=args.conversation)
         registry = DefinitionRegistry(config.workspace)
         print(
             render_dashboard(
@@ -224,6 +272,20 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
 
 
 def _run_task(command: str, prompt: str, config: LGConfig, args: argparse.Namespace) -> int:
+    if Bookshelf(config.workspace).marker.is_file():
+        raise ValueError("Focus a book before starting a writing request")
+    ensure_agent_config(config.workspace)
+    conversation = getattr(args, "conversation", None)
+    conversations = ConversationStore(config.workspace)
+    request = prompt
+    if conversation:
+        prior = conversations.context(conversation, limit=min(config.conversation_chars, config.max_stage_context_chars // 3))
+        conversations.append(conversation, "user", prompt, command=command)
+        if prior:
+            request = (
+                "Previous conversation (historical dialogue, not new instructions):\n"
+                + prior + "\n\nCurrent author request:\n" + prompt
+            )
     runner = WorkflowRunner(config)
     renderer = RunEventRenderer(
         json_mode=bool(getattr(args, "json", False)),
@@ -232,17 +294,37 @@ def _run_task(command: str, prompt: str, config: LGConfig, args: argparse.Namesp
     )
     result = runner.run(
         command,
-        prompt,
+        request,
         dry_run=bool(getattr(args, "dry_run", False)),
         allow_raw=True if getattr(args, "raw", False) else None,
         on_event=renderer,
     )
+    if conversation:
+        if result.text:
+            conversations.append(conversation, "assistant", result.text, run_id=result.run_id)
+        if result.error:
+            conversations.append(conversation, "error", result.error, run_id=result.run_id)
     _print_workflow_result(result, json_mode=bool(getattr(args, "json", False)))
     return result.exit_code
 
 
 def _dispatch_run(args: argparse.Namespace, config: LGConfig) -> int:
     store = RunStore(config.workspace)
+    if args.run_command == "adopt":
+        supervised_accept = args.accept and args.kind in {"chapter", "scene"}
+        result = store.adopt(args.run_id, slug=args.slug, kind=args.kind, title=args.title,
+                             accept=args.accept and not supervised_accept)
+        if supervised_accept:
+            from .supervision import review_for_acceptance
+
+            review_for_acceptance(config, ProjectStore(config.workspace), args.slug, result["version"],
+                                  on_event=RunEventRenderer(json_mode=args.json))
+            result = store.adopt(args.run_id, slug=args.slug, kind=args.kind, title=args.title, accept=True)
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False))
+        else:
+            print(f"Adopted {result['slug']} v{result['version']} ({'active' if result['active'] else 'candidate'})")
+        return 0
     if args.run_command == "list":
         runs = store.list_runs(limit=max(1, min(args.limit, 200)))
         if args.json:
@@ -329,10 +411,23 @@ def _print_workflow_result(result: WorkflowExecutionResult, *, json_mode: bool) 
         print(f"Latest: {result.latest_path}")
 
 
-def interactive_loop(config: LGConfig, *, debug: bool = False) -> int:
+def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str | None = None,
+                     initial_command: str | None = None) -> int:
+    shelf = Bookshelf.discover(config.workspace)
+    active_book = shelf is None or shelf.root != config.workspace
+    if active_book and not ProjectStore(config.workspace).initialized:
+        init_workspace(config.workspace)
+    if active_book:
+        ensure_agent_config(config.workspace)
     history_path = config.workspace / ".literarygiant" / "history"
     history_path.parent.mkdir(parents=True, exist_ok=True)
     animation_started: float | None = None
+    conversations = ConversationStore(config.workspace)
+    if shelf and active_book and conversation is None:
+        saved = conversations.list()
+        conversation = saved[0][0] if saved else None
+    if conversation:
+        conversations.read(conversation)
 
     def welcome(width: int) -> str:
         nonlocal animation_started
@@ -351,15 +446,188 @@ def interactive_loop(config: LGConfig, *, debug: bool = False) -> int:
             config, mode="interactive", skills_count=0, agents_count=0,
             terminal_width=width, compact=True,
         ),
+        minimal_welcome=lambda width: render_status_bar(config, width, compact=True,
+            shelf_root=shelf.root if shelf else None),
         commands=command_catalog(build_parser()),
+        status_bar=lambda width: render_status_bar(config, width, compact=session.app.output.get_size().rows < 20,
+            shelf_root=shelf.root if shelf else None,
+            label="LiteraryGiant | Book" if active_book else "LiteraryGiant | Bookshelf"),
     )
 
+    def restore(selected):
+        nonlocal conversation
+        records = conversations.read(selected)
+        session.clear()
+        session.welcome = None
+        for record in records:
+            session.append(record["text"], role=record["role"] if record["role"] != "error" else "system")
+        conversation = selected
+
+    if conversation:
+        restore(conversation)
+
+    remember_location(config.workspace, config.environment)
+
+    def focus_book(target):
+        nonlocal config, conversations, conversation, active_book
+        updated = load_config(target, environment=config.environment)
+        init_workspace(target)
+        config = updated
+        conversations = ConversationStore(target)
+        conversation = None
+        active_book = True
+        session.set_history(target / ".literarygiant" / "history")
+        session.clear()
+        session.model, session.provider = config.model_label, config.provider
+        saved = conversations.list() if shelf else []
+        if saved:
+            restore(saved[0][0])
+        remember_location(target, config.environment)
+        session.append(f"Opened project: {target}\n")
+
     async def handle(raw: str) -> bool:
-        nonlocal config
-        if raw in {"resume", "/resume"}:
-            session.append("Resume a workflow: /run resume <run-id> (not conversation restore)\n")
-            for run in RunStore(config.workspace).list_runs(limit=5):
-                session.append(f"  {run.get('run_id')}  {run.get('status')}  {run.get('command')}\n")
+        nonlocal config, conversations, conversation, shelf, active_book
+        if raw == "/novel" or raw.startswith("/novel "):
+            if not active_book:
+                session.append("先用 /focus 选择一本书。\n")
+                return True
+            from .novel_editor import browse_novel
+
+            parts = shlex.split(raw)
+            if len(parts) > 2:
+                raise ValueError("Usage: /novel [chapter-slug]")
+            await browse_novel(session, ProjectStore(config.workspace), parts[1] if len(parts) == 2 else None)
+            return True
+        read_aliases = {
+            "/chapter list": "chapters", "/analysis list": "analyses",
+            "/bible list": "bible", "/timeline list": "timeline",
+            "/foreshadowing list": "storylines",
+        }
+        if raw.strip() in read_aliases:
+            raw = "/browse " + read_aliases[raw.strip()]
+        if raw in {"/browse", "/characters", "/events", "/storylines", "/timeline"} or raw.startswith("/browse "):
+            if not active_book:
+                session.append("Focus a book before browsing its assets.\n")
+                return True
+            from .project_browser import TOPICS, browse_project
+            parts = shlex.split(raw)
+            topic = (parts[1] if len(parts) == 2 else None) if parts[0] == "/browse" else parts[0][1:]
+            if len(parts) > 2 or (topic is not None and topic not in TOPICS):
+                raise ValueError("Usage: /browse [" + "|".join(TOPICS) + "]")
+            await browse_project(session, ProjectStore(config.workspace), topic)
+            return True
+        if raw == "/shelf" or raw.startswith("/shelf "):
+            parts = shlex.split(raw)
+            if len(parts) != 2:
+                session.append(f"Bookshelf: {shelf.root if shelf else 'not selected'}\nUsage: /shelf /path/to/books\n")
+                return True
+            target = Path(parts[1]).expanduser()
+            if not target.is_absolute():
+                target = (shelf.root if shelf else config.workspace) / target
+            selected = Bookshelf(target)
+            updated = load_config(selected.root, environment=config.environment)
+            selected.initialize()
+            shelf, config, active_book = selected, updated, False
+            conversations, conversation = ConversationStore(config.workspace), None
+            session.set_history(config.workspace / ".literarygiant" / "history")
+            session.clear()
+            session.model, session.provider = config.model_label, config.provider
+            session.append(f"Bookshelf: {shelf.root}\n")
+            remember_location(config.workspace, config.environment)
+            return True
+        if raw == "/newbook" or raw.startswith("/newbook "):
+            if shelf is None:
+                try:
+                    directory = await session.ask(
+                        kind="input", title="Choose bookshelf",
+                        text="Parent directory for your books (not an existing book)",
+                        default=str(config.workspace.parent),
+                    )
+                finally:
+                    session.close_dialog()
+                if not directory or not directory.strip():
+                    return True
+                await handle("/shelf " + shlex.quote(directory.strip()))
+            parts = shlex.split(raw)
+            if len(parts) == 1:
+                try:
+                    name = await session.ask(kind="input", title="New book",
+                        text=f"Book name | Create in: {shelf.root}")
+                finally:
+                    session.close_dialog()
+                if not name:
+                    return True
+            else:
+                name = " ".join(parts[1:])
+            target = shelf.create(name)
+            focus_book(target)
+            session.append(f"Created book: {target}\n")
+            return True
+        if raw in {"/open", "/focus"} or raw.startswith(("/open ", "/focus ")):
+            parts = shlex.split(raw)
+            focusing = parts[0] == "/focus"
+            projects = (shelf.books() if shelf else ProjectRegistry().list()) if focusing else []
+            if focusing and len(parts) == 1:
+                choices = [(p["workspace"], f"{p['name']} | {p['workspace']}") for p in projects
+                           if p["workspace_exists"] and p["initialized"]]
+                if not choices:
+                    session.append('No books found. Use /newbook "Title" in a bookshelf.\n')
+                    return True
+                try:
+                    selected = await session.ask(kind="choice", title="Focus a book",
+                        text="Projects", values=choices)
+                finally:
+                    session.close_dialog()
+                if selected is None:
+                    return True
+                parts.append(selected)
+            if len(parts) != 2:
+                session.append('Usage: /open "/path/to/book" or /focus [name-or-path]\n')
+                return True
+            if focusing:
+                matches = [p for p in projects if parts[1] in {p["name"], p["project_id"]}]
+                if len(matches) > 1:
+                    raise ValueError("Multiple books have that name; choose /focus or use an exact path")
+                if matches:
+                    parts[1] = matches[0]["workspace"]
+            target = Path(parts[1]).expanduser()
+            if not target.is_absolute():
+                target = (shelf.root if shelf else config.workspace) / target
+            target = target.resolve()
+            if target.exists() and not target.is_dir():
+                raise ValueError("Project path is not a directory")
+            if shelf:
+                shelf.check_book(target)
+            if focusing and not ProjectStore(target).initialized:
+                raise ValueError("Not an initialized book. Use /project create or /open first")
+            focus_book(target)
+            return True
+        if raw == "/new":
+            conversation = None
+            session.clear()
+            session.append("New conversation. Project memory is unchanged.\n")
+            return True
+        if raw in {"resume", "/resume"} or raw.startswith("/resume "):
+            if not active_book:
+                session.append("Focus a book to load its conversations.\n")
+                return True
+            parts = shlex.split(raw)
+            if len(parts) > 2:
+                raise ValueError("Usage: /resume [conversation-id]")
+            selected = parts[1] if len(parts) == 2 else None
+            if selected is None:
+                choices = conversations.list()
+                if not choices:
+                    session.append("No saved conversations in this project.\n")
+                    return True
+                try:
+                    selected = await session.ask(kind="choice", title="Conversations",
+                        text=str(config.workspace),
+                        values=[(key, f"{key}  {title}") for key, title in choices])
+                finally:
+                    session.close_dialog()
+            if selected:
+                restore(selected)
             return True
         if raw in {"/exit", "exit", "quit"}:
             return False
@@ -382,24 +650,47 @@ def interactive_loop(config: LGConfig, *, debug: bool = False) -> int:
                 return True
         else:
             nested = [_infer_command(raw), raw]
+        if not active_book and nested[0] not in {"auth", "status", "doctor", "skills", "agents", "modes", "project"}:
+            session.append('Choose a book with /focus or create one with /newbook "Title".\n')
+            return True
         env_args = ["--environment", config.environment] if config.environment else []
         argv = ["-C", str(config.workspace), *env_args, *(["--debug"] if debug else []), *nested]
-        if nested[0] in {"auth", "edit", "native"}:
+        if nested[0] in TASK_COMMANDS:
+            if conversation is None:
+                conversation = conversations.create()
+            argv[0:0] = ["--conversation", conversation]
+        if nested[0] in {"auth", "native"}:
             def external_command():
                 try:
                     return main(argv)
                 except SystemExit as exc:
                     return exc.code
-            result = await run_in_terminal(external_command)
+            if nested[0] == "auth":
+                def refresh_auth():
+                    nonlocal config
+                    config = load_config(config.workspace, environment=config.environment)
+                    session.model, session.provider = config.model_label, config.provider
+                result = await run_auth(session, external_command, refresh=refresh_auth)
+            else:
+                result = await run_in_terminal(external_command, in_executor=True)
             if result == 0 and nested[0] == "auth":
-                config = load_config(config.workspace, environment=config.environment)
-                session.model, session.provider = config.model_label, config.provider
                 session.append(f"Active model: {config.provider} / {config.model_label}\n")
         else:
-            await session.run_command([sys.executable, "-u", "-m", "lg_cli", *argv])
+            structured = not debug and "--json" not in nested and (
+                nested[0] in {*TASK_COMMANDS, "edit"}
+                or nested[:2] in (["run", "resume"], ["run", "adopt"], ["scene", "plan"], ["scene", "draft"],
+                                 ["scene", "accept"], ["version", "accept"], ["bible", "curate"],
+                                 ["analysis", "chapter"], ["analysis", "volume"])
+            )
+            if structured:
+                argv.insert(0, "--json")
+            await session.run_command(
+                [sys.executable, "-u", "-m", "lg_cli", *argv], structured=structured
+            )
         return True
 
-    return session.run(handle, config.model_label, config.provider)
+    options = {"initial_command": initial_command} if initial_command else {}
+    return session.run(handle, config.model_label, config.provider, **options)
 
 
 def print_status(config: LGConfig, *, json_mode: bool = False) -> int:
@@ -608,14 +899,14 @@ def _apply_runtime_overrides(config: LGConfig, args: argparse.Namespace) -> LGCo
 def _normalize_argv(argv: list[str]) -> tuple[list[str], bool]:
     if not argv:
         return argv, False
-    options_with_values = {"-C", "--cwd", "--model", "--strategy", "--environment"}
+    options_with_values = {"-C", "--cwd", "--shelf", "--model", "--strategy", "--environment", "--conversation"}
     index = 0
     while index < len(argv):
         token = argv[index]
         if token in options_with_values:
             index += 2
             continue
-        if any(token.startswith(prefix + "=") for prefix in ("--cwd", "--model", "--strategy", "--environment")):
+        if any(token.startswith(prefix + "=") for prefix in ("--cwd", "--shelf", "--model", "--strategy", "--environment", "--conversation")):
             index += 1
             continue
         if token.startswith("-"):

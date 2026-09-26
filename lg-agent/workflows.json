@@ -205,7 +205,7 @@
           "id": "chapter-brief",
           "agent": "director",
           "skill": "outline-planner",
-          "task": "Define chapter objective, viewpoint, scene constraints, entering state, required change, payoff, and ending hook."
+          "task": "Produce only a concise chapter brief in at most eight bullets: objective, viewpoint, entering state, constraints, causal beats, required change, payoff, and ending hook. Do not write chapter prose. The author's prose length target applies to the later drafting stages, not this brief."
         },
         {
           "id": "chapter-draft",
@@ -223,23 +223,23 @@
           "id": "continuity-pass",
           "agent": "continuity",
           "skill": "continuity-checker",
-          "task": "Audit the revised chapter against canon, timeline, location, knowledge states, relationships, and power limits; propose exact repairs."
+          "task": "Produce only an audit report, not another chapter draft. Check the revised prose against canon, timeline arithmetic, evidence custody, location, knowledge states, relationships, and power limits. Flag leaked planning instructions and duplicated paragraphs. Quote each problem location briefly and propose an exact bounded repair; distinguish confirmed errors from stylistic preferences."
         },
         {
           "id": "memory-delta",
           "agent": "memory",
           "skill": "memory-updater",
-          "task": "Extract only durable new facts, timeline changes, relationship changes, setups, payoffs, and unresolved errors as a proposed memory delta."
+          "task": "Return only a concise proposed memory delta, not chapter prose or a repeated audit. Extract durable new facts, timeline changes, relationship changes, evidence custody, setups, payoffs, and unresolved errors. Keep future plans distinct from events that actually occur in the draft, and do not promote unresolved contradictions to established facts."
         },
         {
           "id": "chapter-final",
           "agent": "director",
           "skill": "chapter-writer",
-          "task": "Apply all valid continuity repairs and deliver the complete polished chapter followed by a compact memory delta.",
+          "task": "Apply all valid continuity repairs. artifact_markdown must contain only the complete polished chapter prose, with an optional chapter heading. Put memory changes, continuity notes, and production commentary only in handoff and risks, never after the prose.",
           "final": true
         }
       ],
-      "outputs": ["章节目标", "完整正文", "结尾钩子", "连续性说明", "建议 memory delta"]
+      "outputs": ["完整正文（artifact_markdown 中不得混入制作说明）", "连续性说明与建议 memory delta（仅 handoff/risks）"]
     },
     "consistency_check_workflow": {
       "command": "check",

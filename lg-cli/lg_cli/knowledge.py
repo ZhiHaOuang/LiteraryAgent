@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .config import LGConfig
 
@@ -25,6 +26,7 @@ class KnowledgeHit:
     score: float
     matched_terms: tuple[str, ...]
     excerpt: str
+    library: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class KnowledgeContext:
                 [
                     f'<reference index="{index}" tier="{hit.tier.value}" source_id="{hit.source_id}" path="{hit.path}">',
                     f"matched_terms: {', '.join(hit.matched_terms)}",
+                    f"library: {hit.library or 'unclassified'}",
                     hit.excerpt,
                     "</reference>",
                 ]
@@ -66,6 +69,7 @@ class KnowledgeContext:
             "hits": [
                 {
                     "tier": hit.tier.value,
+                    "library": hit.library,
                     "source_id": hit.source_id,
                     "path": str(hit.path),
                     "score": hit.score,
@@ -80,7 +84,9 @@ class KnowledgeContext:
 class KnowledgeGateway:
     def __init__(self, config: LGConfig) -> None:
         self.config = config
-        self.library_root = config.library_path or discover_library_root(config.workspace)
+        self.library_root = config.library_path or discover_library_root(
+            config.workspace, allow_parents=config.allow_external_reference
+        )
 
     def search(
         self,
@@ -88,6 +94,7 @@ class KnowledgeGateway:
         *,
         top_k: int | None = None,
         allow_raw: bool | None = None,
+        library: str | None = None,
     ) -> KnowledgeContext:
         limit = top_k or self.config.knowledge_top_k
         raw_enabled = self.config.allow_raw_reference if allow_raw is None else allow_raw
@@ -101,7 +108,7 @@ class KnowledgeGateway:
             abstract_hits, count = self._search_abstract(terms)
             scanned += count
             tiers.append(KnowledgeTier.ABSTRACT.value)
-            hits.extend(abstract_hits)
+            hits.extend(hit for hit in abstract_hits if library is None or hit.library == library)
         else:
             warnings.append("No Library root containing AbstractLibrary was discovered.")
 
@@ -109,14 +116,14 @@ class KnowledgeGateway:
         scanned += count
         if count:
             tiers.append(KnowledgeTier.CUSTOM.value)
-            hits.extend(custom_hits)
+        hits.extend(hit for hit in custom_hits if library is None or hit.library == library)
 
         hits = _dedupe_hits(hits)
         if len(hits) < limit and self.library_root is not None:
             bridge_hits, count, bridge_warning = self._search_bridges(terms)
             scanned += count
             tiers.append(KnowledgeTier.BRIDGE.value)
-            hits.extend(bridge_hits)
+            hits.extend(hit for hit in bridge_hits if library is None or hit.library == library)
             if bridge_warning:
                 warnings.append(bridge_warning)
 
@@ -124,7 +131,7 @@ class KnowledgeGateway:
             raw_hits, count, raw_warning = self._search_raw(terms)
             scanned += count
             tiers.append(KnowledgeTier.RAW.value)
-            hits.extend(raw_hits)
+            hits.extend(hit for hit in raw_hits if library is None or hit.library == library)
             if raw_warning:
                 warnings.append(raw_warning)
         elif not raw_enabled:
@@ -147,14 +154,22 @@ class KnowledgeGateway:
             abstract / "instance_index.jsonl",
             self.library_root / "indexes" / "abstract_index.jsonl",
         ]
-        return _search_structured_files(candidates, terms, KnowledgeTier.ABSTRACT, base_score=300)
+        return _search_structured_files(self._scoped_files(candidates), terms, KnowledgeTier.ABSTRACT, base_score=300)
 
     def _search_custom(self, terms: tuple[str, ...]) -> tuple[list[KnowledgeHit], int]:
+        from .book_assets import organized
+
         root = self.config.reference_path
+        if organized(self.config.workspace) and root == self.config.workspace / "ReferenceLibrary":
+            root = root / "sources"
         if not root.exists() or not root.is_dir():
             return [], 0
-        files = list(_bounded_files(root, {".json", ".jsonl", ".md", ".txt"}, limit=300))
-        return _search_structured_files(files, terms, KnowledgeTier.CUSTOM, base_score=250)
+        reference = self.config.workspace / "ReferenceLibrary"
+        excluded = tuple(reference / name for name in (
+            "plans", "bible", "reviews", "drafts", "analyses", "archive", "sources/research/stages",
+        )) if self.config.reference_path == reference else ()
+        files = list(_bounded_files(root, {".json", ".jsonl", ".md", ".txt"}, limit=300, excluded=excluded))
+        return _search_structured_files(self._scoped_files(files), terms, KnowledgeTier.CUSTOM, base_score=250)
 
     def _search_bridges(
         self, terms: tuple[str, ...]
@@ -164,27 +179,33 @@ class KnowledgeGateway:
         files = sorted(index_root.glob("books/*.jsonl")) if index_root.exists() else []
         if not files:
             return [], 0, "BridgeIndex is missing; the 809MB Bridges tree was not scanned directly."
-        hits, count = _search_structured_files(files, terms, KnowledgeTier.BRIDGE, base_score=180)
+        hits, count = _search_structured_files(self._scoped_files(files), terms, KnowledgeTier.BRIDGE, base_score=180)
         return hits, count, None
 
     def _search_raw(self, terms: tuple[str, ...]) -> tuple[list[KnowledgeHit], int, str | None]:
         assert self.library_root is not None
         root = self.library_root / "TaciturnRaw"
         files = list(_bounded_files(root, {".json", ".jsonl", ".md", ".txt"}, limit=200))
-        hits, count = _search_structured_files(files, terms, KnowledgeTier.RAW, base_score=40)
+        hits, count = _search_structured_files(self._scoped_files(files), terms, KnowledgeTier.RAW, base_score=40)
         warning = "Raw search is explicitly enabled and capped at 200 files per run."
         return hits, count, warning
 
+    def _scoped_files(self, paths):
+        return [path for path in paths if self.config.allow_external_reference
+                or path.resolve().is_relative_to(self.config.workspace.resolve())]
 
-def discover_library_root(workspace: Path) -> Path | None:
+
+def discover_library_root(workspace: Path, *, allow_parents: bool = False) -> Path | None:
     candidates: list[Path] = []
-    for current in (workspace, *workspace.parents):
+    for current in ((workspace, *workspace.parents) if allow_parents else (workspace,)):
         candidates.extend([current / "Library", current])
     seen: set[Path] = set()
     for candidate in candidates:
         try:
             resolved = candidate.resolve()
         except OSError:
+            continue
+        if not allow_parents and not resolved.is_relative_to(workspace.resolve()):
             continue
         if resolved in seen:
             continue
@@ -223,6 +244,11 @@ def _search_structured_files(
                     score=round(score, 3),
                     matched_terms=matched,
                     excerpt=_excerpt(record, max_chars=900 if tier != KnowledgeTier.RAW else 500),
+                    library=(
+                        record["library"]
+                        if isinstance(record, dict) and isinstance(record.get("library"), str)
+                        else None
+                    ),
                 )
             )
     return hits, scanned
@@ -262,7 +288,7 @@ def _flatten_text(value: Any) -> str:
             parts.append(item)
         elif isinstance(item, dict):
             for key, child in item.items():
-                if key not in {"raw_text", "content", "chapter_text"}:
+                if key not in {"raw_text", "content", "chapter_text", "source_locked_details"}:
                     visit(child)
         elif isinstance(item, list):
             for child in item[:40]:
@@ -295,7 +321,7 @@ def _excerpt(value: Any, *, max_chars: int) -> str:
 
 def _source_id(value: Any, path: Path) -> str:
     if isinstance(value, dict):
-        for key in ("pattern_id", "instance_id", "plot_id", "book_id", "id"):
+        for key in ("instance_id", "pattern_id", "plot_id", "book_id", "id"):
             if value.get(key):
                 return str(value[key])
     return path.stem
@@ -330,9 +356,11 @@ def _query_terms(query: str) -> tuple[str, ...]:
     return tuple(output[:40])
 
 
-def _bounded_files(root: Path, extensions: set[str], *, limit: int) -> Iterable[Path]:
+def _bounded_files(root: Path, extensions: set[str], *, limit: int, excluded: tuple[Path, ...] = ()) -> Iterable[Path]:
     count = 0
     for path in root.rglob("*"):
+        if any(path.is_relative_to(directory) for directory in excluded):
+            continue
         if path.is_file() and path.suffix.lower() in extensions:
             yield path
             count += 1

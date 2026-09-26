@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import LGConfig
+from .chapter_sync import ChapterSync
+from .project_browser import TOPICS, project_entries
+from .book_analysis import BookAnalysisStore, CATEGORIES, ChapterAnalysisService
 from .exporter import EXPORT_FORMATS, EXPORT_TARGETS, export_project
 from .init_project import init_workspace
 from .project_store import (
@@ -37,10 +40,46 @@ STORY_COMMANDS = {
     "foreshadowing",
     "export",
     "search",
+    "browse",
+    "characters",
+    "events",
+    "storylines",
+    "analysis",
 }
 
 
 def add_story_commands(subparsers: argparse._SubParsersAction[Any]) -> None:
+    analysis = subparsers.add_parser("analysis", help="Inspect and generate source-linked book analyses.")
+    analysis_commands = analysis.add_subparsers(dest="analysis_command", required=True)
+    enable = analysis_commands.add_parser("enable", help="Enable candidate supervision for this book.")
+    _json_option(enable)
+    analysis_list = analysis_commands.add_parser("list")
+    analysis_list.add_argument("reference", nargs="?")
+    analysis_list.add_argument("--volume", action="store_true")
+    _json_option(analysis_list)
+    analysis_chapter = analysis_commands.add_parser("chapter")
+    analysis_chapter.add_argument("reference")
+    analysis_chapter.add_argument("--category", action="append", choices=sorted(CATEGORIES))
+    _json_option(analysis_chapter)
+    analysis_volume = analysis_commands.add_parser("volume", help="Review all five dimensions across a volume or book.")
+    analysis_volume.add_argument("reference", nargs="?", default="__book__")
+    _json_option(analysis_volume)
+    adjudicate = analysis_commands.add_parser("adjudicate", help="Record an explicit, source-bound human dismissal of one false-positive finding.")
+    adjudicate.add_argument("reference")
+    adjudicate.add_argument("--version", type=int)
+    adjudicate.add_argument("--volume", action="store_true")
+    adjudicate.add_argument("--category", required=True, choices=sorted(CATEGORIES))
+    adjudicate.add_argument("--finding", required=True, type=int, help="One-based index in report.findings.")
+    adjudicate.add_argument("--reviewer", required=True)
+    adjudicate.add_argument("--reason", required=True)
+    adjudicate.add_argument("--confirm", action="store_true")
+    _json_option(adjudicate)
+    browse = subparsers.add_parser("browse", help="Read project assets without calling a model.")
+    browse.add_argument("topic", choices=sorted(TOPICS))
+    _json_option(browse)
+    for topic in ("characters", "events", "storylines"):
+        command = subparsers.add_parser(topic, help=f"Browse existing {topic} without generation.")
+        _json_option(command)
     _add_project_parser(subparsers)
     _add_bible_parser(subparsers)
     _add_document_parser(subparsers)
@@ -66,7 +105,53 @@ def dispatch_story_command(args: argparse.Namespace, config: LGConfig) -> int | 
     if args.command == "project":
         return _dispatch_project(args, config)
     store = ProjectStore(config.workspace)
+    if args.command == "analysis":
+        if args.analysis_command == "adjudicate":
+            from .supervision import adjudicate_review
+
+            result = adjudicate_review(store, args.reference, category=args.category,
+                finding_index=args.finding, reviewer=args.reviewer, reason=args.reason,
+                confirmed=args.confirm, version_number=args.version, volume=args.volume)
+            return _emit(result, args, text=f"Adjudication recorded: {result['path']}. Original report retained; manuscript unchanged.")
+        if args.analysis_command == "enable":
+            from .supervision import configure_supervision
+
+            return _emit(configure_supervision(store), args, text="Chapter supervision enabled for this book.")
+        if args.analysis_command == "list":
+            return _emit_many(BookAnalysisStore(store).list(args.reference, volume=args.volume), args, heading="Book analyses",
+                formatter=lambda item: f"{item['chapter']} | {item['library']} | {item['status']}\n{item['report']['summary']}")
+        result = ChapterAnalysisService(config).analyze(args.reference, categories=getattr(args, "category", None),
+            on_event=_renderer(args), volume=args.analysis_command == "volume")
+        _emit(result, args, text=f"Analysis run {result['run_id']}: {result['status']}")
+        return 1 if result["status"] == "blocked" else 0
+    if args.command in {"browse", "characters", "events", "storylines"}:
+        topic = args.topic if args.command == "browse" else args.command
+        entries = project_entries(store, topic)
+        if not getattr(args, "json", False):
+            from rich.console import Console
+            from rich.table import Table
+            from rich.text import Text
+
+            table = Table(title=f"{store.project_info().name} / {TOPICS[topic]}",
+                          box=None, expand=True, padding=(0, 1))
+            table.add_column("#", width=4, style="dim")
+            table.add_column("Name", ratio=2)
+            table.add_column("Summary", ratio=3)
+            for number, entry in enumerate(entries, 1):
+                summary = next((line for line in entry.text.splitlines()[1:]
+                                if line.strip() and not line.startswith(("#", "Status:", "Source:"))), "")
+                table.add_row(str(number), Text(entry.title), Text(summary[:160]))
+            Console().print(table)
+            return 0
+        return _emit_many(entries, args, heading=TOPICS[topic],
+                          formatter=lambda entry: entry.text + "\n")
     if args.command == "bible":
+        if args.bible_command == "curate":
+            result = StoryWorkflowService(config, project=store).curate_document(
+                args.reference, request=" ".join(args.request), dry_run=args.dry_run,
+                on_event=_renderer(args),
+            )
+            return _emit_story_result(result, args)
         return _dispatch_bible(args, store)
     if args.command == "document":
         return _dispatch_document(args, store)
@@ -75,6 +160,10 @@ def dispatch_story_command(args: argparse.Namespace, config: LGConfig) -> int | 
     if args.command == "scene":
         return _dispatch_scene(args, config, store)
     if args.command == "version":
+        if args.version_command == "accept":
+            from .supervision import review_for_acceptance
+
+            review_for_acceptance(config, store, args.reference, args.version, final=args.final, on_event=_renderer(args))
         return _dispatch_version(args, store)
     if args.command == "review":
         return _dispatch_review(args, store)
@@ -92,6 +181,9 @@ def dispatch_story_command(args: argparse.Namespace, config: LGConfig) -> int | 
 def _add_project_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     parser = subparsers.add_parser("project", help="Create, list, and inspect independent novel projects.")
     commands = parser.add_subparsers(dest="project_command", required=True)
+    organize = commands.add_parser("organize", help="Preview or apply book asset organization; never deletes files.")
+    organize.add_argument("--apply", action="store_true")
+    _json_option(organize)
     create = commands.add_parser("create", help="Create and register a new story workspace.")
     create.add_argument("name")
     create.add_argument("--path", help="Project directory. Defaults to a directory under the current workspace.")
@@ -111,6 +203,10 @@ def _add_project_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
 def _add_bible_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     parser = subparsers.add_parser("bible", help="Manage Canonical facts, Ideas, and memory proposals.")
     commands = parser.add_subparsers(dest="bible_command", required=True)
+    curate = commands.add_parser("curate", help="Extract source-linked memory proposals from a book document.")
+    curate.add_argument("reference")
+    curate.add_argument("request", nargs="*")
+    _generation_options(curate)
     for name, default_state, help_text in (
         ("add", "idea", "Add a replaceable Idea or explicit fact."),
         ("set", "canonical", "Set or update an author-confirmed Canonical fact."),
@@ -197,6 +293,10 @@ def _add_document_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
 def _add_chapter_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     parser = subparsers.add_parser("chapter", help="Create and inspect chapter containers.")
     commands = parser.add_subparsers(dest="chapter_command", required=True)
+    for name in ("sync", "status", "diff", "import"):
+        command = commands.add_parser(name, help=f"{name.capitalize()} per-chapter editable Markdown files.")
+        command.add_argument("reference", nargs="?" if name in {"sync", "status"} else None)
+        _json_option(command)
     create = commands.add_parser("create")
     create.add_argument("slug")
     create.add_argument("title")
@@ -304,6 +404,7 @@ def _add_edit_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     parser.add_argument("request", nargs="*")
     parser.add_argument("--mode", choices=sorted(REVISION_MODES), required=True)
     parser.add_argument("--source-version", type=int)
+    parser.add_argument("--passage", help="Revise only this exact, uniquely matching source passage.")
     _generation_options(parser)
 
 
@@ -318,6 +419,15 @@ def _add_timeline_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     add.add_argument("--tag", action="append", default=[])
     add.add_argument("--source")
     _json_option(add)
+    update = commands.add_parser("set", help="Correct or confirm an existing timeline entry.")
+    update.add_argument("entry_id", type=int)
+    update.add_argument("--label")
+    update.add_argument("--event")
+    update.add_argument("--order")
+    update.add_argument("--state", choices=sorted(FACT_STATES))
+    update.add_argument("--tag", action="append")
+    update.add_argument("--source")
+    _json_option(update)
     listing = commands.add_parser("list")
     listing.add_argument("--state", choices=sorted(FACT_STATES))
     _json_option(listing)
@@ -383,6 +493,12 @@ def _json_option(parser: argparse.ArgumentParser) -> None:
 
 
 def _dispatch_project(args: argparse.Namespace, config: LGConfig) -> int:
+    if args.project_command == "organize":
+        from .book_assets import organize_book, print_plan
+
+        result = organize_book(config.workspace, apply=args.apply)
+        print_plan(result, json_mode=getattr(args, 'json', False))
+        return 0
     registry = ProjectRegistry()
     if args.project_command == "create":
         target = _project_target(config.workspace, args.name, args.path)
@@ -497,6 +613,18 @@ def _dispatch_document(args: argparse.Namespace, store: ProjectStore) -> int:
 
 
 def _dispatch_chapter(args: argparse.Namespace, store: ProjectStore) -> int:
+    if args.chapter_command in {"sync", "status", "diff", "import"}:
+        sync = ChapterSync(store)
+        if args.chapter_command == "diff":
+            difference = sync.diff(args.reference)
+            return _emit({"diff": difference}, args, text=difference or "No changes.")
+        method = {"sync": sync.export, "status": sync.status, "import": sync.import_file}[args.chapter_command]
+        references = [args.reference] if args.reference else [
+            chapter.slug for chapter in store.list_documents(kind="chapter", limit=1000)
+        ]
+        results = [method(reference) for reference in references]
+        return _emit_many(results, args, heading="Chapter files",
+                          formatter=lambda item: f"{item.chapter}: {item.status} | {item.path}")
     if args.chapter_command == "create":
         chapter = store.create_document(
             kind="chapter",
@@ -573,6 +701,9 @@ def _dispatch_scene(args: argparse.Namespace, config: LGConfig, store: ProjectSt
         scene = store.approve_scene(args.reference)
         return _emit(scene, args, text=f"Approved scene plan for `{scene.document.slug}`. It is now eligible for drafting.")
     if args.scene_command == "accept":
+        from .supervision import review_for_acceptance
+
+        review_for_acceptance(config, store, args.reference, args.version, final=args.final, on_event=_renderer(args))
         document = store.accept_version(args.reference, args.version, final=args.final)
         return _emit(document, args, text=f"Accepted v{document.active_version_number} as {document.state} for `{document.slug}`.")
     renderer = _renderer(args)
@@ -661,11 +792,18 @@ def _dispatch_edit(args: argparse.Namespace, config: LGConfig, store: ProjectSto
         source_version=args.source_version,
         dry_run=args.dry_run,
         on_event=_renderer(args),
+        passage=args.passage,
     )
     return _emit_story_result(result, args)
 
 
 def _dispatch_timeline(args: argparse.Namespace, store: ProjectStore) -> int:
+    if args.timeline_command == "set":
+        entry = store.update_timeline_entry(
+            args.entry_id, label=args.label, event=args.event, sort_key=args.order,
+            state=args.state, tags=args.tag, source_document=args.source,
+        )
+        return _emit(entry, args, text=_timeline_line(entry))
     if args.timeline_command == "add":
         entry = store.add_timeline_entry(
             label=args.label,

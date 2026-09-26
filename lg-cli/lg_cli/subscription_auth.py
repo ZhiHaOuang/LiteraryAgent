@@ -91,6 +91,7 @@ def login_subscription(
     *,
     model: str = "",
     browser: bool = False,
+    run_process=None,
 ) -> int:
     from .core_adapter import _adapter_env
 
@@ -103,7 +104,7 @@ def login_subscription(
     model = model or (previous.get("model", "") if previous else "")
     if model:
         validate_model(model)
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
+    if run_process is None and (not sys.stdin.isatty() or not sys.stdout.isatty()):
         raise ConfigError("Subscription login requires your interactive terminal")
     config = load_config(workspace, environment=environment)
     command = pinned_command(config)
@@ -126,17 +127,20 @@ def login_subscription(
     print(
         "Opening official Codex ChatGPT login. This uses subscription access, not an API key."
     )
-    process = subprocess.Popen(args, env=_adapter_env(config), cwd=directory)
-    try:
-        code = process.wait()
-    except KeyboardInterrupt:
-        process.terminate()
+    if run_process:
+        code = run_process(args, env=_adapter_env(config), cwd=directory)
+    else:
+        process = subprocess.Popen(args, env=_adapter_env(config), cwd=directory)
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-        return 130
+            code = process.wait()
+        except KeyboardInterrupt:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            return 130
     if code != 0:
         return code if code > 0 else 128 - code
     cache = directory / "auth.json"

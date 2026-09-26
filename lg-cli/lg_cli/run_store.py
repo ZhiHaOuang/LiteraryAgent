@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .events import RunEvent
+from .project_store import ProjectStore, ProjectStoreError
 
 
 RUN_SCHEMA = "lg.run.v2"
@@ -139,6 +140,16 @@ class RunStore:
         _atomic_json(last_run, manifest)
         return manifest
 
+    def read_stage_metadata(self, run_id: str, stage_id: str) -> dict[str, Any]:
+        safe_id = "".join(char if char.isalnum() or char in "-_" else "-" for char in stage_id)
+        path = self.root / run_id / "stages" / f"{safe_id}.json"
+        if not path.exists():
+            return {}
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("Invalid stage metadata")
+        return value
+
     def load(self, run_id: str) -> dict[str, Any]:
         path = self.root / run_id / "run.json"
         try:
@@ -147,6 +158,11 @@ class RunStore:
             raise FileNotFoundError(f"LG run not found: {run_id}") from exc
         if not isinstance(value, dict):
             raise ValueError(f"invalid LG run manifest: {path}")
+        from .book_assets import resolve_artifact
+
+        for key in ("artifact_path", "latest_path"):
+            if value.get(key):
+                value[key] = resolve_artifact(self.workspace, value[key])
         return value
 
     def handle(self, run_id: str) -> RunHandle:
@@ -155,13 +171,52 @@ class RunStore:
             raise FileNotFoundError(f"LG run not found: {run_id}")
         return RunHandle(run_id, directory, directory / "run.json", directory / "events.jsonl")
 
+    def adopt(self, run_id: str, *, slug: str, kind: str, title: str, accept: bool = False) -> dict:
+        if Path(run_id).name != run_id or run_id in {".", ".."}:
+            raise ValueError("Expected a local run ID")
+        manifest = self.load(run_id)
+        if manifest.get("status") != "completed" or not manifest.get("artifact_path"):
+            raise ValueError("Only completed runs with an artifact can be adopted")
+        artifact = Path(manifest["artifact_path"]).resolve()
+        if not artifact.is_relative_to(self.workspace.resolve()):
+            raise ValueError("Run artifact must be inside the current book")
+        content = artifact.read_text(encoding="utf-8")
+        if not content.strip():
+            raise ValueError("Run artifact is empty")
+        project = ProjectStore(self.workspace)
+        metadata = {"run_id": run_id, "artifact_path": str(artifact)}
+        try:
+            document = project.get_document(slug)
+        except ProjectStoreError:
+            if kind in {"chapter", "scene"}:
+                raise ValueError("Create the chapter or scene container before adopting manuscript text") from None
+            document = project.create_document(
+                kind=kind, slug=slug, title=title, content=content,
+                state="accepted" if accept else "draft", metadata=metadata,
+                reason=f"Adopted from LG run {run_id}",
+            )
+            version = project.get_version(document.id, 1)
+        else:
+            if document.kind != kind:
+                raise ValueError("Existing document kind differs; choose a different slug")
+            version = next((v for v in project.list_versions(document.id, limit=1000)
+                            if v.metadata.get("run_id") == run_id
+                            or (v.version_number == 1 and document.metadata.get("run_id") == run_id)), None)
+            if version is None:
+                version = project.create_version(document.id, content=content, metadata=metadata,
+                    reason=f"Adopted from LG run {run_id}")
+        if accept:
+            project.accept_version(document.id, version.version_number)
+        return {"run_id": run_id, "slug": document.slug, "version": version.version_number,
+                "active": project.get_document(document.id).active_version_number == version.version_number}
+
     def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         if not self.root.exists():
             return []
         records: list[dict[str, Any]] = []
         for path in sorted(self.root.glob("*/run.json"), reverse=True):
             try:
-                value = json.loads(path.read_text(encoding="utf-8"))
+                value = self.load(path.parent.name)
             except (OSError, json.JSONDecodeError):
                 continue
             if isinstance(value, dict):

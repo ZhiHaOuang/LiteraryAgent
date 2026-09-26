@@ -112,7 +112,8 @@ class SlashCommandTests(unittest.TestCase):
                         "".join(screen.data_buffer[y][x].char for x in range(columns))
                         for y in range(rows)
                     ]
-                    self.assertIn("/status", lines[rows - 5])
+                    offset = 5 if os.environ.get("TERM") == "dumb" else 6
+                    self.assertIn("/status", lines[rows - offset])
                     self.assertTrue(lines[rows - 3].startswith("> /sta"))
                     editor._menu_hidden = True
                     editor.busy = True

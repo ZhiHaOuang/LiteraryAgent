@@ -13,10 +13,11 @@ from .events import EventSink, EventType, RunEvent
 from .knowledge import KnowledgeContext, KnowledgeGateway
 from .logging_utils import append_agent_log, ensure_log_dir, utc_now, write_text
 from .memory import read_memory_context
-from .output_writer import OutputWriteResult, write_workflow_output
+from .output_writer import OutputWriteResult, SPECIALIST_OUTPUTS, write_workflow_output
+from .project_store import ProjectStore
 from .prompt_builder import build_stage_prompt
 from .run_store import RunHandle, RunStore
-
+from .story_context import render_story_context
 
 COMMAND_TO_WORKFLOW = {
     "chat": "chat_workflow",
@@ -218,6 +219,12 @@ class WorkflowRunner:
             max_total_chars=min(16000, self.config.max_stage_context_chars // 2),
         )
         knowledge = self._knowledge_context(workflow, request, allow_raw)
+        project = ProjectStore(self.config.workspace)
+        project_context = (
+            render_story_context(project.context_snapshot(query=request),
+                                 max_chars=min(36000, self.config.max_stage_context_chars // 2))
+            if project.initialized else ""
+        )
         emit(
             EventType.CONTEXT_COMPLETED,
             f"Loaded {memory.found_count} memory files and {knowledge.found_count} knowledge hits",
@@ -241,7 +248,7 @@ class WorkflowRunner:
             )
             output = write_workflow_output(
                 self.config.workspace,
-                "plan",
+                "dry-run",
                 plan,
                 output_root=self.config.output_path,
                 run_id=handle.run_id,
@@ -314,13 +321,18 @@ class WorkflowRunner:
                 stage_count=len(stages),
                 stage_task=str(stage.get("task") or "Complete the assigned stage."),
                 expected_outputs=[str(item) for item in workflow.get("outputs", [])],
-                user_request=request,
+                user_request=(
+                    "Project writing instructions:\n" + self.config.project_instructions
+                    + "\n\nAuthor request:\n" + request
+                    if self.config.project_instructions else request
+                ),
                 agent=agent,
                 skill=skill,
                 memory_context=memory,
                 knowledge_context=knowledge,
                 prior_outputs=prior_outputs,
                 max_context_chars=self.config.max_stage_context_chars,
+                project_context=project_context,
             )
             prompt_path = self.store.write_stage_prompt(handle, stage_id=stage_id, prompt=prompt.text)
             write_text(ensure_log_dir(self.config.workspace) / "last_prompt.md", prompt.text)
@@ -384,6 +396,12 @@ class WorkflowRunner:
                     stage_id=stage_id,
                 )
             artifact = str(parsed["artifact_markdown"]).strip()
+            stage_artifact = None
+            if command not in {"chat", "code"} and index < len(stages):
+                stage_artifact = write_workflow_output(
+                    self.config.workspace, SPECIALIST_OUTPUTS.get(agent.id, command), artifact,
+                    output_root=self.config.output_path, run_id=handle.run_id, stage_id=stage_id,
+                ).output_path
             self.store.write_stage(
                 handle,
                 stage_id=stage_id,
@@ -398,6 +416,7 @@ class WorkflowRunner:
                     "handoff": parsed["handoff"],
                     "risks": parsed["risks"],
                     "adapter": _adapter_metadata(core_result),
+                    "artifact_path": str(stage_artifact) if stage_artifact else None,
                 },
             )
             prior_outputs.append((stage_id, artifact))
@@ -522,7 +541,8 @@ class WorkflowRunner:
                 handle,
                 stage_id=stage_id,
                 content=content,
-                metadata={"stage_id": stage_id, "restored_from": resumed_from},
+                metadata={**self.store.read_stage_metadata(resumed_from, stage_id),
+                          "stage_id": stage_id, "restored_from": resumed_from},
             )
             prior_outputs.append((stage_id, content))
             restored.add(stage_id)

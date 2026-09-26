@@ -60,7 +60,7 @@ class CredentialTests(unittest.TestCase):
             self.assertEqual(main(["--environment=test", "auth", "list"]), 0)
             self.assertEqual(main(["--environment", "test", "auth", "use", "one"]), 0)
         self.assertNotIn("never-display-me", output.getvalue())
-        self.assertIn("* one", output.getvalue())
+        self.assertIn("* DeepSeek | deepseek-flash", output.getvalue())
 
     def test_bad_names_corrupt_store_and_symlink_fail_closed(self):
         with self.assertRaises(ValueError):

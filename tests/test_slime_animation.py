@@ -1,6 +1,7 @@
 import unittest
 from itertools import pairwise
 
+from lg_cli import slime_animation as animation
 from lg_cli.slime_animation import (
     BODY,
     CROWN,
@@ -17,6 +18,36 @@ from lg_cli.slime_animation import (
 
 
 class SlimeAnimationTests(unittest.TestCase):
+    def test_velocity_is_continuous_without_keyframe_stops(self):
+        epsilon = 0.00001
+        for t, _ in animation._KEYS[1:-1]:
+            before = pose_at(t - epsilon)
+            at = pose_at(t)
+            after = pose_at(t + epsilon)
+            for field in animation.Pose.__dataclass_fields__:
+                left = (getattr(at, field) - getattr(before, field)) / epsilon
+                right = (getattr(after, field) - getattr(at, field)) / epsilon
+                self.assertAlmostEqual(left, right, delta=0.2, msg=f"{field} at {t}")
+        for t in (0.65, 0.8, 0.95, 1.25, 1.45):
+            self.assertLess(
+                (pose_at(t + epsilon).x - pose_at(t - epsilon).x) / (2 * epsilon), -1
+            )
+
+    def test_interpolation_preserves_keys_and_bounds(self):
+        for i, (t, expected) in enumerate(animation._KEYS[:-1]):
+            self.assertEqual(pose_at(t), expected)
+            end, next_pose = animation._KEYS[i + 1]
+            for step in range(1, 20):
+                pose = pose_at(t + (end - t) * step / 20)
+                for field in animation.Pose.__dataclass_fields__:
+                    a, b, value = (
+                        getattr(expected, field),
+                        getattr(next_pose, field),
+                        getattr(pose, field),
+                    )
+                    self.assertLessEqual(min(a, b), value)
+                    self.assertLessEqual(value, max(a, b))
+
     def test_loop_and_direction(self):
         self.assertAlmostEqual(FRAME_COUNT * FRAME_INTERVAL, DURATION)
         self.assertEqual(pose_at(0), pose_at(DURATION))

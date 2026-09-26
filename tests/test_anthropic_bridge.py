@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from lg_cli.anthropic_bridge import (
@@ -46,6 +47,188 @@ def message_events(block=None, delta=None, stop="end_turn"):
 
 
 class BridgeTests(unittest.TestCase):
+    def test_glm_forced_thinking_is_scoped_to_supported_models(self):
+        for provider, model, enabled in (
+            ("glm", "glm-5.3", True), ("glm", "glm-5.3-flash", True),
+            ("glm", "GLM-5.3-FlashX", True), ("glm", "glm-4.7", False),
+            ("deepseek", "glm-5.3-flash", False),
+        ):
+            with self.subTest(provider=provider, model=model):
+                calls = []
+
+                def factory(payload, captured=calls):
+                    captured.append(payload)
+                    return message_events()
+                config = replace(make_config(Path("/tmp/test-bridge")), provider=provider)
+                bridge = AnthropicBridge(config, stream_factory=factory)
+                list(bridge.response_events({"model": model, "input": "hello"}))
+                if enabled:
+                    self.assertEqual(calls[0]["thinking"], {"type": "enabled", "budget_tokens": 1024})
+                    self.assertEqual(calls[0]["output_config"], {"effort": "low"})
+                else:
+                    self.assertEqual(calls[0]["thinking"], {"type": "disabled"})
+                    self.assertNotIn("output_config", calls[0])
+
+    def test_glm_insufficient_output_budget_fails_before_request(self):
+        calls = []
+        config = replace(make_config(Path("/tmp/test-bridge")), provider="glm", max_output_tokens=1024)
+        bridge = AnthropicBridge(config, stream_factory=lambda payload: calls.append(payload))
+        with self.assertRaisesRegex(ProtocolError, "1024-token thinking budget"):
+            list(bridge.response_events({"model": "glm-5.3-flash", "input": "hello"}))
+        self.assertEqual(calls, [])
+
+    def test_token_limit_diagnostics_count_content_without_exposing_it(self):
+        cases = [
+            ({"type": "text", "text": "PRIVATE"},
+             {"type": "text_delta", "text": "-TEXT"}, {}, "text_chars=12"),
+            ({"type": "thinking", "thinking": "PRIVATE"},
+             {"type": "thinking_delta", "thinking": "-REASONING"}, {}, "reasoning_chars=17"),
+            ({"type": "tool_use", "id": "call", "name": "tool", "input": {}},
+             {"type": "input_json_delta", "partial_json": '{"value":"PRIVATE"}'},
+             {"tool": {"type": "function", "name": "tool", "namespace": None}}, "tool_json_delta_chars=19"),
+        ]
+        for block, delta, mapping, count in cases:
+            with self.subTest(kind=block["type"]):
+                with self.assertRaises(ProtocolError) as failure:
+                    list(translate_stream(message_events(block, delta, stop="max_tokens"), mapping))
+                message = str(failure.exception)
+                self.assertIn("output_tokens=3", message)
+                self.assertIn(count, message)
+                self.assertNotIn("PRIVATE", message)
+
+    def test_core_stream_timeout_matches_lg_request_budget(self):
+        with tempfile.TemporaryDirectory() as raw:
+            for seconds in (10, 300, 900):
+                config = replace(make_config(Path(raw)), timeout_seconds=seconds)
+                with AnthropicBridge(config, stream_factory=lambda _: message_events()) as bridge:
+                    args = bridge.codex_args()
+                    self.assertIn(
+                        f"model_providers.lg_anthropic.stream_idle_timeout_ms={seconds * 1000}", args,
+                    )
+                    self.assertIn("model_providers.lg_anthropic.stream_max_retries=0", args)
+
+    def test_plain_text_schema_failure_gets_one_private_bounded_repair(self):
+        request = {"model": "test", "input": "hello", "text": {"format": {
+            "type": "json_schema", "schema": {"type": "object", "properties": {
+                "answer": {"type": "string"}
+            }, "required": ["answer"], "additionalProperties": False}
+        }}}
+        for succeeds in (True, False):
+            calls = []
+
+            def factory(payload):
+                calls.append(payload)
+                if succeeds and len(calls) == 2:
+                    return message_events(
+                        {"type": "tool_use", "id": "c", "name": "lg_structured_output", "input": {}},
+                        {"type": "input_json_delta", "partial_json": '{"answer":"kept"}'}, "tool_use")
+                return message_events(delta={"type": "text_delta", "text": "PRIVATE-MANUSCRIPT not JSON"})
+
+            bridge = AnthropicBridge(make_config(Path("/tmp/test-bridge")), stream_factory=factory)
+            if succeeds:
+                events = list(bridge.response_events(request))
+                self.assertEqual(sum(e["type"] == "response.completed" for e in events), 1)
+                self.assertNotIn("PRIVATE-MANUSCRIPT", json.dumps(events))
+            else:
+                with self.assertRaises(ProtocolError) as failure:
+                    list(bridge.response_events(request))
+                self.assertNotIn("PRIVATE-MANUSCRIPT", str(failure.exception))
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[-1]["messages"][-2]["content"], "PRIVATE-MANUSCRIPT not JSON")
+
+    def test_schema_repair_is_bounded_and_emits_only_valid_response(self):
+        request = {"model": "test", "input": "hello", "text": {"format": {
+            "type": "json_schema", "schema": {"type": "object", "properties": {
+                "answer": {"type": "string"}
+            }, "required": ["answer"], "additionalProperties": False}
+        }}}
+        for repair_succeeds in (True, False):
+            calls = []
+
+            def factory(payload):
+                calls.append(payload)
+                content = '{"answer":"kept"}' if repair_succeeds and len(calls) == 2 else '{"answer":"kept","extra":true}'
+                return message_events(
+                    {"type": "tool_use", "id": "c", "name": "lg_structured_output", "input": {}},
+                    {"type": "input_json_delta", "partial_json": content}, "tool_use")
+
+            bridge = AnthropicBridge(make_config(Path("/tmp/test-bridge")), stream_factory=factory)
+            if repair_succeeds:
+                events = list(bridge.response_events(request))
+                self.assertEqual(sum(e["type"] == "response.completed" for e in events), 1)
+                self.assertNotIn("extra", json.dumps(events))
+            else:
+                with self.assertRaises(ProtocolError):
+                    list(bridge.response_events(request))
+            self.assertEqual(len(calls), 2)
+            self.assertIn("Repair only the JSON structure", calls[-1]["messages"][-1]["content"])
+
+    def test_malformed_structured_arguments_get_one_bounded_repair(self):
+        request = {"model": "test", "input": "hello", "text": {"format": {
+            "type": "json_schema", "schema": {"type": "object", "properties": {
+                "answer": {"type": "string"}
+            }, "required": ["answer"], "additionalProperties": False}
+        }}}
+        for invalid in ('"PRIVATE string"', '["PRIVATE array"]', '{"PRIVATE":'):
+            for repaired in (True, False):
+                with self.subTest(invalid=invalid, repaired=repaired):
+                    calls = []
+
+                    def factory(payload):
+                        calls.append(payload)
+                        content = '{"answer":"OK"}' if repaired and len(calls) == 2 else invalid
+                        return message_events(
+                            {"type": "tool_use", "id": "c", "name": "lg_structured_output", "input": {}},
+                            {"type": "input_json_delta", "partial_json": content}, "tool_use")
+
+                    bridge = AnthropicBridge(make_config(Path("/tmp/test-bridge")), stream_factory=factory)
+                    if repaired:
+                        events = list(bridge.response_events(request))
+                        self.assertEqual(sum(e["type"] == "response.completed" for e in events), 1)
+                        self.assertNotIn("PRIVATE", json.dumps(events))
+                    else:
+                        with self.assertRaises(ProtocolError) as failure:
+                            list(bridge.response_events(request))
+                        self.assertNotIn("PRIVATE", str(failure.exception))
+                    self.assertEqual(len(calls), 2)
+
+    def test_schema_failure_reports_field_without_private_value(self):
+        request = {"model": "test", "input": "hello", "text": {"format": {
+            "type": "json_schema", "schema": {"type": "object", "properties": {
+                "answer": {"type": "array", "items": {"type": "string"}}
+            }, "required": ["answer"]}
+        }}}
+        _, mapping = translate_request(request, 1024)
+        events = message_events(
+            {"type": "tool_use", "id": "c", "name": "lg_structured_output", "input": {}},
+            {"type": "input_json_delta", "partial_json": '{"answer":"PRIVATE-MANUSCRIPT"}'},
+            "tool_use",
+        )
+        with self.assertRaisesRegex(ProtocolError, r"\$\.answer: type") as failure:
+            list(translate_stream(events, mapping))
+        self.assertNotIn("PRIVATE-MANUSCRIPT", str(failure.exception))
+
+    def test_reasoning_only_token_exhaustion_reports_budget(self):
+        events = message_events({"type": "thinking", "thinking": ""}, {"type": "thinking_delta", "thinking": "private"}, stop="max_tokens")
+        with self.assertRaisesRegex(ProtocolError, "output token limit"):
+            list(translate_stream(events, {}))
+
+    def test_thinking_blocks_do_not_leak_into_manuscript(self):
+        reasoning = list(message_events(
+            {"type": "thinking", "thinking": "private reasoning"},
+            {"type": "thinking_delta", "thinking": "private delta"},
+        ))
+        reasoning.insert(3, {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "private signature"}})
+        final = list(message_events())
+        for event in final[1:-2]:
+            event["index"] = 1
+        events = list(translate_stream(reasoning[:-2] + final[1:], {}))
+        self.assertEqual(len(events[-1]["response"]["output"]), 1)
+        self.assertNotIn("private", json.dumps(events))
+        self.assertEqual(events[-1]["response"]["output"][0]["content"][0]["text"], "LG bridge ready")
+        with self.assertRaises(ProtocolError):
+            list(translate_stream(reasoning, {}))
+
     def test_structured_result_after_progress_message(self):
         request = {"model": "test", "input": "hello", "text": {"format": {
             "type": "json_schema", "schema": {"type": "object", "required": ["answer"]}
@@ -253,7 +436,7 @@ class BridgeTests(unittest.TestCase):
         os.environ.get("LG_TEST_CODEX_BINARY"),
         "set LG_TEST_CODEX_BINARY for native integration",
     )
-    def test_real_codex_through_bridge(self):
+    def test_real_core_stepfun_request_has_lg_identity_without_bundled_harness(self):
         calls = []
 
         def stream(payload):
@@ -263,9 +446,9 @@ class BridgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             config = replace(
                 make_config(Path(raw)),
-                provider="deepseek-anthropic",
-                default_model="deepseek-flash",
-                base_url="https://api.deepseek.com/anthropic",
+                provider="stepfun",
+                default_model="step-3.7-flash",
+                base_url="https://api.stepfun.com",
             )
             factory = lambda cfg: AnthropicBridge(cfg, stream_factory=stream)
             with (
@@ -286,6 +469,12 @@ class BridgeTests(unittest.TestCase):
             )
             self.assertEqual(result.output_text, "LG bridge ready")
             self.assertEqual(len(calls), 1)
+            system = "\n".join(block.get("text", "") for block in calls[0].get("system", []))
+            self.assertIn("LiteraryGiant", system)
+            self.assertNotIn("Codex", system)
+            self.assertNotIn("skills_instructions", system)
+            self.assertNotIn("coding agent", system)
+            self.assertIn("read-only", system)
 
     @unittest.skipUnless(
         os.environ.get("LG_TEST_CODEX_BINARY"),
@@ -384,6 +573,62 @@ class BridgeTests(unittest.TestCase):
                     )
                 else:
                     self.assertEqual(len(calls), 2)
+
+    def test_rate_limit_error_is_actionable_without_leaking_body_or_headers(self):
+        class RateLimitError(Exception):
+            status_code = 429
+
+        for retry_after in ("12", "private manuscript and a-secret-key", "999999999999999", None):
+            with self.subTest(retry_after=retry_after), tempfile.TemporaryDirectory() as raw:
+                def stream(_, header=retry_after):
+                    error = RateLimitError("a-secret-key and private manuscript")
+                    error.response = SimpleNamespace(headers={"retry-after": header})
+                    raise error
+
+                with AnthropicBridge(make_config(Path(raw)), stream_factory=stream) as bridge:
+                    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    req = urllib.request.Request(
+                        bridge.base_url + "/responses",
+                        data=json.dumps({"model": "test", "input": "hello", "stream": True}).encode(),
+                        headers={"Authorization": "Bearer " + bridge.token},
+                    )
+                    with opener.open(req) as response:
+                        output = response.read().decode()
+                self.assertIn("HTTP 429 (rate limit or quota)", output)
+                self.assertNotIn("check the protocol Base URL", output)
+                self.assertNotIn("a-secret-key", output)
+                self.assertNotIn("private manuscript", output)
+                self.assertEqual("Retry-After: 12 seconds" in output, retry_after == "12")
+                if retry_after != "12":
+                    self.assertNotIn("Retry-After", output)
+
+    def test_glm_insufficient_balance_is_not_misreported_as_transient_throttling(self):
+        class ProviderError(Exception):
+            status_code = 429
+
+        for provider, code, expected in (("glm", "1113", True), ("glm", 1113, True),
+                                         ("deepseek", "1113", False), ("glm", "private manuscript", False)):
+            with self.subTest(provider=provider, code=code), tempfile.TemporaryDirectory() as raw:
+                def stream(_, error_code=code):
+                    error = ProviderError("a-secret-key and private manuscript")
+                    error.body = {"error": {"code": error_code, "message": "a-secret-key and private manuscript"}}
+                    raise error
+
+                config = replace(make_config(Path(raw)), provider=provider)
+                with AnthropicBridge(config, stream_factory=stream) as bridge:
+                    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    req = urllib.request.Request(
+                        bridge.base_url + "/responses",
+                        data=json.dumps({"model": "test", "input": "hello", "stream": True}).encode(),
+                        headers={"Authorization": "Bearer " + bridge.token},
+                    )
+                    with opener.open(req) as response:
+                        output = response.read().decode()
+                self.assertEqual("code 1113" in output, expected)
+                self.assertEqual("check provider billing and plan access" in output, expected)
+                self.assertEqual("wait before retrying" in output, not expected)
+                self.assertNotIn("a-secret-key", output)
+                self.assertNotIn("private manuscript", output)
 
     def test_upstream_error_is_redacted(self):
         def stream(_):

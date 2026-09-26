@@ -10,7 +10,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
-from lg_cli.auth_ui import manage_auth
+from lg_cli.auth_ui import _manage_auth as manage_auth
 from lg_cli.config import load_config
 from lg_cli.core_adapter import _adapter_env
 from lg_cli.credentials import checked_name, environment_dir, read_profiles, save_profile
@@ -226,7 +226,7 @@ class ProviderProfileTests(unittest.TestCase):
                 return 0
             return asyncio.run(exercise())
         session.run.side_effect = run
-        async def terminal(function):
+        async def terminal(function, **kwargs):
             return function()
         with (
             patch("lg_cli.main.LiteraryInput", return_value=session),

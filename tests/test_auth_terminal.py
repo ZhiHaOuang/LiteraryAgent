@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import fcntl
-import io
 import json
 import os
 import pty
@@ -13,30 +13,85 @@ import tempfile
 import termios
 import time
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from lg_cli.auth_ui import radiolist_dialog
+from lg_cli.auth_ui import choice_application
+from lg_cli.slime_animation import BODY, CROWN
+from lg_cli.terminal_input import input_style
+from prompt_toolkit.data_structures import Size
+from prompt_toolkit.input.defaults import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 
 class AuthTerminalTests(unittest.TestCase):
-    def test_invalid_number_does_not_select_a_profile(self):
-        output = io.StringIO()
-        with (
-            patch("builtins.input", side_effect=["wrong", "9", "2"]),
-            redirect_stdout(output),
+    def test_selection_is_orange_and_scrolls_in_small_terminal(self):
+        class Output(DummyOutput):
+            def get_size(self):
+                return Size(rows=18, columns=40)
+
+        with patch.dict(os.environ, {"TERM": "xterm-256color"}):
+            os.environ.pop("NO_COLOR", None)
+            style = input_style().get_attrs_for_style_str("class:command.selected")
+            self.assertEqual(style.bgcolor, BODY.lstrip("#"))
+            self.assertFalse(style.reverse)
+            for selector in ("command.edge", "command.side"):
+                border = input_style().get_attrs_for_style_str(f"class:{selector}")
+                self.assertEqual(border.color, CROWN.lstrip("#"))
+                self.assertEqual(border.bgcolor, "default")
+                self.assertFalse(border.reverse)
+
+        async def exercise(app, pipe):
+            task = asyncio.create_task(app.run_async())
+            try:
+                pipe.send_text("\x1b[B" * 15)
+                await asyncio.sleep(0.05)
+                app._redraw()
+                screen = app.renderer.last_rendered_screen
+                lines = [
+                    "".join(screen.data_buffer[y][x].char for x in range(40))
+                    for y in range(screen.height)
+                ]
+                self.assertTrue(any("Profile 15" in line for line in lines))
+                pipe.send_text("\r")
+                self.assertEqual(await asyncio.wait_for(task, 2), 15)
+            finally:
+                if not task.done():
+                    app.exit(result=None)
+                    await task
+
+        with create_pipe_input() as pipe:
+            app = choice_application(
+                title="Profiles",
+                text="",
+                values=[(i, f"Profile {i}") for i in range(30)],
+                input=pipe,
+                output=Output(),
+            )
+            asyncio.run(exercise(app, pipe))
+
+    def test_arrow_selection_and_cancel(self):
+        for keys, expected in (
+            ("\x1b[B\r", "two"),
+            ("\x1b[A\r", "two"),
+            ("\x03", None),
+            ("2\r", "one"),
         ):
-            selected = radiolist_dialog(
-                title="Profiles", text="", values=[("one", "First"), ("two", "Second")]
-            ).run()
-        self.assertEqual(selected, "two")
-        self.assertEqual(output.getvalue().count("Invalid number."), 2)
-        self.assertNotIn("\x1b", output.getvalue())
+            with self.subTest(keys=keys), create_pipe_input() as pipe:
+                app = choice_application(
+                    title="Profiles",
+                    text="",
+                    values=[("one", "First"), ("two", "Second")],
+                    input=pipe,
+                    output=DummyOutput(),
+                )
+                pipe.send_text(keys)
+                self.assertEqual(app.run(), expected)
 
     def test_key_is_saved_without_terminal_echo(self):
         with tempfile.TemporaryDirectory() as home:
             master, slave = pty.openpty()
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
             process = subprocess.Popen(
                 [
                     sys.executable,
@@ -55,13 +110,13 @@ class AuthTerminalTests(unittest.TestCase):
             os.close(slave)
             secret = b"fake-terminal-only-secret"
             steps = [
-                (b"> ", b"1\n"),
-                (b"> ", b"2\n"),
-                (b"Profile name [deepseek]: ", b"\n"),
-                (b"Model ID available to your account [deepseek-flash]: ", b"\n"),
-                (b"Base URL [https://api.deepseek.com/anthropic]: ", b"\n"),
-                (b"API key: ", secret + b"\n"),
-                (b"> ", b"0\n"),
+                (b"Add provider", b"\r"),
+                (b"Connection type", b"\x1b[B\r"),
+                (b"Profile name", b"\r"),
+                (b"account", b"\r"),
+                (b"/anthropic", b"\r"),
+                (b"API key", secret + b"\r"),
+                (b"Model profiles", b"\x03"),
             ]
             output = b""
             cursor = 0
@@ -78,10 +133,15 @@ class AuthTerminalTests(unittest.TestCase):
                         cursor = len(output)
                         os.write(master, steps[index][1])
                         index += 1
-                self.assertEqual(index, len(steps))
+                self.assertEqual(
+                    index,
+                    len(steps),
+                    output[-2500:]
+                    .replace(secret, b"[hidden]")
+                    .decode(errors="replace"),
+                )
                 self.assertEqual(process.wait(timeout=2), 0)
                 self.assertNotIn(secret, output)
-                self.assertNotIn(b"\x1b", output)
                 saved = json.loads(
                     (
                         Path(home)
@@ -129,12 +189,13 @@ class AuthTerminalTests(unittest.TestCase):
                             except OSError:
                                 break
                         if b"Add provider" in output and not sent_cancel:
-                            os.write(master, b"0\n")
+                            os.write(master, b"\x03")
                             sent_cancel = True
                     self.assertIn(b"Add provider", output)
                     self.assertIn(b"LiteraryGiant", output)
-                    self.assertNotIn(b"\x1b", output)
-                    self.assertTrue(output.isascii())
+                    self.assertNotIn(b"0. Back", output)
+                    self.assertEqual(output.count(b"\x1b[?1049h"), 1)
+                    self.assertEqual(output.count(b"\x1b[?1049l"), 1)
                     self.assertEqual(process.wait(timeout=2), 0)
                 finally:
                     if process.poll() is None:

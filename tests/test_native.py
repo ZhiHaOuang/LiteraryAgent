@@ -51,6 +51,9 @@ class NativeTests(unittest.TestCase):
             args = writing_args(make_config(Path(raw)))
             settings = dict(item.split("=", 1) for item in args if item != "-c")
             self.assertEqual(settings["features.shell_tool"], "false")
+            self.assertEqual(settings["skills.bundled.enabled"], "false")
+            self.assertEqual(settings["include_apps_instructions"], "false")
+            self.assertEqual(settings["include_collaboration_mode_instructions"], "false")
             self.assertEqual(settings["mcp_servers.lg_writing.required"], "true")
             self.assertEqual(
                 len(json.loads(settings["mcp_servers.lg_writing.enabled_tools"])), 9

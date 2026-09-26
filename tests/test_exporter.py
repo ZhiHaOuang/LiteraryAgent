@@ -10,6 +10,32 @@ from lg_cli.project_store import ProjectStore
 
 
 class ExporterTests(unittest.TestCase):
+    def test_default_exports_belong_to_author_assets_not_agent_runtime(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            store = ProjectStore(root)
+            store.initialize(name="Author exports")
+            result = export_project(store, target="manuscript")
+            self.assertEqual(result.path.parent, root / "exports")
+            self.assertTrue(result.path.is_file())
+            self.assertFalse(result.path.is_relative_to(store.root))
+
+    def test_unaccepted_chapter_text_is_excluded_unless_requested(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            store = ProjectStore(root)
+            store.initialize(name="Export states")
+            store.create_document(kind="chapter", slug="draft", title="Draft",
+                                  content="UNACCEPTED CHAPTER", state="draft")
+            result = export_project(store, target="manuscript", output_path=root / "final.md")
+            self.assertNotIn("UNACCEPTED CHAPTER", result.path.read_text())
+            draft = export_project(store, target="manuscript", include_drafts=True,
+                                   output_path=root / "draft.md")
+            self.assertIn("UNACCEPTED CHAPTER", draft.path.read_text())
+            store.accept_version("draft", 1)
+            final = export_project(store, target="manuscript", output_path=root / "accepted.md")
+            self.assertIn("UNACCEPTED CHAPTER", final.path.read_text())
+
     def test_manuscript_exports_accepted_text_to_all_formats(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

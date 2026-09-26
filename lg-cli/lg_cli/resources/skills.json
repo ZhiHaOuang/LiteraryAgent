@@ -525,7 +525,7 @@
     },
     {
       "name": "memory-updater",
-      "purpose": "Update .literarygiant/memory for characters, places, setting, plot, timeline, relationships, foreshadowing, and error records.",
+      "purpose": "Propose source-linked database memory updates; classify supplemental book notes in ReferenceLibrary/bible without silently changing Canonical facts.",
       "when_to_use": "After new outline, world, character, plot, chapter, check, or revision output creates durable story facts.",
       "inputs": [
         "new_facts",

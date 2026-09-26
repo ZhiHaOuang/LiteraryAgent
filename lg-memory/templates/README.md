@@ -1,8 +1,9 @@
 # LG Memory Templates
 
-`lg init` creates runtime memory files in `.literarygiant/memory/`.
+`lg init` does not create empty memory files. Supplemental notes are created
+only when useful, in the current book's `ReferenceLibrary/bible/`.
 
-The canonical memory files are:
+Optional note filenames are (the project database is authoritative):
 
 - `CHARACTERS.md`
 - `LOCATIONS.md`

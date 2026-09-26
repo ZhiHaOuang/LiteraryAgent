@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import DEFAULT_CONFIG_TEXT
+from .config import DEFAULT_CONFIG_TEXT, PROJECT_AGENT_CONFIG
 from .project_store import ProjectRegistry, ProjectStore
 
 
@@ -34,25 +34,15 @@ class InitResult:
 
 
 def init_workspace(workspace: Path) -> InitResult:
+    new_project = not ProjectStore(workspace).initialized
     created: list[Path] = []
     skipped: list[Path] = []
     root = workspace / ".literarygiant"
     for directory in [
         root,
-        root / "memory",
-        root / "output",
-        root / "output" / "outlines",
-        root / "output" / "worlds",
-        root / "output" / "characters",
-        root / "output" / "plots",
-        root / "output" / "chapters",
-        root / "output" / "reports",
-        root / "output" / "references",
-        root / "output" / "conversations",
-        root / "output" / "plans",
-        root / "output" / "exports",
         root / "logs",
         root / "runs",
+        root / "conversations",
         root / "tmp",
         root / "skills",
         root / "subagents",
@@ -65,6 +55,7 @@ def init_workspace(workspace: Path) -> InitResult:
             skipped.append(directory)
 
     _write_if_missing(root / "config.toml", DEFAULT_CONFIG_TEXT, created, skipped)
+    _write_if_missing(root / "agent.toml", PROJECT_AGENT_CONFIG, created, skipped)
     _write_if_missing(root / "logs" / "agent.log", "", created, skipped)
     _write_if_missing(root / "logs" / "failures.md", "# Failures\n\n", created, skipped)
     _write_if_missing(
@@ -81,11 +72,16 @@ def init_workspace(workspace: Path) -> InitResult:
         skipped,
     )
 
-    for name, text in MEMORY_FILES.items():
-        _write_if_missing(root / "memory" / name, text, created, skipped)
-    for name, text in OUTPUT_FILES.items():
-        _write_if_missing(root / "output" / name, text, created, skipped)
     project = ProjectStore(workspace).initialize()
+    if new_project:
+        from .book_assets import organize_book
+        from .supervision import configure_supervision
+
+        # Never relocate pre-existing user references implicitly during init.
+        if not any((workspace / "ReferenceLibrary").iterdir()):
+            organize_book(workspace, apply=True)
+        configure_supervision(ProjectStore(workspace))
+        created.append(root / "supervision.json")
     ProjectRegistry().register(project)
     return InitResult(created=created, skipped=skipped)
 

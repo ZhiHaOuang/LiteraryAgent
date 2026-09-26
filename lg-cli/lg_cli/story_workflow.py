@@ -8,6 +8,7 @@ from typing import Any
 
 from .config import LGConfig
 from .core_adapter import CodexExecAdapter, CoreExecutionResult
+from .definitions import DefinitionRegistry
 from .events import EventSink, EventType, RunEvent
 from .logging_utils import append_agent_log, ensure_log_dir, write_text
 from .output_writer import write_workflow_output
@@ -15,7 +16,6 @@ from .project_store import DocumentRecord, DocumentVersion, ProjectStore, SceneC
 from .run_store import RunHandle, RunStore
 from .story_context import render_scene_card, render_story_context
 from .workflow_runner import EXIT_CONFIGURATION, EXIT_MODEL, EXIT_OK, ModelAdapter
-
 
 REVISION_MODES = {
     "light",
@@ -66,6 +66,60 @@ class StoryWorkflowService:
         self.project = project or ProjectStore(config.workspace)
         self.adapter = adapter or CodexExecAdapter()
         self.runs = runs or RunStore(config.workspace)
+        self.registry = DefinitionRegistry(config.workspace)
+
+    def curate_document(self, reference: str | int, *, request: str = "",
+                        dry_run: bool = False, on_event: EventSink | None = None) -> StoryTaskResult:
+        document = self.project.get_document(reference)
+        handle, emit = self._new_run("bible_curation", "bible-curate", request, on_event)
+        if not document.content.strip():
+            return self._fail(handle, emit, "Source document has no active text.", EXIT_CONFIGURATION,
+                              document=document)
+        prompt = "\n\n".join([
+            "# LiteraryGiant Story Bible Curation",
+            "Extract only durable facts supported by the source document. Do not invent or resolve "
+            "conflicts by silently changing canon. Return concise atomic memory_proposals with stable "
+            "category/key pairs, tags, and a rationale citing the source passage. Avoid duplicate facts "
+            "already in Canonical memory. These are proposals, never automatic canon edits.",
+            "## Author Request\n" + request,
+            f"## Source: {document.slug} v{document.active_version_number}\n{document.content}",
+            render_story_context(self.project.context_snapshot(query=document.title)),
+            "Return only the provided JSON schema: summary, memory_proposals, risks.",
+        ])
+        prompt = self._write_prompt(handle, "bible-curate", prompt)
+        if dry_run:
+            return self._plan_only(handle, emit, "bible-curate", prompt, document)
+        if not self.config.credentials_configured:
+            return self._fail(handle, emit, "No model credentials configured.", EXIT_CONFIGURATION, document=document)
+        emit.emit(EventType.STAGE_STARTED, "MemoryAgent using story-bible-curator", stage_id="bible-curate")
+        result = self._model_run(prompt, "bible-curate", "memory-proposals.schema.json", emit)
+        if not result.ok:
+            return self._fail_from_model(handle, emit, result, document, "bible-curate")
+        try:
+            payload = _json_object(result.output_text, "Bible curation")
+            _require_string(payload, "summary", "Bible curation")
+            _validate_proposals(payload.get("memory_proposals"), "Bible curation")
+            _validate_strings(payload.get("risks"), "Bible curation risks")
+        except ValueError as exc:
+            return self._fail(handle, emit, str(exc), EXIT_MODEL, document=document, stage_id="bible-curate")
+        proposals = self._store_memory_proposals(payload["memory_proposals"], document.id,
+                                                  document.active_version_number)
+        text = payload["summary"] + "\n\n" + "\n".join(
+            f"- Proposal {key}: [{item['category']}] {item['key']}: {item['value']}"
+            for key, item in zip(proposals, payload["memory_proposals"], strict=True)
+        )
+        self.runs.write_stage(handle, stage_id="bible-curate", content=text,
+            metadata={"skill": "story-bible-curator", "agent": "memory", "proposal_ids": proposals,
+                      "source_document": document.id, "source_version": document.active_version_number,
+                      "risks": payload["risks"], "adapter": _adapter_metadata(result)})
+        artifact = write_workflow_output(self.config.workspace, "bible-proposal", text,
+            output_root=self.config.output_path, run_id=handle.run_id)
+        emit.emit(EventType.STAGE_COMPLETED, payload["summary"], stage_id="bible-curate")
+        emit.emit(EventType.RUN_COMPLETED, "Memory proposals saved; Canonical facts unchanged")
+        self.runs.finalize(handle, status="completed", artifact_path=artifact.output_path,
+                           latest_path=artifact.latest_path)
+        return StoryTaskResult("bible-curate", handle.run_id, "completed", text, document, None,
+                               artifact.output_path, EXIT_OK)
 
     def plan_scene(
         self,
@@ -110,6 +164,7 @@ class StoryWorkflowService:
         mode: str,
         request: str = "",
         source_version: int | None = None,
+        passage: str | None = None,
         dry_run: bool = False,
         on_event: EventSink | None = None,
     ) -> StoryTaskResult:
@@ -129,9 +184,26 @@ class StoryWorkflowService:
                 EXIT_CONFIGURATION,
                 document=document,
             )
-        snapshot = self.project.context_snapshot(query=f"{document.title} {request_text}")
-        prompt = _revision_prompt(document, source_text, snapshot, normalized_mode, request_text)
-        return self._execute_revision(handle, emit, document, prompt, dry_run, normalized_mode, source)
+        snapshot = self.project.context_snapshot(
+            scene=document.id if document.kind == "scene" else None,
+            query=f"{document.title} {request_text}",
+        )
+        snapshot["documents"] = [item for item in snapshot["documents"] if item.id != document.id]
+        if passage is not None and (not passage.strip() or source_text.find(passage) < 0
+                                    or source_text.find(passage) != source_text.rfind(passage)):
+            return self._fail(handle, emit, "Passage must match exactly once in the selected source version.",
+                              EXIT_CONFIGURATION, document=document)
+        surroundings = None
+        if passage is not None:
+            offset = source_text.index(passage)
+            surroundings = (source_text[max(0, offset - 600):offset],
+                            source_text[offset + len(passage):offset + len(passage) + 600])
+        prompt = _revision_prompt(document, passage if passage is not None else source_text, snapshot,
+                                  normalized_mode, request_text, passage_only=passage is not None,
+                                  surroundings=surroundings)
+        return self._execute_revision(handle, emit, document, prompt, dry_run, normalized_mode, source,
+                                      passage=passage, source_text=source_text,
+                                      context_documents=tuple(snapshot["documents"]))
 
     def _execute_scene_plan(
         self,
@@ -141,7 +213,7 @@ class StoryWorkflowService:
         prompt: str,
         dry_run: bool,
     ) -> StoryTaskResult:
-        self._write_prompt(handle, "scene-plan", prompt)
+        prompt = self._write_prompt(handle, "scene-plan", prompt)
         emit.emit(EventType.CONTEXT_STARTED, "Collected scene card, Story Bible, related scenes, and open threads")
         emit.emit(EventType.CONTEXT_COMPLETED, "Scene planning context is ready")
         if dry_run:
@@ -162,7 +234,20 @@ class StoryWorkflowService:
             payload = _parse_scene_plan(result.output_text)
         except ValueError as exc:
             return self._fail(handle, emit, str(exc), EXIT_MODEL, document=scene.document, stage_id="scene-plan")
-        updates = payload["card_updates"]
+        proposed_updates = payload["card_updates"]
+        current_scene = self.project.get_scene(scene.document.id)
+        updates = {
+            key: value for key, value in proposed_updates.items()
+            if getattr(current_scene, key) in (None, "", (), [])
+        }
+        # The prose range is one author constraint, not the requested plan length.
+        if current_scene.word_min is not None or current_scene.word_max is not None:
+            updates.pop("word_min", None)
+            updates.pop("word_max", None)
+        ignored = {key: value for key, value in proposed_updates.items()
+                   if key not in updates and value != getattr(current_scene, key)}
+        notice = ("Preserved existing scene card fields: " + ", ".join(sorted(ignored))
+                  + ". Use `literary scene set` to change them explicitly.") if ignored else ""
         if updates:
             self.project.update_scene_card(scene.document.id, **updates)
         updated = self.project.set_scene_plan(scene.document.id, payload["plan_markdown"], state="candidate")
@@ -174,6 +259,7 @@ class StoryWorkflowService:
             metadata={
                 "summary": payload["summary"],
                 "card_updates": updates,
+                "ignored_card_updates": ignored,
                 "proposal_ids": proposals,
                 "risks": payload["risks"],
                 "adapter": _adapter_metadata(result),
@@ -181,7 +267,7 @@ class StoryWorkflowService:
         )
         artifact = write_workflow_output(
             self.config.workspace,
-            "candidate",
+            "scene-plan",
             payload["plan_markdown"],
             output_root=self.config.output_path,
             run_id=handle.run_id,
@@ -195,6 +281,8 @@ class StoryWorkflowService:
             "Review it, then run `literary scene approve "
             f"{updated.document.slug}` before generating prose.\n\n{payload['plan_markdown']}"
         )
+        if notice:
+            text += "\n\n" + notice
         return StoryTaskResult(
             "scene-plan", handle.run_id, "completed", text, updated.document, None, artifact.output_path, EXIT_OK
         )
@@ -207,7 +295,7 @@ class StoryWorkflowService:
         prompt: str,
         dry_run: bool,
     ) -> StoryTaskResult:
-        self._write_prompt(handle, "scene-draft", prompt)
+        prompt = self._write_prompt(handle, "scene-draft", prompt)
         emit.emit(EventType.CONTEXT_STARTED, "Collected approved scene plan and relevant project context")
         emit.emit(EventType.CONTEXT_COMPLETED, "Scene drafting context is ready")
         if dry_run:
@@ -290,8 +378,12 @@ class StoryWorkflowService:
         dry_run: bool,
         mode: str,
         source: DocumentVersion | None,
+        *,
+        passage: str | None = None,
+        source_text: str = "",
+        context_documents: tuple[DocumentRecord, ...] = (),
     ) -> StoryTaskResult:
-        self._write_prompt(handle, "revision", prompt)
+        prompt = self._write_prompt(handle, "revision", prompt)
         emit.emit(EventType.CONTEXT_STARTED, "Collected source text, Story Bible, and related writing context")
         emit.emit(EventType.CONTEXT_COMPLETED, f"Revision context is ready for {mode} mode")
         if dry_run:
@@ -312,6 +404,22 @@ class StoryWorkflowService:
             payload = _parse_revision(result.output_text)
         except ValueError as exc:
             return self._fail(handle, emit, str(exc), EXIT_MODEL, document=document, stage_id="revision")
+        replacement = payload["revision_markdown"].strip()
+        if len(replacement) >= 120 and replacement != source_text.strip():
+            for context_document in context_documents:
+                if replacement == context_document.content.strip():
+                    return self._fail(
+                        handle, emit,
+                        f"Revision copied unrelated context document '{context_document.slug}'; selected source was not revised.",
+                        EXIT_MODEL, document=document, stage_id="revision",
+                    )
+        if passage is not None:
+            before, after = source_text.split(passage, 1)
+            boundaries = [paragraph.strip() for side in (before, after) for paragraph in side.split("\n\n")]
+            if any(len(boundary) >= 40 and boundary in payload["revision_markdown"] for boundary in boundaries):
+                return self._fail(handle, emit, "Replacement copied an unchanged paragraph outside the selection; narrow the revision request.",
+                                  EXIT_MODEL, document=document, stage_id="revision")
+            payload["revision_markdown"] = source_text.replace(passage, payload["revision_markdown"], 1)
         version = self.project.create_version(
             document.id,
             content=payload["revision_markdown"],
@@ -321,6 +429,7 @@ class StoryWorkflowService:
                 "run_id": handle.run_id,
                 "mode": mode,
                 "source_version": source.version_number if source else document.active_version_number,
+                "passage": passage,
                 "change_log": payload["change_log"],
                 "risks": payload["risks"],
             },
@@ -379,9 +488,31 @@ class StoryWorkflowService:
         emitter.emit(EventType.RUN_STARTED, f"Starting {workflow}", data={"command": command})
         return handle, emitter
 
-    def _write_prompt(self, handle: RunHandle, stage_id: str, prompt: str) -> None:
+    def _specialist(self, stage_id: str):
+        agent_id, skill_id = {
+            "scene-plan": ("scene-planner", "scene-planner"),
+            "scene-draft": ("chapter-writer", "chapter-writer"),
+            "revision": ("manuscript-editor", "manuscript-editor"),
+            "bible-curate": ("memory", "story-bible-curator"),
+        }[stage_id]
+        return self.registry.agent(agent_id), self.registry.skill(skill_id)
+
+    def _write_prompt(self, handle: RunHandle, stage_id: str, prompt: str) -> str:
+        from .book_analysis import BookAnalysisStore
+
+        agent, skill = self._specialist(stage_id)
+        prompt = "\n\n".join([
+            f"## Assigned Subagent: {agent.id}\n{agent.prompt}",
+            f"## Assigned Skill: {skill.id}\n{skill.instructions}",
+            "## Project Writing Instructions\n" + self.config.project_instructions,
+            "## Current Book Analyses\nTreat these as source-linked interpretations, not Canonical facts.\n"
+            + BookAnalysisStore(self.project).context(),
+            prompt,
+            "Use the operation's supplied JSON schema, not any alternative schema mentioned in a skill.",
+        ])
         self.runs.write_stage_prompt(handle, stage_id=stage_id, prompt=prompt)
         write_text(ensure_log_dir(self.config.workspace) / "last_prompt.md", prompt)
+        return prompt
 
     def _model_run(
         self,
@@ -390,6 +521,8 @@ class StoryWorkflowService:
         schema_name: str,
         emit: _EventEmitter,
     ) -> CoreExecutionResult:
+        agent, _ = self._specialist(stage_id)
+
         def engine_event(payload: dict[str, Any]) -> None:
             item = payload.get("item")
             item_type = item.get("type") if isinstance(item, dict) else None
@@ -404,7 +537,7 @@ class StoryWorkflowService:
             prompt=prompt,
             config=self.config,
             mode="write",
-            model_profile="writer",
+            model_profile=agent.model_profile,
             output_schema=_resource_path(schema_name),
             on_event=engine_event,
         )
@@ -444,7 +577,7 @@ class StoryWorkflowService:
         self.runs.write_stage(handle, stage_id=stage_id, content=text, metadata={"dry_run": True})
         artifact = write_workflow_output(
             self.config.workspace,
-            "plan",
+            "dry-run",
             text,
             output_root=self.config.output_path,
             run_id=handle.run_id,
@@ -542,14 +675,20 @@ def _scene_plan_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str)
                 "Do not add facts directly to canon: list potential additions only in memory_proposals. "
                 "Return only JSON conforming to the provided schema."
             ),
-            "## Author Request\n" + request,
             "## Scene Card\n" + render_scene_card(scene),
             render_story_context(snapshot),
+            "## Author Request\n" + request,
             (
                 "## Required Plan\n"
                 "Use plan_markdown to specify: scene promise, starting state, beat-by-beat actions, conflict escalation, "
                 "information revealed or withheld, emotional movement, causality, ending hook/state, and risks. "
-                "card_updates may fill missing fields but may not erase author-supplied constraints."
+                "An existing plan is a draft to revise, not Canonical truth; apply the current author request "
+                "to the actual plan instead of copying the old plan and merely claiming it changed. "
+                "The scene card length target is for later prose, not this planning artifact. "
+                "card_updates may fill missing fields but may not erase author-supplied constraints. "
+                "The only top-level JSON keys are summary, plan_markdown, card_updates, memory_proposals, risks. "
+                "Map the skill's scene_plan output to plan_markdown and continuity_risks to risks; "
+                "do not emit those skill labels or handoff/artifact fields as additional JSON keys."
             ),
         ]
     )
@@ -565,12 +704,14 @@ def _scene_draft_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str
                 "Do not silently revise canon or previous accepted text. Any possible new durable fact belongs only in memory_proposals. "
                 "Return only JSON conforming to the provided schema."
             ),
-            "## Author Request\n" + request,
             "## Approved Scene Card\n" + render_scene_card(scene),
             render_story_context(snapshot),
+            "## Author Request\n" + request,
             (
                 "## Draft Requirements\n"
                 "draft_markdown must contain only the readable scene prose, without prefatory explanation. "
+                "Planning notes, author instructions, checklists, and future chapter labels are not story text: "
+                "do not copy them into narration or character dialogue. Dramatize the requested actions instead. "
                 "Make the scene change a concrete state. Keep continuity_notes separate from the prose."
             ),
         ]
@@ -583,22 +724,42 @@ def _revision_prompt(
     snapshot: dict[str, Any],
     mode: str,
     request: str,
+    *,
+    passage_only: bool = False,
+    surroundings: tuple[str, str] | None = None,
 ) -> str:
+    scene = snapshot.get("scene")
+    constraints = "Preserve the source narrative POV and tense unless the author explicitly requests a change."
+    if scene is not None:
+        constraints += (f"\nPOV: {scene.pov or 'unspecified'}"
+                        f"\nNarrative tense: {scene.narrative_tense or 'unspecified'}"
+                        f"\nScene time: {scene.time_label or 'unspecified'}")
     return "\n\n".join(
         [
             "# LiteraryGiant Revision",
             (
                 "You are an editing specialist. Create a candidate revision only; do not claim it is accepted. "
                 "Preserve Canonical facts unless the author explicitly requests a canon change. Keep plot changes within the selected revision mode. "
+                "Context documents are references only; never return them in place of the selected Source Document. "
                 "Return only JSON conforming to the provided schema."
             ),
             f"## Revision Mode\n{mode}",
-            "## Author Request\n" + request,
-            f"## Source Document\n{document.title} ({document.slug})\n\n{source_text}",
             render_story_context(snapshot),
+            "## Narrative Constraints\n" + constraints,
+            ("## Unchanged Surroundings (context only; never include in replacement)\n"
+             f"<unchanged_before>\n{surroundings[0]}\n</unchanged_before>\n"
+             f"<unchanged_after>\n{surroundings[1]}\n</unchanged_after>"
+             if surroundings is not None else ""),
+            (f"## Source Document\n{document.title} ({document.slug}, kind={document.kind})\n\n"
+             + (f"<selected_passage>\n{source_text}\n</selected_passage>" if passage_only else source_text)),
+            "## Author Request\n" + request,
             (
                 "## Output Requirements\n"
-                "revision_markdown contains the full revised document. change_log identifies concrete changes. "
+                + ("revision_markdown contains only the replacement passage, never the full document or editing instructions. "
+                 if passage_only else "revision_markdown contains the full revised document. ")
+                + "Apply requested changes to revision_markdown itself, not only the summary or change_log. "
+                "For manuscript prose, keep author instructions and planning commentary out of narration and dialogue. "
+                "change_log identifies concrete changes actually present in the returned text. "
                 "memory_proposals is only for facts that would require author confirmation."
             ),
         ]
@@ -699,6 +860,8 @@ def _validate_proposals(value: Any, label: str) -> None:
         for key in ("category", "key", "value", "rationale"):
             if not isinstance(proposal.get(key), str):
                 raise ValueError(f"{label} memory proposal `{key}` must be a string.")
+            if key != "rationale" and not proposal[key].strip():
+                raise ValueError(f"{label} memory proposal `{key}` cannot be empty.")
         tags = proposal.get("tags")
         if not isinstance(tags, list) or not all(isinstance(item, str) for item in tags):
             raise ValueError(f"{label} memory proposal tags must be an array of strings.")

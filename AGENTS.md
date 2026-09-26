@@ -28,6 +28,6 @@ Use `KnowledgeGateway` for reference retrieval. Search `AbstractLibrary` first, 
 
 New literary behavior belongs in declarative workflows, `SKILL.md` definitions, independent subagent prompts/schemas, or the outer Python runtime. Do not add LG behavior to `core/codex`.
 
-Runtime generated story artifacts should default to `.literarygiant/output/`. Durable story memory should default to `.literarygiant/memory/`.
+File reusable artifacts at creation, not in a later cleanup pass. Workflows route outlines/plots/scene plans to `ReferenceLibrary/plans/`, world/character notes and memory proposals to `ReferenceLibrary/bible/`, critiques to `ReferenceLibrary/reviews/`, reference briefs to `ReferenceLibrary/sources/research/`, and prose candidates to `ReferenceLibrary/drafts/`. Version-validated analyses belong in `ReferenceLibrary/analyses/`. Useful intermediate specialist results follow the same routing and remain explicitly provisional. Filing does not promote Canonical facts or accepted manuscript. Conversations, dry-run previews, database, runs and recovery state remain in `.literarygiant/`. Legacy files require explicit `project organize --apply` to relocate, but newly generated artifacts must already use the classified paths. See `docs/book-layout.md`. Do not recreate empty placeholder documents or eagerly populate output directories.
 
 Do not move, delete, or rewrite user data libraries while working on LG agent code.

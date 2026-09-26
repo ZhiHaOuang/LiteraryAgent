@@ -22,6 +22,12 @@ class ProtocolError(ValueError):
     pass
 
 
+class SchemaOutputError(ProtocolError):
+    def __init__(self, message: str, value: Any):
+        super().__init__(message)
+        self.value = value
+
+
 def _content(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, str):
         return [{"type": "text", "text": value}] if value else []
@@ -33,6 +39,17 @@ def _content(value: Any) -> list[dict[str, Any]]:
             raise ProtocolError("only text content is supported by this writing bridge")
         result.append({"type": "text", "text": part["text"]})
     return result
+
+
+def _schema_error_summary(errors) -> str:
+    # Never include the invalid value: it may contain private manuscript content.
+    return "; ".join(
+        f"{error.json_path}: {error.validator}"
+        + (" (missing: " + ", ".join(key for key in error.validator_value
+                                    if key not in error.instance) + ")"
+           if error.validator == "required" and isinstance(error.instance, dict) else "")
+        for error in errors[:4]
+    )
 
 
 def translate_request(request: dict[str, Any], max_tokens: int) -> tuple[dict, dict]:
@@ -193,6 +210,7 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
     usage: dict = {}
     stop_reason = None
     started = False
+    generated_chars = {"text": 0, "tool_json": 0, "reasoning": 0}
 
     def event(kind: str, **fields: Any) -> dict:
         return {"type": "response." + kind, **fields}
@@ -223,6 +241,14 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
             )
         elif kind == "content_block_start":
             block = source["content_block"]
+            if block["type"] == "text":
+                generated_chars["text"] += len(block.get("text", ""))
+            elif block["type"] == "thinking":
+                generated_chars["reasoning"] += len(block.get("thinking", ""))
+            if block["type"] in {"thinking", "redacted_thinking"}:
+                # Reasoning is not manuscript text or an executable tool result.
+                blocks[source["index"]] = {"spec": {"type": "thinking"}, "closed": False}
+                continue
             index = len(output)
             item_id = "item_" + uuid.uuid4().hex
             if block["type"] == "text":
@@ -284,9 +310,15 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
             )
         elif kind == "content_block_delta":
             state = blocks[source["index"]]
+            if state["spec"]["type"] == "thinking":
+                if source["delta"]["type"] not in {"thinking_delta", "signature_delta"}:
+                    raise ProtocolError("unsupported reasoning delta")
+                generated_chars["reasoning"] += len(source["delta"].get("thinking", ""))
+                continue
             item = state["item"]
             delta = source["delta"]
             if delta["type"] == "text_delta" and state["spec"]["type"] == "text":
+                generated_chars["text"] += len(delta["text"])
                 item["content"][0]["text"] += delta["text"]
                 yield event(
                     "output_text.delta",
@@ -298,6 +330,7 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
             elif (
                 delta["type"] == "input_json_delta" and state["spec"]["type"] != "text"
             ):
+                generated_chars["tool_json"] += len(delta["partial_json"])
                 state["json"] += delta["partial_json"]
                 if state["spec"]["type"] == "function":
                     yield event(
@@ -310,17 +343,29 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
                 raise ProtocolError("unsupported upstream delta")
         elif kind == "content_block_stop":
             state = blocks[source["index"]]
+            if state["spec"]["type"] == "thinking":
+                state["closed"] = True
+                continue
             item, spec = state["item"], state["spec"]
             if spec["type"] != "text":
-                args = json.loads(state["json"]) if state["json"] else state["initial"]
+                try:
+                    args = json.loads(state["json"]) if state["json"] else state["initial"]
+                except json.JSONDecodeError:
+                    if spec["type"] == "structured":
+                        raise SchemaOutputError("structured output is not valid JSON", state["json"]) from None
+                    raise ProtocolError("upstream tool input is not valid JSON") from None
                 if not isinstance(args, dict):
+                    if spec["type"] == "structured":
+                        raise SchemaOutputError("structured output must be an object", args)
                     raise ProtocolError("upstream tool input must be an object")
                 if spec["type"] == "structured":
                     from jsonschema import Draft202012Validator
 
-                    if not Draft202012Validator(spec["schema"]).is_valid(args):
-                        raise ProtocolError(
-                            "structured output does not match the requested schema"
+                    errors = list(Draft202012Validator(spec["schema"]).iter_errors(args))
+                    if errors:
+                        raise SchemaOutputError(
+                            "structured output does not match the requested schema: "
+                            + _schema_error_summary(errors), args,
                         )
                     item["content"][0]["text"] = json.dumps(args, ensure_ascii=False)
                     yield event(
@@ -349,6 +394,16 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
             )
             stop_reason = source.get("delta", {}).get("stop_reason", source.get("stop_reason", stop_reason))
         elif kind == "message_stop":
+            if stop_reason == "max_tokens":
+                reported = usage.get("output_tokens")
+                token_count = reported if type(reported) is int and reported >= 0 else "unknown"
+                raise ProtocolError(
+                    "upstream output token limit reached before completion; "
+                    f"output_tokens={token_count}, text_chars={generated_chars['text']}, "
+                    f"tool_json_delta_chars={generated_chars['tool_json']}, "
+                    f"reasoning_chars={generated_chars['reasoning']}; "
+                    "increase the output budget or shorten the request"
+                )
             if (
                 not started
                 or not output
@@ -458,6 +513,24 @@ class AnthropicBridge:
                         if isinstance(exc, ProtocolError)
                         else "Provider upstream request failed; check credentials, endpoint, and provider availability"
                     )
+                    status = getattr(exc, "status_code", None)
+                    if isinstance(status, int) and 100 <= status <= 599:
+                        message = f"Provider returned HTTP {status}; check the protocol Base URL, model access, and credentials"
+                    if status == 429:
+                        message = "Provider returned HTTP 429 (rate limit or quota); wait before retrying and check provider usage limits"
+                        body = getattr(exc, "body", None)
+                        error = body.get("error") if isinstance(body, dict) else None
+                        if (bridge.config.provider == "glm" and isinstance(error, dict)
+                                and error.get("code") in ("1113", 1113)):
+                            message = ("GLM returned HTTP 429 (code 1113): insufficient balance or usable quota; "
+                                       "check provider billing and plan access before retrying")
+                        headers = getattr(getattr(exc, "response", None), "headers", {}) or {}
+                        retry_after = headers.get("retry-after")
+                        if isinstance(retry_after, str):
+                            retry_after = retry_after.strip()
+                            if (len(retry_after) <= 5 and retry_after.isascii()
+                                    and retry_after.isdigit() and int(retry_after) <= 86400):
+                                message += f"; Retry-After: {int(retry_after)} seconds"
                     if streaming:
                         try:
                             self.emit(
@@ -500,16 +573,47 @@ class AnthropicBridge:
 
     def response_events(self, request: dict) -> Iterable[dict]:
         payload, mapping = translate_request(request, self.config.max_output_tokens)
+        if self.config.provider == "glm" and request["model"].lower() in {
+            "glm-5.3", "glm-5.3-flash", "glm-5.3-flashx",
+        }:
+            # These models require thinking; keep its effort bounded for LG tasks.
+            if self.config.max_output_tokens <= 1024:
+                raise ProtocolError("GLM-5.3 requires max_output_tokens greater than its 1024-token thinking budget")
+            payload["thinking"] = {"type": "enabled", "budget_tokens": 1024}
+            payload["output_config"] = {"effort": "low"}
         if self.config.provider == "stepfun":
             # Only documented StepFun Messages fields may cross this boundary.
             payload.pop("thinking", None)
             payload.pop("tool_choice", None)
             if request.get("tool_choice", "auto") != "auto":
                 raise ProtocolError("StepFun Messages does not document forced tool_choice")
-        for event in translate_stream(self.events(payload), mapping):
-            if event["type"] == "response.completed":
-                self.validate_final_schema(request, event["response"])
-            yield event
+        structured = ((request.get("text") or {}).get("format") or {}).get("type") == "json_schema"
+        if not structured:
+            yield from translate_stream(self.events(payload), mapping)
+            return
+        for attempt in range(2):
+            try:
+                # Validate before emitting response IDs, so one bounded repair cannot
+                # leak a partial failed response into the Codex event stream.
+                events = list(translate_stream(self.events(payload), mapping))
+                for event in events:
+                    if event["type"] == "response.completed":
+                        self.validate_final_schema(request, event["response"])
+            except SchemaOutputError as exc:
+                if attempt:
+                    raise
+                payload["messages"] = [*payload["messages"],
+                    {"role": "assistant", "content": exc.value if isinstance(exc.value, str)
+                     else json.dumps(exc.value, ensure_ascii=False)},
+                    {"role": "user", "content": (
+                        "Repair only the JSON structure of your previous final result. "
+                        "Preserve the manuscript/design content; do not start a new task. "
+                        f"Validation error: {exc}. Follow the lg_structured_output tool schema exactly, "
+                        "with no extra keys. Return the repaired complete result using that tool."
+                    )}]
+                continue
+            yield from events
+            return
 
     @staticmethod
     def validate_final_schema(request: dict, response: dict) -> None:
@@ -525,9 +629,11 @@ class AnthropicBridge:
         try:
             value = json.loads(content)
         except (ValueError, TypeError):
-            raise ProtocolError("Provider did not return the required structured final result") from None
-        if not Draft202012Validator(spec["schema"]).is_valid(value):
-            raise ProtocolError("Provider final result does not match the requested schema")
+            raise SchemaOutputError("Provider did not return the required structured final result", content) from None
+        errors = list(Draft202012Validator(spec["schema"]).iter_errors(value))
+        if errors:
+            raise SchemaOutputError("Provider final result does not match the requested schema: "
+                                    + _schema_error_summary(errors), value)
 
     def events(self, payload: dict) -> Iterable[dict]:
         if self.stream_factory is not None:
@@ -557,6 +663,9 @@ class AnthropicBridge:
             "model_providers.lg_anthropic.supports_websockets": False,
             "model_providers.lg_anthropic.request_max_retries": 0,
             "model_providers.lg_anthropic.stream_max_retries": 0,
+            # Structured output is buffered until validation; the core must not
+            # apply its shorter default idle timeout inside LG's request budget.
+            "model_providers.lg_anthropic.stream_idle_timeout_ms": self.config.timeout_seconds * 1000,
             "model_reasoning_effort": "none",
             "model_supports_reasoning_summaries": False,
             "web_search": "disabled",
