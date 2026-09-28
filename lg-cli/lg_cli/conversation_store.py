@@ -75,7 +75,33 @@ class ConversationStore:
             title = next(
                 (r["text"] for r in records if r["role"] == "user"), "New conversation"
             )
-            result.append((path.stem, " ".join(title.split())[:80]))
+            result.append((path.stem, self.title(path.stem, fallback=title)))
+        return result
+
+    def title(self, conversation: str, *, fallback: str = '新对话') -> str:
+        path = self.path(conversation).with_suffix('.title.json')
+        try:
+            title = json.loads(path.read_text(encoding='utf-8')).get('title')
+            if isinstance(title, str) and title.strip():
+                return title
+        except (FileNotFoundError, ValueError, AttributeError):
+            pass
+        return ' '.join(fallback.split())[:40]
+
+    def rename(self, conversation: str, title: str) -> None:
+        from .output_writer import _atomic_text
+        self.read(conversation)
+        title = ' '.join(title.split())
+        if not title or len(title) > 80:
+            raise ValueError('对话名称需为 1–80 个字符。')
+        _atomic_text(self.path(conversation).with_suffix('.title.json'),
+            json.dumps({'title': title}, ensure_ascii=False) + '\n')
+
+    def choices(self) -> list[tuple[str, str]]:
+        result = []
+        for key, title in self.list():
+            stamp = datetime.fromtimestamp(self.path(key).stat().st_mtime).strftime('%m-%d %H:%M')
+            result.append((key, f'{title}  ·  {stamp}'))
         return result
 
     def context(self, conversation: str, limit: int = 10000) -> str:

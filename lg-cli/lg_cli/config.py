@@ -241,6 +241,8 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
             return asset_root(root, kind)
         return _project_asset_path(root, raw)
 
+    from .preferences import preference_instructions
+
     return LGConfig(
         workspace=root,
         provider=provider,
@@ -252,7 +254,7 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
         output_path=local_asset("output"),
         reference_path=reference,
         library_path=library,
-        project_instructions=_string(policy.get("instructions")),
+        project_instructions=_string(policy.get("instructions")) + preference_instructions(root),
         conversation_chars=_bounded_int(policy.get("conversation_chars"), 10000, 0, 100000),
         allow_external_reference=external,
         knowledge_top_k=_bounded_int(knowledge.get("top_k"), default=6, minimum=1, maximum=30),

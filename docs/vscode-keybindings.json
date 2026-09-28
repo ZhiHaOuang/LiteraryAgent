@@ -1,0 +1,8 @@
+[
+  {
+    "key": "f1",
+    "command": "workbench.action.terminal.sendSequence",
+    "args": { "text": "\u001bOP" },
+    "when": "terminalFocus"
+  }
+]

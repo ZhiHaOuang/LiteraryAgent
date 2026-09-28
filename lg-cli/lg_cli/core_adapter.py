@@ -92,6 +92,12 @@ class CodexExecAdapter:
         output_schema: Path | None = None,
         on_event: EngineEventCallback | None = None,
     ) -> CoreExecutionResult:
+        if output_schema and output_schema.name in {'stage-output.schema.json', 'scene-draft.schema.json', 'revision.schema.json'}:
+            from .story_index import GRAPH_INSTRUCTIONS
+            prompt += '\n' + GRAPH_INSTRUCTIONS
+        guidance = os.environ.get("LG_WORKFLOW_GUIDANCE", "").strip()
+        if guidance:
+            prompt += "\n\nAuthor's latest instructions for this workflow attempt:\n" + guidance
         if not config.credentials_configured:
             return _failure(
                 "no API key configured; use literary auth add PROVIDER or a provider-scoped environment variable",
@@ -175,6 +181,9 @@ class CodexExecAdapter:
         bridge: AnthropicBridge | None = None,
     ) -> CoreExecutionResult:
         temp_dir = config.workspace / ".literarygiant" / "tmp"
+        if not config.uses_anthropic and not config.uses_responses:
+            from .usage_ledger import UsageLedger
+            UsageLedger(config.workspace).start_capture()
         temp_dir.mkdir(parents=True, exist_ok=True)
         final_path = temp_dir / f"core-final-{uuid.uuid4().hex}.txt"
         command = [
@@ -297,6 +306,14 @@ class CodexExecAdapter:
             if stream is not None:
                 stream.close()
         duration = time.monotonic() - started
+        if not config.uses_anthropic and not config.uses_responses:
+            from uuid import uuid4
+            from .usage_ledger import UsageLedger
+            invocation = uuid4().hex
+            for index, event in enumerate(events):
+                if event.get('type') == 'turn.completed' and isinstance(event.get('usage'), dict):
+                    UsageLedger(config.workspace).record(f'exec:{invocation}:{index}', config.provider,
+                        config.model_for_profile(model_profile or '', mode=mode), event['usage'], source='core-exec')
         stdout = "".join(stdout_lines)
         stderr = "".join(stderr_lines)
         final_text = _read_final_message(final_path) or _extract_final_text(events, stdout)

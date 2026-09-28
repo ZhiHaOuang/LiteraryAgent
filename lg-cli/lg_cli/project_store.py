@@ -431,7 +431,7 @@ class ProjectStore:
                 content=content,
                 state=normalized_state,
                 reason=reason,
-                metadata={},
+                metadata={"story_index": metadata["story_index"]} if metadata and "story_index" in metadata else {},
             )
             connection.execute(
                 "UPDATE documents SET active_version_id = ? WHERE id = ?", (version_id, document_id)
@@ -454,7 +454,7 @@ class ProjectStore:
         kind: str | None = None,
         state: str | None = None,
         parent: str | int | None = None,
-        limit: int = 200,
+        limit: int | None = 200,
     ) -> list[DocumentRecord]:
         self._require_initialized()
         clauses: list[str] = []
@@ -479,7 +479,7 @@ class ProjectStore:
                 ORDER BY d.kind, COALESCE(d.sequence, 999999), d.created_at, d.id
                 LIMIT ?
                 """,
-                [*parameters, max(1, min(limit, 1000))],
+                [*parameters, (-1 if limit is None else max(1, min(limit, 1000)))],
             ).fetchall()
             return [self._document_from_row(connection, row) for row in rows]
 
@@ -541,7 +541,8 @@ class ProjectStore:
         return version
 
     def edit_active_document(
-        self, reference: str | int, *, content: str, expected_version_id: int, reason: str
+        self, reference: str | int, *, content: str, expected_version_id: int, reason: str,
+        story_index: dict | None = None,
     ) -> DocumentVersion:
         """Activate a revision only if the author/model read the current version."""
         self._require_initialized()
@@ -553,7 +554,8 @@ class ProjectStore:
                 raise ProjectStoreError("Document changed since it was read; reload before editing.")
             version_id = self._insert_version(
                 connection, document_id=document_id, content=content, state=document.state,
-                reason=reason or "Author-directed edit", metadata={"previous_version_id": expected_version_id},
+                reason=reason or "Author-directed edit", metadata={"previous_version_id": expected_version_id,
+                    **({"story_index": story_index} if story_index is not None else {})},
             )
             self._activate_version(connection, document_id, version_id, state=document.state)
             version = self._get_version(connection, version_id)
@@ -588,7 +590,9 @@ class ProjectStore:
                 )
                 self._activate_version(connection, document_id, version_id, state=document.state)
                 revisions.append(self._get_version(connection, version_id))
-            return revisions
+        from .story_index import refresh_index
+        refresh_index(self)
+        return revisions
 
     def list_versions(self, reference: str | int, *, limit: int = 100) -> list[DocumentVersion]:
         self._require_initialized()
@@ -648,6 +652,11 @@ class ProjectStore:
         return document
 
     def _sync_chapter_file(self, document: DocumentRecord) -> None:
+        from .story_index import refresh_index
+        try:
+            refresh_index(self)
+        except (OSError, ValueError) as exc:
+            warnings.warn(f"Story index needs refresh: {exc}", UserWarning, stacklevel=2)
         if document.kind not in {"chapter", "scene"}:
             return
         chapter_id = document.id if document.kind == "chapter" else document.parent_id
@@ -799,7 +808,7 @@ class ProjectStore:
         category: str | None = None,
         query: str = "",
         tags: Iterable[str] = (),
-        limit: int = 300,
+        limit: int | None = 300,
     ) -> list[StoryFact]:
         self._require_initialized()
         clauses: list[str] = []
@@ -820,7 +829,7 @@ class ProjectStore:
         with self._connection() as connection:
             rows = connection.execute(
                 f"SELECT * FROM story_facts {where} ORDER BY state, category, fact_key, id LIMIT ?",
-                [*parameters, max(1, min(limit, 1000))],
+                [*parameters, (-1 if limit is None else max(1, min(limit, 1000)))],
             ).fetchall()
             return [_fact_from_row(row) for row in rows]
 
@@ -1002,19 +1011,19 @@ class ProjectStore:
         with self._connection() as connection:
             return self._get_scene(connection, self._resolve_document_id(connection, reference, kind="scene"))
 
-    def list_scenes(self, *, chapter: str | int | None = None, limit: int = 300) -> list[SceneCard]:
+    def list_scenes(self, *, chapter: str | int | None = None, limit: int | None = 300) -> list[SceneCard]:
         self._require_initialized()
         with self._connection() as connection:
             if chapter is None:
                 rows = connection.execute(
                     "SELECT document_id FROM scene_cards ORDER BY chapter_id, document_id LIMIT ?",
-                    (max(1, min(limit, 1000)),),
+                    ((-1 if limit is None else max(1, min(limit, 1000))),),
                 ).fetchall()
             else:
                 chapter_id = self._resolve_document_id(connection, chapter, kind="chapter")
                 rows = connection.execute(
                     "SELECT document_id FROM scene_cards WHERE chapter_id = ? ORDER BY document_id LIMIT ?",
-                    (chapter_id, max(1, min(limit, 1000))),
+                    (chapter_id, (-1 if limit is None else max(1, min(limit, 1000)))),
                 ).fetchall()
             scenes = [self._get_scene(connection, int(row["document_id"])) for row in rows]
             return sorted(scenes, key=lambda item: (item.document.sequence or 999999, item.document.id))
@@ -1206,19 +1215,19 @@ class ProjectStore:
             )
             return self._get_timeline_entry(connection, entry_id)
 
-    def list_timeline(self, *, state: str | None = None, limit: int = 500) -> list[TimelineEntry]:
+    def list_timeline(self, *, state: str | None = None, limit: int | None = 500) -> list[TimelineEntry]:
         self._require_initialized()
         with self._connection() as connection:
             if state:
                 normalized_state = _required_choice("timeline state", state, FACT_STATES)
                 rows = connection.execute(
                     "SELECT * FROM timeline_entries WHERE state = ? ORDER BY sort_key, id LIMIT ?",
-                    (normalized_state, max(1, min(limit, 1000))),
+                    (normalized_state, (-1 if limit is None else max(1, min(limit, 1000)))),
                 ).fetchall()
             else:
                 rows = connection.execute(
                     "SELECT * FROM timeline_entries ORDER BY sort_key, id LIMIT ?",
-                    (max(1, min(limit, 1000)),),
+                    ((-1 if limit is None else max(1, min(limit, 1000))),),
                 ).fetchall()
             return [_timeline_from_row(row) for row in rows]
 
@@ -1730,6 +1739,9 @@ class ProjectStore:
         reason: str,
         metadata: dict[str, Any],
     ) -> int:
+        if 'story_index' in metadata:
+            from .story_index import validate_graph
+            metadata = dict(metadata, story_index=validate_graph(metadata['story_index']))
         row = connection.execute(
             "SELECT COALESCE(MAX(version_number), 0) AS maximum FROM document_versions WHERE document_id = ?",
             (document_id,),

@@ -219,10 +219,22 @@ class ProviderProfileTests(unittest.TestCase):
         config = load_config(self.root, environment="experiment")
         session = Mock()
         session.run_command = AsyncMock(return_value=0)
+        requests = []
+        class Agent:
+            thread_id = 'main'
+            def __init__(self, current, on_event, **kwargs):
+                self.config = current
+            async def start(self, **kwargs):
+                pass
+            async def run(self, text):
+                requests.append((self.config, text))
+            async def close(self):
+                pass
         def run(handler, model, provider):
             async def exercise():
                 for value in ("/auth use glm", "continue the novel", "/exit"):
                     await handler(value)
+                await session.shutdown_handler()
                 return 0
             return asyncio.run(exercise())
         session.run.side_effect = run
@@ -230,6 +242,7 @@ class ProviderProfileTests(unittest.TestCase):
             return function()
         with (
             patch("lg_cli.main.LiteraryInput", return_value=session),
+            patch("lg_cli.live_agent.LiveAgent", Agent),
             patch("lg_cli.main.run_in_terminal", side_effect=terminal),
             redirect_stdout(io.StringIO()),
         ):
@@ -241,9 +254,11 @@ class ProviderProfileTests(unittest.TestCase):
         )
         self.assertFalse(read_profiles("sandbox")["profiles"])
         self.assertEqual(session.provider, "glm")
-        argv = session.run_command.call_args.args[0]
-        self.assertEqual(argv[argv.index("--environment") + 1], "experiment")
-        self.assertEqual(argv[-1], "continue the novel")
+        current, text = requests[0]
+        self.assertEqual((current.provider, current.default_model, current.environment),
+            ('glm', 'glm-test', 'experiment'))
+        self.assertEqual(text, 'continue the novel')
+        session.run_command.assert_not_called()
 
     def test_tui_cancel_preserves_active_profile(self):
         save_profile("test", "old", "key")

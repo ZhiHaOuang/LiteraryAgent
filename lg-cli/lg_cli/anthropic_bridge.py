@@ -36,7 +36,7 @@ def _content(value: Any) -> list[dict[str, Any]]:
     result = []
     for part in value:
         if part.get("type") not in {"input_text", "output_text", "text"}:
-            raise ProtocolError("only text content is supported by this writing bridge")
+            raise ProtocolError("unsupported content type: " + str(part.get("type")))
         result.append({"type": "text", "text": part["text"]})
     return result
 
@@ -116,6 +116,11 @@ def translate_request(request: dict[str, Any], max_tokens: int) -> tuple[dict, d
                 append(role, content)
             else:
                 raise ProtocolError("unsupported message role")
+        elif kind == "agent_message":
+            content = _content(item.get("content", []))
+            label = json.dumps({"author": item.get("author", ""),
+                                "recipient": item.get("recipient", "")}, ensure_ascii=False)
+            append("user", [{"type": "text", "text": "Agent message " + label}, *content])
         elif kind in {"function_call", "custom_tool_call"}:
             name = next(
                 (
@@ -293,6 +298,12 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
                     }
                     if spec["namespace"]:
                         item["namespace"] = spec["namespace"]
+                    # Messages providers return plaintext arguments; the core otherwise
+                    # treats v2 collaboration message fields as encrypted payloads.
+                    if spec["namespace"] == "collaboration" and spec["name"] in {
+                        "spawn_agent", "send_message", "followup_task"
+                    }:
+                        item["encrypted_function_args"] = []
                     item["input" if spec["type"] == "custom" else "arguments"] = ""
             else:
                 raise ProtocolError("unsupported upstream content block")
@@ -636,12 +647,29 @@ class AnthropicBridge:
                                     + _schema_error_summary(errors), value)
 
     def events(self, payload: dict) -> Iterable[dict]:
-        if self.stream_factory is not None:
-            yield from self.stream_factory(payload)
-        else:
-            with self.client.messages.create(**payload) as stream:
-                for event in stream:
-                    yield event.model_dump(exclude_none=True)
+        from uuid import uuid4
+        from .usage_ledger import UsageLedger
+        usage, complete = {}, False
+        request_id = uuid4().hex
+        UsageLedger(self.config.workspace).start_capture()
+        def track(events):
+            nonlocal complete
+            for event in events:
+                reported = (event.get('message') or {}).get('usage', {}) if event.get('type') == 'message_start' else event.get('usage', {})
+                usage.update({k: v for k, v in reported.items() if v is not None})
+                complete = complete or event.get('type') == 'message_stop'
+                yield event
+        try:
+            if self.stream_factory is not None:
+                yield from track(self.stream_factory(payload))
+            else:
+                with self.client.messages.create(**payload) as stream:
+                    yield from track(event.model_dump(exclude_none=True) for event in stream)
+        finally:
+            if type(usage.get('input_tokens')) is int:
+                usage['input_tokens'] += sum(usage.get(k, 0) or 0 for k in ('cache_read_input_tokens', 'cache_creation_input_tokens'))
+            UsageLedger(self.config.workspace).record(request_id, self.config.provider,
+                payload.get('model', self.config.default_model), usage, partial=not complete)
 
     def __exit__(self, *args: object) -> None:
         if self.server:

@@ -47,7 +47,7 @@ def native_binary(manifest_path: Path) -> Path:
     return binary
 
 
-def writing_args(config: LGConfig) -> list[str]:
+def writing_args(config: LGConfig, *, control_socket: str | None = None) -> list[str]:
     instructions = resources.files("lg_cli.resources").joinpath("native-writing.txt")
     settings = {
         "project_doc_max_bytes": 0,
@@ -56,6 +56,7 @@ def writing_args(config: LGConfig) -> list[str]:
         "include_collaboration_mode_instructions": False,
         "model_instructions_file": str(instructions),
         "mcp_servers.lg_writing.command": sys.executable,
+        "mcp_servers.lg_writing.env.PYTHONPATH": str(Path(__file__).resolve().parent.parent),
         "mcp_servers.lg_writing.args": [
             "-m",
             "lg_cli.writing_mcp",
@@ -69,6 +70,7 @@ def writing_args(config: LGConfig) -> list[str]:
             "read_document",
             "create_chapter",
             "edit_manuscript",
+            "update_book_overview",
             "document_history",
             "reference_search",
             "propose_setting",
@@ -86,6 +88,11 @@ def writing_args(config: LGConfig) -> list[str]:
         "features.apps": False,
         "features.recommended_plugins": False,
     }
+    if control_socket:
+        settings["mcp_servers.lg_writing.args"].extend(["--control-socket", control_socket])
+        settings["mcp_servers.lg_writing.enabled_tools"].extend([
+            "workflow_status", "stop_workflow", "retry_workflow",
+        ])
     return [
         arg
         for key, value in settings.items()

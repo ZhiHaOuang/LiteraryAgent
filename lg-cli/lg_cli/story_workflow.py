@@ -324,6 +324,7 @@ class StoryWorkflowService:
             metadata={
                 "run_id": handle.run_id,
                 "continuity_notes": payload["continuity_notes"],
+                **({"story_index": payload["story_index"]} if "story_index" in payload else {}),
                 "risks": payload["risks"],
                 "summary": payload["summary"],
             },
@@ -355,6 +356,10 @@ class StoryWorkflowService:
             output_root=self.config.output_path,
             run_id=handle.run_id,
         )
+        if payload.get('book_overview'):
+            from .book_overview import save_overview
+            save_overview(self.config.workspace, payload['book_overview'],
+                source={'run': handle.run_id, 'version': version.id, 'state': 'candidate'})
         emit.emit(EventType.STAGE_COMPLETED, payload["summary"], stage_id="scene-draft")
         emit.emit(EventType.ARTIFACT_WRITTEN, f"Candidate draft written to {artifact.output_path}")
         emit.emit(EventType.RUN_COMPLETED, "Candidate scene draft created; no manuscript text was overwritten")
@@ -431,6 +436,7 @@ class StoryWorkflowService:
                 "source_version": source.version_number if source else document.active_version_number,
                 "passage": passage,
                 "change_log": payload["change_log"],
+                **({"story_index": payload["story_index"]} if "story_index" in payload and passage is None else {}),
                 "risks": payload["risks"],
             },
         )
@@ -460,6 +466,10 @@ class StoryWorkflowService:
             output_root=self.config.output_path,
             run_id=handle.run_id,
         )
+        if payload.get('book_overview'):
+            from .book_overview import save_overview
+            save_overview(self.config.workspace, payload['book_overview'],
+                source={'run': handle.run_id, 'version': version.id, 'state': 'candidate'})
         emit.emit(EventType.STAGE_COMPLETED, payload["summary"], stage_id="revision")
         emit.emit(EventType.ARTIFACT_WRITTEN, f"Candidate revision written to {artifact.output_path}")
         emit.emit(EventType.RUN_COMPLETED, "Candidate revision created; active text remains unchanged")
@@ -498,6 +508,9 @@ class StoryWorkflowService:
         return self.registry.agent(agent_id), self.registry.skill(skill_id)
 
     def _write_prompt(self, handle: RunHandle, stage_id: str, prompt: str) -> str:
+        if stage_id in {'scene-draft', 'revision'}:
+            from .book_overview import overview_context
+            prompt += '\n' + overview_context(self.config.workspace)
         from .book_analysis import BookAnalysisStore
 
         agent, skill = self._specialist(stage_id)
@@ -782,20 +795,30 @@ def _parse_scene_plan(text: str) -> dict[str, Any]:
 def _parse_scene_draft(text: str) -> dict[str, Any]:
     payload = _json_object(text, "Scene draft")
     _require_string(payload, "summary", "Scene draft")
+    from .book_overview import validate_overview
+    validate_overview(payload.get('book_overview'))
     _require_nonempty_string(payload, "draft_markdown", "Scene draft")
     _validate_strings(payload.get("continuity_notes"), "Scene draft continuity_notes")
     _validate_proposals(payload.get("memory_proposals"), "Scene draft")
     _validate_strings(payload.get("risks"), "Scene draft risks")
+    if 'story_index' in payload:
+        from .story_index import validate_graph
+        validate_graph(payload['story_index'])
     return payload
 
 
 def _parse_revision(text: str) -> dict[str, Any]:
     payload = _json_object(text, "Revision")
     _require_string(payload, "summary", "Revision")
+    from .book_overview import validate_overview
+    validate_overview(payload.get('book_overview'))
     _require_nonempty_string(payload, "revision_markdown", "Revision")
     _validate_strings(payload.get("change_log"), "Revision change_log")
     _validate_proposals(payload.get("memory_proposals"), "Revision")
     _validate_strings(payload.get("risks"), "Revision risks")
+    if 'story_index' in payload:
+        from .story_index import validate_graph
+        validate_graph(payload['story_index'])
     return payload
 
 

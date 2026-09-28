@@ -1,0 +1,290 @@
+{
+  "version": "lg.backend.v1",
+  "methods": {
+    "initialize": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "required": []
+    },
+    "session/list": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "required": []
+    },
+    "session/create": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "required": []
+    },
+    "session/open": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "session/read": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "session/close": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "session/rename": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "sessionId",
+        "title"
+      ]
+    },
+    "events/read": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "after": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "permissions/set": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "mode": {
+          "enum": [
+            "ask",
+            "auto_review",
+            "full_access"
+          ]
+        },
+        "creativeMode": {
+          "enum": [
+            "ask",
+            "auto_review",
+            "full_access"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "mode"
+      ]
+    },
+    "run/start": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "outputSchema": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "sessionId",
+        "text"
+      ]
+    },
+    "run/steer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        }
+      },
+      "required": [
+        "sessionId",
+        "text"
+      ]
+    },
+    "run/cancel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "approval/resolve": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "approvalId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "approvalId",
+        "result"
+      ]
+    },
+    "reference/contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "required": []
+    },
+    "reference/validate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "card": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "category",
+        "card"
+      ]
+    },
+    "workflow/start": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "chapter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        }
+      },
+      "required": [
+        "sessionId",
+        "category",
+        "chapter"
+      ]
+    },
+    "creative/apply": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "action": {
+          "enum": [
+            "promoteFact",
+            "acceptVersion"
+          ]
+        },
+        "factId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "document": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "sessionId",
+        "action"
+      ]
+    },
+    "protocol/schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "required": []
+    }
+  }
+}

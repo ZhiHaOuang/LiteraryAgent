@@ -41,7 +41,7 @@ class TerminalInputTests(unittest.TestCase):
 
         async def exercise(editor, pipe):
             editor.buffer.history.append_string("old command")
-            editor.append("".join(f"line {i}\n" for i in range(100)))
+            editor.append("".join(f"line {i}\n\n" for i in range(100)), role="assistant")
             task = asyncio.create_task(editor.app.run_async())
             try:
                 await asyncio.sleep(0.05)

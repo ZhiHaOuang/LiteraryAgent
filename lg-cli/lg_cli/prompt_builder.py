@@ -88,6 +88,7 @@ def build_stage_prompt(
             (
                 "## Stage Output Contract\n"
                 "summary: a compact account of decisions made.\n"
+                "book_overview: one concise Chinese sentence summarizing the whole book when writing prose; otherwise an empty string.\n"
                 "artifact_markdown: the complete stage deliverable in Markdown.\n"
                 "handoff: an object with exactly these five keys: established_facts, assumptions, "
                 "constraints, open_questions, next_actions. Every value must be an array of strings, "

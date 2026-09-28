@@ -185,6 +185,10 @@ class RunStore:
             raise ValueError("Run artifact is empty")
         project = ProjectStore(self.workspace)
         metadata = {"run_id": run_id, "artifact_path": str(artifact)}
+        from .story_index import artifact_graph
+        graph = artifact_graph(self.workspace, artifact)
+        if graph is not None:
+            metadata['story_index'] = graph
         try:
             document = project.get_document(slug)
         except ProjectStoreError:

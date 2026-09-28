@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -287,6 +289,8 @@ class WorkflowRunner:
             )
 
         prior_outputs: list[tuple[str, str]] = []
+        final_graph = None
+        final_overview = None
         completed_stage_ids = self._restore_prior_stages(
             resumed_from=resumed_from,
             handle=handle,
@@ -294,6 +298,10 @@ class WorkflowRunner:
             prior_outputs=prior_outputs,
             emit=emit,
         )
+        if prior_outputs:
+            final_metadata = self.store.read_stage_metadata(handle.run_id, prior_outputs[-1][0])
+            final_graph = final_metadata.get('story_index')
+            final_overview = final_metadata.get('book_overview')
 
         for index, stage in enumerate(stages, start=1):
             stage_id = str(stage.get("id") or f"stage-{index}")
@@ -334,6 +342,9 @@ class WorkflowRunner:
                 max_context_chars=self.config.max_stage_context_chars,
                 project_context=project_context,
             )
+            if command == 'write':
+                from .book_overview import overview_context
+                prompt = replace(prompt, text=prompt.text + '\n' + overview_context(self.config.workspace))
             prompt_path = self.store.write_stage_prompt(handle, stage_id=stage_id, prompt=prompt.text)
             write_text(ensure_log_dir(self.config.workspace) / "last_prompt.md", prompt.text)
             emit(
@@ -385,6 +396,9 @@ class WorkflowRunner:
 
             try:
                 parsed = _parse_stage_output(core_result.output_text)
+                if command == 'write' and index == len(stages):
+                    from .book_overview import validate_overview
+                    validate_overview(parsed.get('book_overview'))
             except ValueError as exc:
                 emit(EventType.STAGE_FAILED, str(exc), stage_id=stage_id)
                 return self._fail(
@@ -396,6 +410,8 @@ class WorkflowRunner:
                     stage_id=stage_id,
                 )
             artifact = str(parsed["artifact_markdown"]).strip()
+            final_graph = parsed.get('story_index')
+            final_overview = parsed.get('book_overview')
             stage_artifact = None
             if command not in {"chat", "code"} and index < len(stages):
                 stage_artifact = write_workflow_output(
@@ -413,6 +429,8 @@ class WorkflowRunner:
                     "model_profile": agent.model_profile,
                     "prompt_path": str(prompt_path),
                     "summary": parsed["summary"],
+                    **({'story_index': final_graph} if final_graph is not None else {}),
+                    **({'book_overview': final_overview} if final_overview else {}),
                     "handoff": parsed["handoff"],
                     "risks": parsed["risks"],
                     "adapter": _adapter_metadata(core_result),
@@ -451,6 +469,13 @@ class WorkflowRunner:
                 "latest_path": str(output.latest_path),
             },
         )
+        if final_graph is not None and command not in {'chat', 'code'}:
+            from .story_index import save_artifact_index
+            save_artifact_index(self.config.workspace, output.output_path, final_graph, display=False)
+            save_artifact_index(self.config.workspace, output.latest_path or output.output_path, final_graph)
+        if final_overview and command == 'write':
+            from .book_overview import save_overview
+            save_overview(self.config.workspace, final_overview, source={'run': handle.run_id, 'state': 'draft'})
         emit(EventType.RUN_COMPLETED, f"Completed {workflow_name}")
         self.store.finalize(
             handle,
@@ -601,8 +626,14 @@ def _parse_stage_output(text: str) -> dict[str, Any]:
         raise ValueError("Model stage artifact_markdown must be a non-empty string.")
     if not isinstance(value["summary"], str):
         raise ValueError("Model stage summary must be a string.")
+    if value.get('book_overview'):
+        from .book_overview import validate_overview
+        validate_overview(value['book_overview'])
     if not isinstance(value["handoff"], dict):
         raise ValueError("Model stage handoff must be an object.")
+    if 'story_index' in value:
+        from .story_index import validate_graph
+        validate_graph(value['story_index'])
     if not isinstance(value["risks"], list) or not all(
         isinstance(item, str) for item in value["risks"]
     ):

@@ -49,6 +49,28 @@ class ResponsesBridge(AnthropicBridge):
             )
 
     def validated_events(self, events: Iterable[dict], request: dict) -> Iterable[dict]:
+        from uuid import uuid4
+        from .usage_ledger import UsageLedger
+        request_id = uuid4().hex
+        UsageLedger(self.config.workspace).start_capture()
+        usage = {}
+        complete = False
+        def tracked():
+            for event in events:
+                if isinstance(event, dict):
+                    usage.update((event.get('response') or {}).get('usage') or {})
+                yield event
+        try:
+            for event in self._validated_events(tracked(), request):
+                response = event.get('response') or {}
+                usage.update(response.get('usage') or {})
+                complete = event.get('type') == 'response.completed'
+                yield event
+        finally:
+            UsageLedger(self.config.workspace).record(request_id, self.config.provider,
+                request.get('model', self.config.default_model), usage, partial=not complete)
+
+    def _validated_events(self, events: Iterable[dict], request: dict) -> Iterable[dict]:
         for event in events:
             if not isinstance(event, dict) or not isinstance(event.get("type"), str):
                 raise ProtocolError("Invalid Responses event")

@@ -113,7 +113,7 @@ class SlashCommandTests(unittest.TestCase):
                         for y in range(rows)
                     ]
                     offset = 5 if os.environ.get("TERM") == "dumb" else 6
-                    self.assertIn("/status", lines[rows - offset])
+                    self.assertTrue(any("/status" in line for line in lines[:rows - 4]), lines)
                     self.assertTrue(lines[rows - 3].startswith("> /sta"))
                     editor._menu_hidden = True
                     editor.busy = True
@@ -146,17 +146,17 @@ class SlashCommandTests(unittest.TestCase):
             {"/help", "/auth", "/model", "/run", "/chapter", "/clear", "/exit"} <= roots
         )
         self.assertEqual(
-            [c.text for c in matching_commands("/sta", catalog)], ["/status"]
+            [c.text for c in matching_commands("/sta", catalog)][:1], ["/status"]
         )
         self.assertIn(
             "/run resume", [c.text for c in matching_commands("/run r", catalog)]
         )
         self.assertEqual(matching_commands("a /status", catalog), [])
 
-    def test_tab_and_enter_complete_without_immediate_execution(self):
+    def test_enter_executes_and_tab_only_completes(self):
         for keys, expected in (
             ("/sta\t\r", "/status"),
-            ("/sta\r\r", "/status"),
+            ("/sta\r", "/status"),
             ("/run r\t id-123\r", "/run resume id-123"),
             ("/ru\rli\t\r", "/run list"),
         ):

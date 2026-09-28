@@ -19,7 +19,7 @@ from lg_cli.book_analysis import (
 from lg_cli.core_adapter import CoreExecutionResult
 from lg_cli.project_store import ProjectStore, ProjectStoreError
 
-from .helpers import make_config
+from .helpers import make_config, reference_card
 
 
 class BookAnalysisTests(unittest.TestCase):
@@ -34,6 +34,7 @@ class BookAnalysisTests(unittest.TestCase):
         self.fact = self.project.add_fact(category="world", key="gate", value="The gate closes at dusk.", state="canonical")
         self.records = BookAnalysisStore(self.project)
         self.report = {"summary": "Gate rule observed", "entries": [{
+            "instance_card": reference_card("Worldview", stored=True),
             "key": "gate", "label": "Gate", "analysis": "Access is restricted at dusk.",
             "evidence": [{"document_id": self.doc.id, "version_id": self.doc.active_version_id,
                           "quote": "gate was closed at dusk"}],
@@ -74,6 +75,7 @@ class BookAnalysisTests(unittest.TestCase):
 
     def test_service_uses_specialist_and_records_run(self):
         report = copy.deepcopy(self.report)
+        report["entries"][0]["instance_card"] = reference_card("Worldview")
         report["entries"][0]["evidence"] = [{"span_id": next(iter(source_spans(self.records.snapshot("first"))))}]
         class Adapter:
             def run(self, **kwargs):
@@ -90,7 +92,7 @@ class BookAnalysisTests(unittest.TestCase):
         self.assertIn("Each evidence object contains ONLY span_id", adapter.kwargs["prompt"])
         self.assertIn("Every finding must include fact_id", adapter.kwargs["prompt"])
         self.assertIn("missing emphasis is not a contradiction", adapter.kwargs["prompt"])
-        self.assertIn(json.dumps(response_schema(), ensure_ascii=False), adapter.kwargs["prompt"])
+        self.assertIn(json.dumps(response_schema("Worldview"), ensure_ascii=False), adapter.kwargs["prompt"])
         self.assertEqual(service.runs.load(result["run_id"])["status"], "completed")
         started = next(event for event in events if event.type.value == "stage.started")
         self.assertEqual(started.data, {"index": 1, "total": 1, "agent": "worldbuilding"})
@@ -109,13 +111,17 @@ class BookAnalysisTests(unittest.TestCase):
         candidate = self.project.create_version("first", content="The gate remained closed at dusk.")
         snapshot = self.records.candidate_snapshot("first", candidate)
         report = copy.deepcopy(self.report)
+        report["entries"][0]["instance_card"] = reference_card("Worldview")
         report["entries"][0]["evidence"] = [{"span_id": next(iter(source_spans(snapshot)))}]
         barrier = Barrier(2)
 
         class Adapter:
             def run(self, **kwargs):
                 barrier.wait(timeout=10)
-                return CoreExecutionResult(True, False, json.dumps(report), None, "test", [], 0, "", "", 0.01)
+                payload = copy.deepcopy(report)
+                category = Path(kwargs["output_schema"]).name.split(".")[0]
+                payload["entries"][0]["instance_card"] = reference_card(category)
+                return CoreExecutionResult(True, False, json.dumps(payload), None, "test", [], 0, "", "", 0.01)
 
         config = replace(make_config(self.root, api_key="test-placeholder"), enable_reference=False)
 
@@ -141,6 +147,7 @@ class BookAnalysisTests(unittest.TestCase):
 
     def test_invalid_evidence_gets_one_bounded_repair(self):
         valid = copy.deepcopy(self.report)
+        valid["entries"][0]["instance_card"] = reference_card("Worldview")
         valid["entries"][0]["evidence"] = [{"span_id": next(iter(source_spans(self.records.snapshot("first"))))}]
         invalid = copy.deepcopy(valid)
         invalid["entries"][0]["evidence"][0]["span_id"] = "invented-span"
@@ -163,6 +170,7 @@ class BookAnalysisTests(unittest.TestCase):
         snapshot["documents"][0]["content"] = 'She said: “Wait.”\nThen she left.'
         spans = source_spans(snapshot)
         response = copy.deepcopy(self.report)
+        response["entries"][0]["instance_card"] = reference_card("Worldview")
         response["entries"][0]["evidence"] = [{"span_id": next(iter(spans))}]
         report = resolve_evidence(snapshot, response)
         self.assertEqual(report["entries"][0]["evidence"][0]["quote"], 'She said: “Wait.”')

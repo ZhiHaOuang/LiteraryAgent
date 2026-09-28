@@ -4,17 +4,54 @@
 The message region scrolls above the composer; the input, lower rule, and model
 status remain at the bottom during command execution and terminal resizing.
 
+## Book home
+
+Startup opens the last active book's local dashboard. Switching books opens the
+new book's dashboard. Type directly to start talking; `/home` returns without
+discarding the current conversation. Scroll with the wheel, arrows or PageUp/Down;
+`/browse` enters panel navigation: arrows select a panel, Enter opens its entries,
+and Enter again reads details. Escape returns one level at a time and restores
+native mouse selection. The footer shows the navigation hint once. F1 and Ctrl+O
+remain optional compatibility bindings, but no workflow depends on them or requires
+VS Code keybinding changes.
+
+The original crowned slime is centered in a large gold rounded frame with the
+book, author and model. This same animated header stays fixed above home and chat.
+Short/narrow windows use the compact original mark while retaining the centered frame. First paint uses local data or a timestamped screen cache before workflow
+imports; source-validated indices and usage summaries refresh in the background.
+Personal caches live outside Git under `$XDG_CACHE_HOME/literarygiant/home`.
+
+Book overview, characters, relationships, current events, full plans, preferences
+and token usage have separate rounded panels. Narrow terminals stack them; medium
+and wide terminals use two or three columns. Opening home makes no model request.
+Missing graph data is shown explicitly. See `book-home-review.md` for source and
+usage-accounting rules.
+
+`/profile` (also available through `/preferences`) edits the author's name, default model, response detail and writing
+preferences. Personal preferences live outside the repository; a book may override
+writing preferences. `/resume` shows titles and timestamps without internal IDs;
+`/rename` changes the current conversation title without modifying its messages.
+
 ## Commands
 
-Type `/` to show the command menu immediately above the input. Keep typing to
-filter. Up/Down select an entry; Tab completes it. Enter completes a partial entry
-first, then submits the completed command. Command groups such as `/run` expand
-their subcommands. Escape dismisses the menu without discarding input.
+Type `/` to open a purpose-grouped palette. The first three entries follow your
+personal command-use counts across books. Before any usage exists these are
+`/resume`, `/novel`, and `/outlines`. Counts live outside the repository at
+`$XDG_CONFIG_HOME/literarygiant/command-usage.json`, or
+`~/.config/literarygiant/command-usage.json`. They are not project data, credentials,
+or telemetry; multiple open books update them under a file lock.
 
-The catalog is generated from the CLI parser, including nested commands, so the
-menu does not invent unsupported operations. `/model` opens model/profile settings;
-`/auth` opens the existing credential manager. `/help` lists the root commands.
-`/clear` clears only the displayed transcript, not saved workflow data or history.
+The three favorites share one gold rounded frame. Gold rounded cards group conversation, reading/editing, creation, review/memory,
+book/project, and settings commands. Up/Down selects; Enter opens a group or runs a
+parameter-free command immediately. Required arguments open a field-by-field
+prompt. Tab completes without executing. Escape returns from a group, then closes
+the palette. Typing filters all commands by name, description, and category.
+
+`/novel` opens the chapter reader/editor. `/outlines` reads and edits existing
+outline documents and generated outline Markdown files, separate from `/outline`
+which generates new material. The outline editor retains old database versions or
+file backups in `.literarygiant/editor-history/outlines`; stale edits cannot
+silently overwrite newer content. Saving requires an explicit editor confirmation.
 
 ## Input and Output
 
@@ -23,8 +60,16 @@ menu does not invent unsupported operations. `/model` opens model/profile settin
 - Up/Down scroll dialogue by three lines, not recalled commands; inside menus they
   select entries. Mouse wheel over the transcript scrolls dialogue too.
 - PageUp/PageDown scroll the displayed message history by half a screen.
+- Normal input and detail readers leave mouse capture off: drag to select and use
+  the terminal's native Copy command (Cmd+C on macOS). `/browse` mode captures
+  clicks; Escape returns to native selection.
 - New output does not pull you back to the bottom while reading older messages.
-- Input is locked while a command is running; Ctrl+C cancels the command.
+- Input stays available while the main agent works. Enter sends a steering message
+  to that active turn; rejected messages are restored to the composer. Ctrl+C interrupts.
+  During an explicit CLI workflow, new messages reach the main agent, which can
+  inspect and stop that job or retry it with revised author instructions.
+  Redirection restarts the stopped workflow with the new guidance; successful
+  workflows cannot be retried through these controls.
 - Ctrl+C while idle clears input; Ctrl+D with empty input or `/exit` closes LG.
 - The on-screen transcript retains its latest 250,000 characters. Durable workflow
   artifacts and input history remain in the project directory.
@@ -42,19 +87,37 @@ as child CLI processes without a shell. Writing workflows use JSONL events to
 update an animated progress line and display the final answer as Markdown,
 without mixing context logs, artifact paths, or model-internal payloads into prose.
 This is stage progress, not simulated token streaming or a display of model reasoning.
-User messages have a full-width gray background; answers have a bullet and indentation.
-The progress indicator refreshes at 8 Hz and stops when the command finishes.
+User messages align right in crown-gold rounded frames; their text remains left
+aligned. Each request has one public reply frame on the left; blank streamed items
+do not create empty frames. Public thinking summaries and tool execution records
+have folded entries below that reply. `/browse` then arrows/Enter, or a click in
+browse mode, expands them. Expanded public summaries
+use dark-orange frames. Message widths adapt to narrow terminals. Full reasoning chains are never
+shown. Code blocks, tables, and long execution logs start collapsed, retaining
+surrounding prose and a selectable entry to expand their original contents.
+
+The orange Thinking Orbs `working/20` decoration follows the newest conversation content. Its
+curated “I am …ing” phrases change slowly and are unrelated to actual work. It
+refreshes at 8 Hz while busy and disappears when idle. It is no longer anchored
+above the input. Real task progress appears separately in a compact task strip;
+each reviewer has its own identity, current step, and completion/failure status.
+Selecting a task in `/browse` opens read-only details. Directing, stopping, or retrying reviewers is done
+by messaging the main agent.
 Errors remain visible, including missing results and nonzero process exit codes.
 `--debug` and explicitly requested `--json` retain their diagnostic output.
-Other commands stream stdout and stderr to the message region.
+Ordinary conversation uses a persistent app-server thread with LG's existing
+provider bridge and writing MCP tools. `turn/steer` delivers new author messages
+during work. Model, book, and conversation changes replace the active thread;
+shutdown cleans up its process. Independent reviewers can run concurrently and
+report to the main agent. Explicit workflow commands retain the existing CLI
+execution path. Other commands stream stdout and stderr to the message region.
 Cancellation also cleans up the independent Codex
 process group. No model request is made by opening or filtering the command menu.
 
-The first submitted command replaces the full welcome panel with a persistent
-bordered seven-row header: a small crowned slime, the active model, and the workspace path.
-Small terminals use a bordered five-row text header. The model refreshes after `/auth`;
-the input remains at the bottom. Long paths are ellipsized, not wrapped over output.
-The startup animation is visually unchanged; rollback uses the Git snapshot below.
+Starting a conversation keeps the same fixed centered slime frame and replaces
+only the lower dashboard with the conversation. The header reads the current
+book/name/model and refreshes after profile changes. It is hidden below 12 terminal
+rows to preserve usable input.
 
 Auth/profile/provider and slash menus use Up/Down and Enter. The selected entry
 has slime-orange fill (`#dc795f`), dark text, and crown-gold (`#e8b866`)
@@ -99,8 +162,7 @@ Focusing replaces configuration, input history, displayed messages, and active
 conversation. It restores the target book's most recently updated conversation,
 or starts empty when none exists. `/new` starts a fresh discussion within that book;
 `/resume` chooses a different saved discussion. No book assets are moved or merged.
-The status header distinguishes Book from Bookshelf and displays the shelf name
-and book-relative location, for example `books / Title` (or `books / .` at the root).
+The shared header displays the focused book, author name and current model.
 
 Existing standalone books remain compatible with `literary -C /path/to/book` and
 `/open`. A direct child book detects its parent's bookshelf marker on startup,
@@ -185,3 +247,35 @@ approval; only the smooth implementation remains. Packaged `resources/` files ar
 the preview script and animation tests remain useful verification tools, not
 disposable generated assets. No credential stores or generated manuscript data
 belong in the repository.
+
+## UI review and validation
+
+Run `PYTHONPATH=lg-cli python scripts/preview_terminal.py --output /tmp/lg-previews`
+to export actual prompt-toolkit screen captures as SVG and text at 40, 64, and 80
+columns. Samples contain fictional text, use temporary preferences, and make no
+model requests. `tests/test_live_runtime.py` is opt-in via
+`LG_TEST_RUNTIME_MANIFEST`; it exercises the pinned core with a local fake model,
+including live steering, two independent reviewers, and main-agent control of a
+running CLI workflow through real MCP tools. It does not use paid APIs.
+
+## Book synopsis and local management
+
+Each book owns `ReferenceLibrary/bible/book-overview.json`. Agent prose generation
+and revisions return a concise whole-book synopsis in the same model output; tools
+validate it before saving prose and persist it with source/version or run metadata.
+Candidate output remains a candidate; an updated synopsis does not promote facts
+to canon. Reading home never generates it. Existing outline premises/loglines are
+used until a generated synopsis is available; otherwise home says 尚未设置简介.
+
+`/run list` opens a local list; Enter reads a record, Esc returns to the list.
+`/run show <id>` opens one local record. Neither calls the agent. Other slash
+commands retain explicit CLI routing; only writing operations invoke model-backed
+workflows. Management commands do not appear as author chat bubbles or animate
+an agent response. `/browse` also works during generation without steering it.
+
+The loading geometry is adapted from MIT-licensed Thinking Orbs by Jakub Antalik,
+commit `de85557ca220332586d070d8788c0e1d6e877a0d`. The `working` 20px preset is
+rasterized to 8×8 terminal dots (4 columns × 2 rows) and tinted orange. It keeps
+upstream motion, not browser pixel fidelity. Tests compare the port against
+coordinates produced by the original JavaScript. Copyright and license are in
+`lg_cli/resources/thinking-orbs-LICENSE.txt`. No network request is used at runtime.

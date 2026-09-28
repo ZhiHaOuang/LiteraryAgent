@@ -210,3 +210,32 @@ def prepare_frames() -> None:
 
 def slime_mark(seconds: float | None = None) -> Text:
     return _frame_text(frame_index(seconds)).copy()
+
+
+def compact_slime_mark(seconds: float | None = None) -> Text:
+    """Half-size projection of the same poses, crown, and face for narrow screens."""
+    index = frame_index(seconds)
+    original = frame_pixels(index)
+    pixels = []
+    for y in range(0, HEIGHT, 2):
+        row = []
+        for x in range(0, WIDTH, 2):
+            cells = [original[yy][xx] for yy in range(y, min(y + 2, HEIGHT))
+                for xx in range(x, min(x + 2, WIDTH))]
+            row.append(CROWN if CROWN in cells else BODY if cells.count(BODY) >= 2 else None)
+        pixels.append(row)
+    for x, y in face_pixels(pose_at(index * FRAME_INTERVAL)):
+        pixels[y // 2][x // 2] = None
+    pixels.append([None] * (WIDTH // 2))
+    result = Text()
+    for y in range(0, len(pixels), 2):
+        if y:
+            result.append('\n')
+        for top, bottom in zip(pixels[y], pixels[y + 1]):
+            if top == bottom:
+                result.append('█' if top else ' ', style=top or '')
+            elif top and bottom:
+                result.append('▀', style=f'{top} on {bottom}')
+            else:
+                result.append('▀' if top else '▄', style=top or bottom or '')
+    return result

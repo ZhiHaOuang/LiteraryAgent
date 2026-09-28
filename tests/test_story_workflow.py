@@ -63,6 +63,8 @@ class StoryAdapter:
                 ],
                 "risks": [],
             }
+        if schema in {'revision.schema.json', 'scene-draft.schema.json'}:
+            payload['book_overview'] = '林舟在城门前追寻真相，与守卫展开较量。'
         return CoreExecutionResult(
             ok=True,
             used_stub=False,

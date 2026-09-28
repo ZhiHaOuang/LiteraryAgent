@@ -113,11 +113,12 @@ class TerminalViewTests(unittest.TestCase):
                 lines = "".join(t for _, t in fragments).splitlines()
                 self.assertEqual([get_cwidth(t) for t in lines], [width] * 4)
                 self.assertTrue(lines[1].startswith(" │/auth"))
-                self.assertTrue(lines[1].endswith("Models│ "))
+                self.assertIn("Models", lines[1])
                 if width >= 40:
-                    self.assertTrue(lines[3].endswith("世界观设定  "))
+                    self.assertEqual(get_cwidth(lines[1].split('Models')[0]) + get_cwidth('Models'),
+                             get_cwidth(lines[3].split('世界观设定')[0]) + get_cwidth('世界观设定'))
                 else:
-                    self.assertTrue(lines[3].endswith("…  "))
+                    self.assertIn("…", lines[3])
 
     def test_selection_insets_border_without_moving_fill_or_neighbor_rows(self):
         with patch.dict(os.environ, {"TERM": "xterm-256color"}):
@@ -149,8 +150,11 @@ class TerminalViewTests(unittest.TestCase):
                     width,
                 )
                 text = Text.from_ansi(rendered).plain
-                self.assertIn("> 帮我", text)
-                self.assertIn("● 你好！", text)
+                self.assertIn("帮我", text)
+                self.assertTrue(text.splitlines()[0].startswith("  "))
+                self.assertIn("╭", text)
+                self.assertIn("你好！", text)
+                self.assertIn("╭─ LiteraryGiant", text)
                 self.assertNotIn("**", text)
                 self.assertTrue(
                     all(get_cwidth(line) <= width for line in text.splitlines())
@@ -274,6 +278,9 @@ class TerminalViewTests(unittest.TestCase):
             editor = LiteraryInput(
                 Path(raw) / "history", input=pipe, output=DummyOutput()
             )
+            color_env = patch.dict(os.environ, {'TERM':'xterm-256color'})
+            color_env.start()
+            self.addCleanup(color_env.stop)
             editor.started = 10
             with patch("lg_cli.terminal_input.time.monotonic", return_value=11):
                 first = editor._progress_text()

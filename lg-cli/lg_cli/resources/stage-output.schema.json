@@ -16,23 +16,33 @@
       "properties": {
         "established_facts": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "assumptions": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "constraints": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "open_questions": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
         "next_actions": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -48,12 +58,134 @@
       "items": {
         "type": "string"
       }
+    },
+    "story_index": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "characters": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "role",
+              "summary"
+            ]
+          }
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "planned": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "summary",
+              "planned"
+            ]
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "target",
+              "label"
+            ]
+          }
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "target",
+              "label"
+            ]
+          }
+        }
+      },
+      "required": [
+        "characters",
+        "events",
+        "relationships",
+        "links"
+      ]
+    },
+    "book_overview": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "One concise Chinese sentence about the whole book, updated with generated prose; not a chapter recap. Empty only for non-prose stages."
     }
   },
   "required": [
     "summary",
     "artifact_markdown",
     "handoff",
-    "risks"
+    "risks",
+    "book_overview"
   ]
 }

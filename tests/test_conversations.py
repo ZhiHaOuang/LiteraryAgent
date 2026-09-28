@@ -146,7 +146,7 @@ class ConversationTests(unittest.TestCase):
             self.assertTrue((book / "ReferenceLibrary/README.md").is_file())
             self.assertTrue((book / ".literarygiant/story.sqlite3").is_file())
             store = ConversationStore(book)
-            self.assertEqual(len(store.list()), 2 if book == first else 1)
+            self.assertEqual(len(store.list()), 1)
             self.assertIn(
                 request, [store.read(key)[0]["text"] for key, _ in store.list()]
             )

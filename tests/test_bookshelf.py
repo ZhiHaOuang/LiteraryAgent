@@ -132,6 +132,16 @@ class BookshelfTests(unittest.TestCase):
             keys[book.name] = store.create()
             store.append(keys[book.name], "user", f"Only {book.name}'s story")
             store.append(keys[book.name], "assistant", f"Reply for {book.name}")
+        captured = []
+        class Agent:
+            def __init__(self, config, on_event, **kwargs):
+                self.config, self.thread_id = config, 'fake'
+            async def start(self, *, context):
+                captured.append((self.config.workspace, context))
+            async def run(self, text):
+                return {'status': 'completed'}
+            async def close(self):
+                pass
         session = Mock()
         session.run_command = AsyncMock(return_value=0)
 
@@ -148,24 +158,21 @@ class BookshelfTests(unittest.TestCase):
                         f"Only {'Two' if book == first else 'One'}'s story", texts
                     )
                     await handler("continue")
-                    argv = session.run_command.call_args.args[0]
-                    self.assertEqual(argv[argv.index("-C") + 1], str(book))
-                    self.assertEqual(
-                        argv[argv.index("--conversation") + 1], keys[book.name]
-                    )
+                    self.assertEqual(captured[-1][0], book)
+                    self.assertIn(f"Only {book.name}'s story", captured[-1][1])
+                    self.assertNotIn(f"Only {'Two' if book == first else 'One'}'s story", captured[-1][1])
                 await handler('/newbook "Three"')
                 self.assertTrue(ProjectStore(self.shelf.root / "Three").initialized)
                 await handler("continue")
-                argv = session.run_command.call_args.args[0]
-                self.assertEqual(
-                    argv[argv.index("-C") + 1], str(self.shelf.root / "Three")
-                )
+                self.assertEqual(captured[-1][0], self.shelf.root / 'Three')
+                self.assertEqual(captured[-1][1], '')
+                await session.shutdown_handler()
                 return 0
 
             return asyncio.run(exercise())
 
         session.run.side_effect = run
-        with patch("lg_cli.main.LiteraryInput", return_value=session):
+        with patch("lg_cli.main.LiteraryInput", return_value=session), patch("lg_cli.live_agent.LiveAgent", Agent):
             self.assertEqual(
                 interactive_loop(load_config(self.shelf.root, environment="sandbox")), 0
             )

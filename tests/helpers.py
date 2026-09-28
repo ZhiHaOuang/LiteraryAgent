@@ -81,6 +81,7 @@ class FakeAdapter:
             )
         payload = {
             "summary": f"completed stage {number}",
+            "book_overview": "林舟在旅途中寻找失踪者，揭开故乡的秘密。",
             "artifact_markdown": f"# Stage {number}\n\nGenerated for {mode}.",
             "handoff": {
                 "established_facts": [f"fact-{number}"],
@@ -103,3 +104,21 @@ class FakeAdapter:
             stderr="",
             duration_seconds=0.01,
         )
+
+
+def reference_card(category, *, stored=False):
+    from lg_cli.reference_contracts import card_schema, finalize_cards
+    def example(schema):
+        if 'enum' in schema:
+            return schema['enum'][-1]
+        if schema['type'] == 'object':
+            return {key:example(value) for key,value in schema['properties'].items()}
+        if schema['type'] == 'array':
+            return []
+        if schema['type'] == 'integer':
+            return 1
+        return ''
+    card = example(card_schema(category))
+    if stored:
+        card = finalize_cards({'entries':[{'instance_card':card, 'evidence':[]}]}, category, {})['entries'][0]['instance_card']
+    return card
