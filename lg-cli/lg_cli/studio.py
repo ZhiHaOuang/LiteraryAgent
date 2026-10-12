@@ -91,6 +91,13 @@ def dashboard(config: LGConfig) -> dict:
         result['pending'] += [f'设定提案：{p.key}' for p in store.list_proposals()]
         for document in store.list_documents(kind='chapter'):
             result['pending'] += [f'{document.title} · v{v.version_number} 待审阅/采用' for v in store.list_versions(document.id) if v.state == 'candidate']
+    # This is a dashboard preview. Full CLI material now has a paged/detail surface.
+    for field in ('characters', 'relationships', 'settings', 'foreshadowing', 'volumes', 'tasks', 'pending'):
+        values = result[field]
+        preview = [s[:500] + ('…（详情见资料库）' if len(s) > 500 else '') for s in values[:24]]
+        if len(values) > 24:
+            preview.append(f'另有 {len(values) - 24} 项，请进入资料库查看。')
+        result[field] = preview
     return result
 
 
@@ -101,6 +108,78 @@ def register_tools(server, config: LGConfig, approved):
     def book_dashboard() -> dict:
         """Read the same local book overview used by the CLI, extended with planning and pending work."""
         return dashboard(config)
+
+    @server.tool()
+    def book_library(topic: str, query: str = '', offset: int = 0) -> dict:
+        """Read a bounded page from the same saved material and source evidence shown by the CLI. No model call or write."""
+        from .workspace_library import library
+        return library(config, topic, query, offset)
+
+    @server.tool()
+    def book_entry(topic: str, key: str) -> dict:
+        """Read one CLI material detail, source and recent version labels, only when requested."""
+        from .workspace_library import entry
+        return entry(config, topic, key)
+
+    @server.tool()
+    def book_action_context(topic: str, key: str, action: str, expected_fingerprint: str) -> dict:
+        """Prepare an author-requested writing action from an unchanged preview. This only reads; it never starts generation or approves writes."""
+        from .workspace_library import writing_context
+        return writing_context(config, topic, key, action, expected_fingerprint)
+
+    @server.tool()
+    @approved
+    def studio_reference(kind: Literal['character', 'world', 'outline', 'note'], slug: str,
+                         title: str, content: str, expected_version_id: int, reason: str,
+                         story_index: dict | None = None) -> dict:
+        """Save author-requested literary reference material as a candidate version. Never adopt automatically or promote Canonical facts.
+        Read an existing document first; new material requires expected_version_id=0.
+        """
+        if not content.strip():
+            raise ValueError('Reference candidate cannot be empty')
+        if story_index is not None:
+            from .story_index import validate_graph
+            validate_graph(story_index)
+        documents = [d for d in store.list_documents(kind=kind, limit=None) if d.slug == slug]
+        metadata = {'story_index': story_index} if story_index is not None else {}
+        if documents:
+            document = documents[0]
+            if document.active_version_id != expected_version_id:
+                raise ValueError('Reference changed; reread before updating')
+            version = store.create_version(slug, content=content, state='candidate', reason=reason,
+                                           metadata=metadata, activate=False)
+        else:
+            if expected_version_id != 0:
+                raise ValueError('New reference requires expected_version_id=0')
+            document = store.create_document(kind=kind, slug=slug, title=title, content=content,
+                                             state='candidate', reason=reason, metadata=metadata)
+            version = store.get_version(slug, document.active_version_number)
+        output = write_workflow_output(config.workspace, kind if kind != 'note' else 'bible-proposal',
+            '# ' + title + '\n\n状态：候选资料，尚未采用或确认为事实。\n\n' + content)
+        return {'document': slug, 'version': asdict(version), 'state': 'candidate',
+                'artifact': str(output.output_path.relative_to(config.workspace))}
+
+    @server.tool()
+    @approved
+    def studio_adopt_reference(slug: str, version_number: int, expected_version_id: int) -> dict:
+        """Adopt the exact author-previewed literary reference candidate using the existing CLI ProjectStore. Does not promote facts to Canonical."""
+        document = store.get_document(slug)
+        if document.kind not in {'character', 'world', 'outline', 'note'}:
+            raise ValueError('Use the existing manuscript review/adoption tools for prose')
+        if document.active_version_id != expected_version_id:
+            raise ValueError('Reference changed after preview')
+        if store.get_version(slug, version_number).state != 'candidate':
+            raise ValueError('Only a candidate can be adopted once')
+        return {'document': asdict(store.accept_version(slug, version_number)), 'accepted': True}
+
+    @server.tool()
+    @approved
+    def studio_accept_proposal(proposal_id: int, expected_fingerprint: str) -> dict:
+        """Author-requested adoption of one previewed setting proposal. Uses the same accept_proposal as CLI bible proposal accept. Refuse stale previews."""
+        from .workspace_library import _stamp
+        if _stamp(config) != expected_fingerprint:
+            raise ValueError('Book changed after preview; review the proposal again')
+        return {'fact': asdict(store.accept_proposal(proposal_id)), 'accepted': True}
 
     @server.tool()
     def studio_status() -> dict:
@@ -184,7 +263,11 @@ def register_tools(server, config: LGConfig, approved):
         if category is not None and category not in CATEGORIES:
             raise ValueError('Unknown review category')
         version = store.get_version(slug, version_number)
-        source = records.candidate_snapshot(slug, version)
+        from .supervision import chapter_for
+        chapter = chapter_for(store, store.get_document(slug))
+        if chapter is None:
+            raise ValueError('Reviews require a chapter or a scene belonging to one')
+        source = records.candidate_snapshot(chapter, version)
         return {'snapshot': source, 'source_spans': source_spans(source), 'sourceFingerprint': fingerprint(source),
                 'schemas': {key: response_schema(key) for key in ([category] if category else CATEGORIES)}}
 
@@ -197,7 +280,11 @@ def register_tools(server, config: LGConfig, approved):
         """
         records = BookAnalysisStore(store)
         version = store.get_version(slug, version_number)
-        source, base = records.candidate_snapshot(slug, version), records.snapshot(slug)
+        from .supervision import chapter_for
+        chapter = chapter_for(store, store.get_document(slug))
+        if chapter is None:
+            raise ValueError('Reviews require a chapter or a scene belonging to one')
+        source, base = records.candidate_snapshot(chapter, version), records.snapshot(chapter)
         if fingerprint(source) != source_fingerprint:
             raise ValueError('Reviewed source changed; rerun the review')
         if not reports or not set(reports).issubset(CATEGORIES):
@@ -219,7 +306,9 @@ def register_tools(server, config: LGConfig, approved):
         """Explicitly adopt a reviewed candidate once. Existing LG supervision rejects missing,
         stale or conflicting reviews. Requires the unchanged active manuscript version.
         """
-        document = store.get_document(slug, kind='chapter')
+        document = store.get_document(slug)
+        if document.kind not in {'chapter', 'scene'}:
+            raise ValueError('Use studio_adopt_reference for literary reference candidates')
         if document.active_version_id != expected_version_id:
             raise ValueError('Active manuscript changed; compare before accepting')
         version = store.get_version(slug, version_number)

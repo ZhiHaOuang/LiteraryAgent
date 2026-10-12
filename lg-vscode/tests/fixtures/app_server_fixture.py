@@ -28,19 +28,31 @@ def diagnostic_popen(command, *args, **kwargs):
 
 def output(payload):
     (workspace/'fixture-tool-names.json').write_text(json.dumps([t.get('name') for t in payload.get('tools', [])]))
-    markers = re.findall(r'CASE:([a-z]+)', json.dumps(payload.get('messages', [])))
-    case = markers[-1] if markers else 'text'
-    if case in handled:
+    transcript=json.dumps(payload.get('messages', []),ensure_ascii=False)
+    markers=list(re.finditer(r'CASE:([a-z]+)|作者要求生成更新 characters|作者要求采用 lin 的候选 v(\d+)',transcript))
+    latest=markers[-1] if markers else None
+    case=(latest.group(1) or ('libadopt' if latest.group(2) else 'libupdate')) if latest else 'text'
+    handled_key=case+str(len(markers)) if case.startswith('lib') else case
+    if handled_key in handled:
         yield from message_events(delta={'type': 'text_delta', 'text': 'LG synthetic provider finished.'})
         return
-    handled.add(case)
+    handled.add(handled_key)
     operations = {
         'init': ('studio_initialize', {}),
         'plan': ('studio_save', {'stage': 'position', 'content': '原创机械悬疑长篇，目标百万字。',
             'updates': {'positioning': '原创机械悬疑长篇', 'targetWords': 1000000}, 'expected_profile_version': 0}),
         'denied': ('update_book_overview', {'text': '这句话被拒绝后不得保存。'}),
         'accepted': ('update_book_overview', {'text': '修理师在停摆的浮城中追查供能失衡的真相。'}),
+        'refdeny': ('studio_reference', {'kind':'character','slug':'denied-person','title':'不得保存的人物','content':'不得保存。','expected_version_id':0,'reason':'approval denial test'}),
+        'reference': ('studio_reference', {'kind':'character','slug':'lin','title':'林砚','content':'人物总结：维修学徒先隔离电源，再救出闸门后的工友。','expected_version_id':0,'reason':'original reference candidate fixture'}),
     }
+    if case=='adoptref':
+        from lg_cli.project_store import ProjectStore
+        operations[case]=('studio_adopt_reference',{'slug':'lin','version_number':1,'expected_version_id':ProjectStore(workspace).get_document('lin').active_version_id})
+    if case in {'libupdate','libadopt'}:
+        from lg_cli.project_store import ProjectStore
+        document=ProjectStore(workspace).get_document('lin')
+        operations[case]=('studio_reference',{'kind':'character','slug':'lin','title':'林砚','content':'更新候选：林砚在救援前隔离电源，愿意承担错过返乡船的代价。','expected_version_id':document.active_version_id,'reason':'author-requested UI update fixture'}) if case=='libupdate' else ('studio_adopt_reference',{'slug':'lin','version_number':int(latest.group(2)),'expected_version_id':document.active_version_id})
     if case == 'slow':
         time.sleep(5)
     if case not in operations:
@@ -49,7 +61,9 @@ def output(payload):
     name, arguments = operations[case]
     description = {'studio_initialize': 'Initialize only the current workspace',
         'studio_save': 'Save a provisional planning/review artifact',
-        'update_book_overview': 'Save one concise Chinese sentence'}[name]
+        'update_book_overview': 'Save one concise Chinese sentence',
+        'studio_reference': 'Save author-requested literary reference material',
+        'studio_adopt_reference': 'Adopt the exact author-previewed literary reference candidate'}[name]
     tool = next(t['name'] for t in payload.get('tools', []) if description in t.get('description', ''))
     yield {'type': 'message_start', 'message': {'usage': {'input_tokens': 10, 'output_tokens': 0}}}
     yield {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'tool_use', 'id': 'call-' + case, 'name': tool, 'input': {}}}

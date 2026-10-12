@@ -2,10 +2,21 @@ import {spawn} from 'node:child_process';
 import {resolve} from 'node:path';
 import {once} from 'node:events';
 import {createServer} from 'node:http';
-import {readFile} from 'node:fs/promises';
+import {readFile,mkdir,writeFile} from 'node:fs/promises';
 
 const root=process.env.LG_VSCODE_TEST_ROOT;
 if(!root||!root.includes('/LitIsLand/'))throw Error('Set LG_VSCODE_TEST_ROOT to the isolated LitIsLand VS Code test directory');
+const workspace=resolve(process.env.LG_TEST_VSCODE_WORKSPACE||'fixtures/workspace');
+if(!workspace.startsWith(resolve(root)+'/'))throw Error('Test workspace must remain in the LitIsLand audit directory');
+const settings={'telemetry.telemetryLevel':'off','update.mode':'none','extensions.autoUpdate':false,'literarygiant.backend':'mock'};
+if(process.env.LG_TEST_VSCODE_REAL_LIBRARY){
+  const python=process.env.LG_TEST_FIXTURE_PYTHON,manifest=process.env.LG_TEST_RUNTIME_MANIFEST;
+  if(!python?.startsWith(resolve(root)+'/')||!manifest?.includes('/LitIsLand/'))throw Error('Set explicit isolated fixture launcher and pinned manifest');
+  Object.assign(settings,{'literarygiant.backend':'codex','literarygiant.pythonPath':python,'literarygiant.runtimeManifest':manifest});
+}
+// This pinned server overrides --user-data-dir with <server-data-dir>/data.
+await mkdir(resolve(root,'vscode-web-data/data/Machine'),{recursive:true});
+await writeFile(resolve(root,'vscode-web-data/data/Machine/settings.json'),JSON.stringify(settings));
 const assets=createServer(async(req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname.slice(1);
   if(!['index.html','fake.html','service-worker.js'].includes(name)){res.writeHead(404);res.end();return;}
@@ -38,7 +49,7 @@ try {
   });
   console.log('Isolated VS Code ready; starting installed-VSIX test');
   test=spawn(process.execPath,['--import','tsx','--test','tests/vscode.e2e.ts'],{
-    stdio:'inherit',env:{...process.env,LG_TEST_WEBVIEW_ENDPOINT:webviewEndpoint,LG_VSCODE_URL:`http://127.0.0.1:${port}/?folder=${encodeURIComponent(resolve('fixtures/workspace'))}`},
+    stdio:'inherit',env:{...process.env,LG_TEST_WEBVIEW_ENDPOINT:webviewEndpoint,LG_VSCODE_URL:`http://127.0.0.1:${port}/?folder=${encodeURIComponent(workspace)}`},
   });
   const [code]=await once(test,'exit');process.exitCode=code??1;
 } finally {

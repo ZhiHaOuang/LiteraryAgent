@@ -78,6 +78,8 @@ def writing_args(config: LGConfig, *, control_socket: str | None = None, require
             "restore_manuscript",
             "book_dashboard", "studio_status", "studio_initialize", "studio_save",
             "studio_draft", "studio_review_context", "studio_review", "studio_accept",
+            "book_library", "book_entry", "book_action_context", "studio_reference",
+            "studio_adopt_reference", "studio_accept_proposal",
         ],
         "mcp_servers.lg_writing.default_tools_approval_mode": "approve",
         "features.shell_tool": False,

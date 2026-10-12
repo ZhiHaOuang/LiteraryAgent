@@ -17,10 +17,12 @@ class WriteConfirmation(BaseModel):
 
 
 READ_TOOLS = frozenset({'project_memory', 'read_document', 'document_history',
-    'document_diff', 'reference_search', 'book_dashboard', 'studio_status', 'studio_review_context'})
+    'document_diff', 'reference_search', 'book_dashboard', 'studio_status', 'studio_review_context',
+    'book_library', 'book_entry', 'book_action_context'})
 WRITE_TOOLS = frozenset({'create_chapter', 'edit_manuscript', 'update_book_overview',
     'restore_manuscript', 'propose_setting', 'studio_initialize', 'studio_save',
-    'studio_draft', 'studio_review', 'studio_accept'})
+    'studio_draft', 'studio_review', 'studio_accept', 'studio_reference',
+    'studio_adopt_reference', 'studio_accept_proposal'})
 
 
 def project_fingerprint(workspace: Path) -> str:
@@ -34,7 +36,8 @@ def project_fingerprint(workspace: Path) -> str:
         if not path.resolve().is_relative_to(workspace.resolve()):
             raise ValueError('Project state points outside this workspace')
         digest.update(str(path.relative_to(workspace)).encode())
-        digest.update(path.read_bytes() if path.exists() else b'<missing>')
+        data = path.read_bytes() if path.exists() else b'<missing>'
+        digest.update(b'<missing>' if path.name.endswith('-wal') and data == b'' else data)
     return digest.hexdigest()
 
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { emptyBook, type BackendEvent, type Snapshot, type Item } from '../../shared/protocol';
+import { emptyBook, emptyLibrary, type BackendEvent, type Snapshot, type Item } from '../../shared/protocol';
 
 export class SessionStore {
   readonly state: Snapshot;
@@ -7,7 +7,7 @@ export class SessionStore {
   private finals = new Set<string>();
   constructor(mode: Snapshot['mode']) {
     this.state = { version: 1, epoch: randomUUID(), sequence: 0, mode, connection: 'connecting', sessions: [], sessionId: '', run: null,
-      items: [], approvals: [], inputs: [], book: emptyBook(), error: null, attachment: null };
+      items: [], approvals: [], inputs: [], book: emptyBook(), error: null, attachment: null, library:emptyLibrary() };
     if (mode === 'codex') this.state.book.source = 'backend';
   }
   snapshot(): Snapshot { return structuredClone(this.state); }

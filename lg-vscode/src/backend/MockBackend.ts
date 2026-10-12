@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { EventBackend, type AgentBackend } from './AgentBackend';
-import { emptyBook, type Approval, type Item, type Session } from '../../shared/protocol';
+import { emptyBook, type Approval, type Item, type Session, type LibraryQuery, type LibraryTopic, type WritingAction } from '../../shared/protocol';
+import { MockLibrary } from './MockLibrary';
 
 export class MockBackend extends EventBackend implements AgentBackend {
   private sessions = new Map<string, { session: Session; items: Item[] }>();
   private active?: { sessionId: string; runId: string; controller: AbortController };
   private pending = new Map<string, (decision: string) => void>();
   private connected = false;
+  private library=new MockLibrary();
+  readLibrary(query:LibraryQuery){return this.library.page(query);}
+  readEntry(topic:LibraryTopic,key:string){return this.library.detail(topic,key);}
+  prepareWriting(topic:LibraryTopic,key:string,action:WritingAction,fingerprint:string){return this.library.prepare(topic,key,action,fingerprint);}
   constructor(private delay = 55) { super(); }
   async connect() { this.connected = true; this.emit({ type: 'backend.status', status: 'ready' }); await this.refreshBook(); }
   async list() { return [...this.sessions.values()].map(s => s.session); }
@@ -33,6 +38,7 @@ export class MockBackend extends EventBackend implements AgentBackend {
     void this.perform(sessionId, runId, text, controller).catch(error => this.emit({ type: 'error', message: String(error) }));
   }
   private async perform(sessionId: string, runId: string, text: string, controller: AbortController) {
+    const operation=text.startsWith('MOCK_LIBRARY:')?JSON.parse(text.slice(13).split('\n')[0]) as {action:string}:undefined;
     let status: 'completed' | 'failed' | 'cancelled' = 'completed';
     let error: string | undefined;
     let accumulated = '', replyCompleted = false;
@@ -49,14 +55,16 @@ export class MockBackend extends EventBackend implements AgentBackend {
       replyCompleted = true;
       if (text.includes('/error')) throw Error('模拟工具执行失败；没有写入作品。');
       const toolId = 'tool:' + runId;
-      this.item(sessionId, { id: toolId, runId, kind: 'tool', title: '保存场景候选', text: '准备保存候选，不改变正式正文。', state: 'waiting' });
+      const toolTitle=operation?(operation.action==='adopt'?'采用资料候选':'保存资料候选'):'保存场景候选';
+      this.item(sessionId, { id: toolId, runId, kind: 'tool', title: toolTitle, text: '准备保存候选，不改变正式正文。', state: 'waiting' });
       const requestId = randomUUID();
       const decision = new Promise<string>(resolve => this.pending.set(requestId, resolve));
       if (text.includes('/input')) this.emit({ type: 'userInput.requested', sessionId, request: { id: requestId, runId, questions: [{ id: 'direction', label: '希望第一章侧重什么？', options: ['人物困境', '世界悬念'] }] } });
-      else this.emit({ type: 'approval.requested', sessionId, approval: { id: requestId, runId, itemId: toolId, title: '保存场景候选（模拟）', details: '只演示审批，不写入磁盘。', choices: ['accept', 'decline'], state: 'pending' } });
+      else this.emit({ type: 'approval.requested', sessionId, approval: { id: requestId, runId, itemId: toolId, title: toolTitle+'（模拟）', details: operation?'资料预览：林砚选择先切断电源，再救出被困的人。\n只演示审批，不写入磁盘；保存候选与采用分别确认。':'只演示审批，不写入磁盘。', choices: ['accept', 'decline'], state: 'pending' } });
       const result = await decision;
       this.pending.delete(requestId);
       if (controller.signal.aborted) throw Error('cancelled');
+      if(result==='accept'&&operation)this.library.commit(operation.action);
       this.emit({ type: 'approval.resolved', sessionId, requestId });
       this.emit({ type: 'userInput.resolved', sessionId, requestId });
       this.item(sessionId, { id: toolId, runId, kind: 'tool', title: '保存场景候选', text: result === 'accept' ? '已演示批准；未写入真实作品。' : '作者已拒绝；未写入。', state: result === 'accept' ? 'completed' : 'cancelled', structured: { simulated: true, decision: result },

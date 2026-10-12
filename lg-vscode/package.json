@@ -2,7 +2,7 @@
   "name": "literarygiant-vscode",
   "displayName": "LiteraryGiant",
   "description": "LG 写作工作台：对话、作品概况、审批与版本差异",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "literarygiant",
   "private": true,
   "engines": {
@@ -12,7 +12,9 @@
     "Other"
   ],
   "main": "./dist/extension.cjs",
-  "extensionKind": ["workspace"],
+  "extensionKind": [
+    "workspace"
+  ],
   "activationEvents": [
     "onView:literarygiant.chat"
   ],
@@ -27,10 +29,20 @@
       {
         "command": "literarygiant.open",
         "title": "LG：打开写作工作台"
+      },
+      {
+        "command": "literarygiant.home",
+        "title": "LG：返回作品首页"
       }
     ],
     "viewsContainers": {
-      "activitybar": [{ "id": "literarygiant", "title": "LiteraryGiant", "icon": "media/lg.svg" }]
+      "activitybar": [
+        {
+          "id": "literarygiant",
+          "title": "LiteraryGiant",
+          "icon": "media/lg.svg"
+        }
+      ]
     },
     "views": {
       "literarygiant": [

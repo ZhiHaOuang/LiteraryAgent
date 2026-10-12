@@ -13,6 +13,41 @@ from tests.helpers import reference_card
 
 
 class StudioCLITests(unittest.TestCase):
+    def test_reference_library_candidates_through_actual_cli(self):
+        root = Path(tempfile.mkdtemp(prefix='lg-library-cli-'))
+        workspace = root / 'novel';workspace.mkdir()
+        repo = Path(__file__).resolve().parents[1]
+        env = dict(os.environ, PYTHONPATH=str(repo/'lg-cli'), LITERARYGIANT_REGISTRY_HOME=str(root/'registry'))
+        evidence=[]
+        def call(operation, arguments=None, confirm=False, code=0):
+            command=[sys.executable,'-m','lg_cli.main','-C',str(workspace),'studio',operation,'--json']
+            if arguments is not None:
+                source=root/f'input-{len(evidence):02d}.json';source.write_text(json.dumps(arguments,ensure_ascii=False));command.extend(['--input',str(source)])
+            if confirm:command.append('--confirm')
+            result=subprocess.run(command,cwd=root,env=env,capture_output=True,text=True,timeout=45)
+            evidence.append({'operation':operation,'confirmed':confirm,'exitCode':result.returncode})
+            (root/'commands.json').write_text(json.dumps(evidence,indent=2))
+            self.assertEqual(result.returncode,code,f'CLI operation failed; evidence: {root}')
+            return json.loads(result.stdout)
+        call('initialize',confirm=True)
+        args=dict(kind='character',slug='lin',title='林砚',content='原创人物资料：维修学徒选择先断电再救人。',expected_version_id=0,reason='author-generated reference')
+        call('reference',args,code=2)
+        self.assertEqual(call('library',{'topic':'characters'})['total'],0)
+        saved=call('reference',args,confirm=True)
+        page=call('library',{'topic':'characters'})
+        detail=call('entry',{'topic':'characters','key':page['entries'][0]['key']})
+        self.assertIn('维修学徒',detail['body'])
+        context=call('action-context',dict(topic='characters',key=detail['key'],action='generate',expected_fingerprint=detail['fingerprint']))
+        self.assertIn('不自动采用',context['prompt'])
+        pending=call('library',{'topic':'pending'})
+        self.assertEqual(pending['entries'][0]['status'],'candidate')
+        adopt=dict(slug='lin',version_number=1,expected_version_id=saved['version']['id'])
+        call('adopt-reference',adopt,code=2)
+        self.assertEqual(call('library',{'topic':'pending'})['total'],1)
+        call('adopt-reference',adopt,confirm=True)
+        self.assertEqual(call('library',{'topic':'pending'})['total'],0)
+        print('CLI library evidence:',root)
+
     def test_original_chapter_workflow_through_cli_processes(self):
         # Retain this independent project and command evidence for inspection.
         root = Path(tempfile.mkdtemp(prefix='lg-studio-cli-'))

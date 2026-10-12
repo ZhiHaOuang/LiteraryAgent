@@ -8,8 +8,11 @@ from pathlib import Path
 OPERATIONS = {'status': 'studio_status', 'dashboard': 'book_dashboard',
     'initialize': 'studio_initialize', 'save': 'studio_save', 'draft': 'studio_draft',
     'review-context': 'studio_review_context', 'review': 'studio_review',
-    'accept': 'studio_accept', 'overview': 'update_book_overview'}
-READ_ONLY = {'status', 'dashboard', 'review-context'}
+    'accept': 'studio_accept', 'overview': 'update_book_overview',
+    'library': 'book_library', 'entry': 'book_entry', 'action-context': 'book_action_context',
+    'reference': 'studio_reference', 'adopt-reference': 'studio_adopt_reference',
+    'accept-proposal': 'studio_accept_proposal'}
+READ_ONLY = {'status', 'dashboard', 'review-context', 'library', 'entry', 'action-context'}
 
 
 def add_parser(sub):

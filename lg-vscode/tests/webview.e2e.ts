@@ -39,11 +39,12 @@ test('rendered webview: stream, approval survives reload, deny, cancel, book ove
   await page.addInitScript(`window.acquireVsCodeApi = () => ({postMessage: message => window.lgHost(message), getState: () => ({}), setState: () => {}});`);
   try {
     await page.goto(`http://127.0.0.1:${address.port}`);
-    await expect(page.getByText('你的故事，正在成形。')).toBeVisible();
+    await expect(page.locator('[aria-label="LG 作品首页"]')).toBeVisible();
+    await page.getByRole('button',{name:'创作对话',exact:true}).click();
     const input=page.getByRole('textbox',{name:'Message input'});
     await input.fill('先规划一个原创场景');await page.getByRole('button',{name:'Send message',exact:true}).click();
     await expect(page.getByRole('button',{name:'批准本次'})).toBeVisible();
-    await page.reload();await expect(page.getByRole('button',{name:'批准本次'})).toBeVisible();
+    await page.reload();await page.getByRole('button',{name:'创作对话',exact:true}).click();await expect(page.getByRole('button',{name:'批准本次'})).toBeVisible();
     await page.getByRole('button',{name:'拒绝',exact:true}).click();
     await expect(page.getByText('已处理',{exact:true})).toBeVisible();
     assert.equal(store.state.items.filter(i=>i.kind==='assistant').length,1);

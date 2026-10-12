@@ -105,11 +105,18 @@ test('desktop F5 builds and launches the default offline LG development host',{
     console.log('F5 development host opened; LG sidebar expanded');
     let frame:Frame|undefined;
     await expect(async()=>{
-      for(const candidate of development!.frames())if(await candidate.getByText('你的故事，正在成形。').count())frame=candidate;
+      for(const candidate of development!.frames())if(await candidate.locator('[aria-label="LG 作品首页"]').count())frame=candidate;
       assert.ok(frame,'LG webview did not activate in the F5 host');
     }).toPass({timeout:45000});
     let view=frame!;
     await expect(view.getByText('离线演示 · 已连接')).toBeVisible();
+    await command(development!,'LG：返回作品首页');
+    await expect(view.locator('[aria-label="LG 作品首页"]')).toBeVisible();
+    await view.getByRole('button',{name:'打开人物',exact:true}).click();
+    await view.getByRole('button',{name:'查看林砚',exact:true}).click();
+    await expect(view.locator('.library-body')).toContainText('来源');
+    await view.getByRole('button',{name:'返回首页',exact:true}).click();
+    await view.getByRole('button',{name:'创作对话',exact:true}).click();
     const send=async(text:string)=>{
       await view.getByRole('textbox',{name:'Message input'}).fill(text);
       await view.getByRole('button',{name:'Send message',exact:true}).click({noWaitAfter:true});

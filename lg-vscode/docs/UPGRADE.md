@@ -1,6 +1,6 @@
 # 版本与升级
 
-当前配对：LG Python 产品包 0.3.0（须包含本次新增模块）、扩展 0.1.0、`codex-cli 0.154.0`。仅包版本相同不能证明安装含有新增接口，须先运行启动器 `--describe`。核心 commit：`6b9826e3aa83b1a5947db50f4332cb9c65f1b340`。
+当前配对：LG Python 产品包 0.3.0（须包含本次新增模块）、扩展 0.2.0、`codex-cli 0.154.0`。仅包版本相同不能证明安装含有新增接口，须先运行启动器 `--describe`。核心 commit：`6b9826e3aa83b1a5947db50f4332cb9c65f1b340`。
 
 ## app-server 升级
 
@@ -20,3 +20,7 @@
 ## 发布边界
 
 `npm run package` 只生成自用 VSIX，不上传 Marketplace。发布、自动更新服务和遥测均不属于本工程的交付动作。
+
+## 0.1.0 升级到 0.2.0
+
+先更新配套 Python 源码，再安装 0.2.0 VSIX 并 Reload Window。新增资料接口与 CLI 的 Studio 命令共用实现；核心二进制与 manifest 不变。核对 `studio library` 可读取已有作品，然后检查首页、人物来源、CLI 保存后的同步、候选预览和单次采用。保留 0.1.0 VSIX；回退扩展不会撤销已经在 ProjectStore 中采用的资料。模型账号、作品库、已有正文不需要迁移或删除。

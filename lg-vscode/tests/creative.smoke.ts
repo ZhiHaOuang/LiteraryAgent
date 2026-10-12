@@ -66,6 +66,7 @@ try{
   });
   await page.addInitScript('window.acquireVsCodeApi=()=>({postMessage:m=>window.lgHost(m),getState:()=>({}),setState:()=>{}})');
   await page.goto(`http://127.0.0.1:${address.port}`);
+  await page.getByRole('button',{name:'创作对话',exact:true}).click();
   await expect(page.getByText('本地 Agent · 已连接')).toBeVisible({timeout:60000});
   const stages:[string,string,string][]=[
     ['create','这是独立测试作品，仅调用 studio_status 检查，必要时 studio_initialize 初始化当前作品。不要生成正文或修改别的作品。简短回复。','studio_initialize'],

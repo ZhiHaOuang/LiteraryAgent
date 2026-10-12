@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { isAbsolute, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { BookSchema, type Approval, type InputRequest, type Item, type Session } from '../../shared/protocol';
+import { BookSchema, LibraryPageSchema, LibraryDetailSchema, type LibraryQuery, type LibraryTopic, type WritingAction, type Approval, type InputRequest, type Item, type Session } from '../../shared/protocol';
 import { EventBackend, type AgentBackend } from './AgentBackend';
 import { RpcTransport, type RpcId, type RpcMessage, type LaunchSpec } from './RpcTransport';
 import { array, record, text, normalizeItem, errorCategory } from './normalize';
@@ -57,7 +57,7 @@ export class CodexBackend extends EventBackend implements AgentBackend {
         this.emit({ type: 'backend.status', status: 'disconnected', error: reason });
       });
       this.rpc.start();
-      await this.rpc.request('initialize', { clientInfo: { name: 'literarygiant_vscode', title: 'LG Writing Workbench', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+      await this.rpc.request('initialize', { clientInfo: { name: 'literarygiant_vscode', title: 'LG Writing Workbench', version: '0.2.0' }, capabilities: { experimentalApi: true } });
       await this.rpc.notify('initialized', {});
       this.emit({ type: 'backend.status', status: 'ready' });
     } catch (error) {
@@ -205,6 +205,20 @@ export class CodexBackend extends EventBackend implements AgentBackend {
     if (!this.sessionId || this.active) return Promise.resolve();
     this.bookRefresh ??= this.loadBook().finally(() => { this.bookRefresh = undefined; });
     return this.bookRefresh;
+  }
+  private async readTool(tool:string,args:unknown):Promise<unknown> {
+    if (!this.sessionId) throw Error('请等待 LG 作品会话就绪');
+    const result=await this.request<McpServerToolCallResponse>('mcpServer/tool/call',{threadId:this.sessionId,server:'lg_writing',tool,arguments:args});
+    if(result.isError)throw Error('作品资料已变化或读取失败，请刷新资料并核对配套 LG Python 版本。');
+    if(result.structuredContent)return result.structuredContent;
+    return JSON.parse(text(result.content.map(record).find(c=>c.type==='text')?.text));
+  }
+  async readLibrary(query:LibraryQuery){return LibraryPageSchema.parse(await this.readTool('book_library',query));}
+  async readEntry(topic:LibraryTopic,key:string){return LibraryDetailSchema.parse(await this.readTool('book_entry',{topic,key}));}
+  async prepareWriting(topic:LibraryTopic,key:string,action:WritingAction,fingerprint:string){
+    const result=z.object({prompt:z.string().min(1).max(30_000),fingerprint:z.literal(fingerprint)}).parse(
+      await this.readTool('book_action_context',{topic,key,action,expected_fingerprint:fingerprint}));
+    return result.prompt;
   }
   private async loadBook() {
     try {

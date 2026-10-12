@@ -2,6 +2,36 @@ import { z } from 'zod';
 
 export const CONTRACT_VERSION = 1;
 const id = z.string().min(1).max(512);
+export const LibraryTopicSchema = z.enum(['characters', 'relationships', 'chapters', 'outlines', 'events', 'timeline', 'world', 'storylines', 'analyses', 'bible', 'pending', 'personal', 'usage']);
+export type LibraryTopic = z.infer<typeof LibraryTopicSchema>;
+export const WritingActionSchema = z.enum(['generate', 'review', 'adopt']);
+export type WritingAction = z.infer<typeof WritingActionSchema>;
+export const LibraryQuerySchema = z.object({topic: LibraryTopicSchema, query: z.string().max(120), offset: z.number().int().nonnegative()}).strict();
+export type LibraryQuery = z.infer<typeof LibraryQuerySchema>;
+export const LIBRARY_TOPICS: {key: LibraryTopic; title: string; description: string; generate?: boolean}[] = [
+  {key:'characters',title:'人物',description:'人物总结、角色与来源',generate:true},
+  {key:'relationships',title:'人物关系',description:'关系与相关人物资料',generate:true},
+  {key:'chapters',title:'章节与版本',description:'正文、场景与候选版本',generate:true},
+  {key:'outlines',title:'全书与分卷规划',description:'大纲与章节目标',generate:true},
+  {key:'world',title:'世界与设定',description:'规则、资料与世界观分析',generate:true},
+  {key:'events',title:'剧情事件',description:'已保存的剧情进展与证据',generate:true},
+  {key:'timeline',title:'时间线',description:'正式事件与场景时间安排'},
+  {key:'storylines',title:'故事线与伏笔',description:'主支线、埋设与回收状态',generate:true},
+  {key:'analyses',title:'审阅报告',description:'五类审阅、证据与有效性'},
+  {key:'bible',title:'已确认事实',description:'经作者确认的事实与来源',generate:true},
+  {key:'pending',title:'待确认中心',description:'资料候选、正文候选与设定提案'},
+  {key:'personal',title:'写作偏好',description:'CLI 中的个人与写作偏好'},
+  {key:'usage',title:'本书模型用量',description:'CLI 已记录的模型用量'},
+];
+const LibrarySummarySchema = z.object({key:id,title:z.string(),summary:z.string().max(180),status:z.string(),origin:z.string(),actions:z.array(WritingActionSchema)});
+export const LibraryPageSchema = LibraryQuerySchema.extend({total:z.number().int().nonnegative(),nextOffset:z.number().int().nonnegative().nullable(),fingerprint:id,entries:z.array(LibrarySummarySchema).max(24)});
+export type LibraryPage = z.infer<typeof LibraryPageSchema>;
+export const LibraryDetailSchema = z.object({topic:LibraryTopicSchema,key:id,title:z.string(),body:z.string().max(60_000),truncated:z.boolean(),status:z.string(),origin:z.string(),actions:z.array(WritingActionSchema),fingerprint:id,
+  versions:z.array(z.object({number:z.number().int().positive(),state:z.string(),reason:z.string(),key:z.string()})).max(50)});
+export type LibraryDetail = z.infer<typeof LibraryDetailSchema>;
+export const LibraryStateSchema = z.object({query:LibraryQuerySchema,page:LibraryPageSchema.nullable(),detail:LibraryDetailSchema.nullable(),loading:z.boolean(),stale:z.boolean(),error:z.string().nullable()});
+export type LibraryState = z.infer<typeof LibraryStateSchema>;
+export const emptyLibrary = (): LibraryState => ({query:{topic:'characters',query:'',offset:0},page:null,detail:null,loading:false,stale:false,error:null});
 export const Stage = z.enum(['create', 'position', 'plan', 'world', 'scene', 'draft', 'review', 'accept', 'overview']);
 export type Stage = z.infer<typeof Stage>;
 export const STAGES: { key: Stage; title: string; prompt: string }[] = [
@@ -48,7 +78,7 @@ export const SnapshotSchema = z.object({
   sessions: z.array(z.object({ id, title: z.string() })), sessionId: z.string(),
   run: z.object({ id, state: z.enum(['running', 'waiting', 'cancelling', 'completed', 'failed', 'cancelled', 'interrupted']) }).nullable(),
   items: z.array(ItemSchema), approvals: z.array(ApprovalSchema), inputs: z.array(InputRequestSchema), book: BookSchema,
-  error: z.string().nullable(), attachment: z.object({ path: z.string(), text: z.string() }).nullable(),
+  error: z.string().nullable(), attachment: z.object({ path: z.string(), text: z.string() }).nullable(), library: LibraryStateSchema.default(emptyLibrary),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 export const ClientMessageSchema = z.discriminatedUnion('type', [
@@ -66,6 +96,9 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('detach') }).strict(),
   z.object({ type: z.literal('copy'), text: z.string().max(1_000_000) }).strict(),
   z.object({ type: z.literal('refreshBook') }).strict(),
+  z.object({type:z.literal('library'),query:LibraryQuerySchema}).strict(),
+  z.object({type:z.literal('entry'),topic:LibraryTopicSchema,key:id}).strict(),
+  z.object({type:z.literal('writingAction'),topic:LibraryTopicSchema,key:z.string().max(512),action:WritingActionSchema,fingerprint:id}).strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export type Session = { id: string; title: string };

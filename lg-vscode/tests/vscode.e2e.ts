@@ -1,10 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir,readFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {chromium,expect,type Frame} from '@playwright/test';
 import chromiumBinary from '@sparticuz/chromium';
 
-test('installed VSIX in actual VS Code: activation, approvals, cancel, history, readonly diff and file protection',{timeout:180000,skip:!process.env.LG_VSCODE_URL},async()=>{
+test('installed VSIX: writing workspace, CLI synchronization and scoped backend interactions',{timeout:180000,skip:!process.env.LG_VSCODE_URL},async()=>{
   const originalFile=await readFile('fixtures/workspace/README.md','utf8');
   const executablePath=process.env.LG_TEST_BROWSER||await chromiumBinary.executablePath();
   const browser=await chromium.launch({headless:true,executablePath,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-proxy-server','--host-resolver-rules=MAP *.localhost 127.0.0.1']});
@@ -69,11 +71,70 @@ test('installed VSIX in actual VS Code: activation, approvals, cancel, history, 
     const start=Date.now();
     while(!frame&&Date.now()-start<60000){
       if(localResourceError)throw Error(localResourceError);
-      for(const f of page.frames())if(await f.getByText('你的故事，正在成形。').count())frame=f;
+      for(const f of page.frames())if(await f.locator('[aria-label="LG 作品首页"]').count())frame=f;
       if(!frame)await new Promise(r=>setTimeout(r,250));
     }
     assert.ok(frame,'LG webview did not activate');
-    await expect(frame.getByText('离线演示 · 已连接')).toBeVisible();
+    const realLibrary=!!process.env.LG_TEST_VSCODE_REAL_LIBRARY;
+    await expect(frame.getByText(realLibrary?'本地 Agent · 已连接':'离线演示 · 已连接')).toBeVisible();
+    await screenshot('writing-home.png');
+    await frame.getByRole('button',{name:'打开人物',exact:true}).click();
+    await frame.getByRole('button',{name:'查看林砚',exact:true}).click();
+    await expect(frame.locator('.library-body')).toContainText('维修学徒');
+    if(realLibrary){
+      const workspace=process.env.LG_TEST_VSCODE_WORKSPACE!,python=process.env.LG_TEST_PYTHON!;
+      assert.ok(workspace.includes('/LitIsLand/')&&python);
+      let commandNumber=0;
+      const cli=async(operation:string,args:unknown,confirm=false)=>{
+        const source=workspace+`/cli-input-${commandNumber++}.json`;
+        await writeFile(source,JSON.stringify(args));
+        const result=await promisify(execFile)(python,['-m','lg_cli.main','-C',workspace,'studio',operation,'--input',source,'--json',...(confirm?['--confirm']:[])],{
+          cwd:workspace,env:{...process.env,PYTHONPATH:process.env.LG_TEST_SOURCE_PYTHONPATH,LITERARYGIANT_REGISTRY_HOME:workspace+'/registry'},timeout:45000,maxBuffer:1024*1024,
+        });return JSON.parse(result.stdout);
+      };
+      const saved=await cli('reference',{kind:'character',slug:'lin',title:'林砚',content:'CLI 自动同步后的人物总结：维修学徒决定为工友留下。',expected_version_id:1,reason:'actual CLI saved update'},true);
+      await cli('adopt-reference',{slug:'lin',version_number:2,expected_version_id:1},true);
+      assert.equal(saved.version.version_number,2);
+      await expect(frame.locator('.library-body')).toContainText('CLI 自动同步后的人物总结',{timeout:30000});
+      await assert.rejects(readFile(workspace+'/fixture-tool-names.json'),'Browsing and automatic synchronization must not call a model');
+      await screenshot('real-cli-synchronized.png');
+      await frame.getByRole('button',{name:'生成更新',exact:true}).click();
+      await frame.getByRole('button',{name:'批准本次',disabled:false}).click();
+      await expect(frame.getByRole('status')).toHaveText('已完成');
+      const preview=async()=>{
+        await frame!.getByRole('button',{name:'返回首页',exact:true}).click();
+        await frame!.getByRole('button',{name:'打开待确认中心',exact:true}).click();
+        await frame!.getByRole('button',{name:'查看林砚 · v3',exact:true}).click();
+        await expect(frame!.locator('.library-body')).toContainText('错过返乡船');
+      };
+      await preview();await screenshot('real-reference-preview.png');
+      await frame.getByRole('button',{name:'确认采用',exact:true}).click();
+      await frame.getByRole('button',{name:'拒绝',exact:true,disabled:false}).click();
+      await expect(frame.getByRole('status')).toHaveText('已完成');
+      assert.equal((await cli('library',{topic:'pending',query:'林砚'})).total,1);
+      await preview();await frame.getByRole('button',{name:'确认采用',exact:true}).click();
+      await frame.getByRole('button',{name:'批准本次',disabled:false}).click();
+      await expect(frame.getByRole('status')).toHaveText('已完成');
+      assert.equal((await cli('library',{topic:'pending',query:'林砚'})).total,0);
+      await frame.getByRole('button',{name:'返回首页',exact:true}).click();
+      await frame.getByRole('button',{name:'打开人物',exact:true}).click();
+      await frame.getByRole('button',{name:'查看林砚',exact:true}).click();
+      const page=await cli('library',{topic:'characters',query:'林砚'});
+      const detail=await cli('entry',{topic:'characters',key:page.entries[0].key});
+      assert.equal(await frame.locator('.library-body').textContent(),detail.body);
+      await screenshot('real-reference-adopted.png');
+      await writeFile('.test-output/vscode/library-real.json',JSON.stringify({workspace,backend:'pinned-core-fixture',cliAutoSync:true,readingCalledModel:false,referenceVersion:3,declinePreservedCandidate:true,adopted:true,cliAndUIBodyEqual:true},null,2));
+      return;
+    }
+    await expect(frame.locator('.library-body')).toContainText('来源');
+    await screenshot('character-detail.png');
+    await frame.getByRole('button',{name:'返回首页',exact:true}).click();
+    await expect(frame.locator('[aria-label="LG 作品首页"]')).toBeVisible();
+    await frame.getByRole('button',{name:'创作对话',exact:true}).click();
+    await frame.getByRole('textbox',{name:'Message input'}).fill('暂存的创作想法');
+    await frame.getByRole('button',{name:'返回首页',exact:true}).click();
+    await frame.getByRole('button',{name:'继续创作',exact:true}).click();
+    await expect(frame.getByRole('textbox',{name:'Message input'})).toHaveText('暂存的创作想法');
     const bounds=await frame.locator('.workbench').boundingBox();
     assert.ok(bounds&&bounds.height>=500,'LG requires a usable full-height workspace');
     await frame.getByRole('textbox',{name:'Message input'}).fill('测试场景');
@@ -124,6 +185,37 @@ test('installed VSIX in actual VS Code: activation, approvals, cancel, history, 
     await frame.getByRole('button',{name:'发送回答',exact:true}).click();
     await expect(frame.getByRole('status')).toHaveText('已完成');
     await screenshot('question-answered.png');
+    await frame.getByRole('button',{name:'返回首页',exact:true}).click();
+    await frame.getByRole('button',{name:'打开人物',exact:true}).click();
+    await frame.getByRole('button',{name:'查看林砚',exact:true}).click();
+    await frame.getByRole('button',{name:'生成更新',exact:true}).click();
+    await expect(frame.getByRole('button',{name:'批准本次',disabled:false})).toBeVisible();
+    const generatingSession=await frame.getByRole('combobox',{name:'创作会话'}).inputValue();
+    await frame.getByRole('button',{name:'返回首页',exact:true}).click();
+    await frame.getByRole('button',{name:'处理作者审批（1）',exact:true}).click();
+    assert.equal(await frame.getByRole('combobox',{name:'创作会话'}).inputValue(),generatingSession);
+    await expect(frame.getByRole('button',{name:'批准本次',disabled:false})).toHaveCount(1);
+    await frame.getByRole('button',{name:'批准本次',disabled:false}).click();
+    await expect(frame.getByRole('status')).toHaveText('已完成');
+    const previewCandidate=async()=>{
+      await frame!.getByRole('button',{name:'返回首页',exact:true}).click();
+      await frame!.getByRole('button',{name:'打开待确认中心',exact:true}).click();
+      await frame!.getByRole('button',{name:'查看林砚 · v2（资料候选）',exact:true}).click();
+      await expect(frame!.locator('.library-body')).toContainText('先切断电源');
+    };
+    await previewCandidate();await screenshot('reference-candidate.png');
+    await frame.getByRole('button',{name:'确认采用',exact:true}).click();
+    await frame.getByRole('button',{name:'拒绝',exact:true,disabled:false}).click();
+    await expect(frame.getByRole('status')).toHaveText('已完成');
+    await previewCandidate();
+    await frame.getByRole('button',{name:'确认采用',exact:true}).click();
+    await frame.getByRole('button',{name:'批准本次',disabled:false}).click();
+    await expect(frame.getByRole('status')).toHaveText('已完成');
+    await frame.getByRole('button',{name:'返回首页',exact:true}).click();
+    await frame.getByRole('button',{name:'打开人物',exact:true}).click();
+    await frame.getByRole('button',{name:'查看林砚',exact:true}).click();
+    await expect(frame.locator('.library-body')).toContainText('先切断电源');
+    await screenshot('reference-adopted.png');
   }catch(error){
     console.log('VS Code failure:',error instanceof Error?error.message:'Unknown test failure');
     throw error;

@@ -16,5 +16,6 @@ export function activate(context: vscode.ExtensionContext) {
   const controller = new WebviewController(context.extensionUri, backend, new SessionStore(mode), new WorkspaceBridge(root));
   context.subscriptions.push(controller,
     vscode.window.registerWebviewViewProvider('literarygiant.chat', controller),
-    vscode.commands.registerCommand('literarygiant.open', () => vscode.commands.executeCommand('literarygiant.chat.focus')));
+    vscode.commands.registerCommand('literarygiant.open', () => vscode.commands.executeCommand('literarygiant.chat.focus')),
+    vscode.commands.registerCommand('literarygiant.home', async () => {await vscode.commands.executeCommand('literarygiant.chat.focus');controller.home();}));
 }

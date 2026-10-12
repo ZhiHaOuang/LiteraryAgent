@@ -2,7 +2,26 @@
 
 记录更新：2026-10-12。经过 LitIsLand 验证的源码已应用到正式仓库。已验证功能、交付检查与已知限制如下。以下明确区分不同验证范围；不以 Mock 成功替代真实后端或 VS Code 宿主验收。
 
-## 已取得的证据
+
+## 0.2.0 当前作品首页与文学资料（2026-10-12）
+
+本批先对齐 CLI 数据和操作逻辑。升级前代码已备份到 Agent `449ca4344a0d2922ed052f2e8b1d5f25b385adac`，根仓库 `f6f40c721f64024f76dd25cdba5d756a67afa744`，远程提交已核对。
+
+- 默认首页、返回导航、人物/关系/章节/规划/设定/事件/时间线/伏笔/审阅/事实/待确认/偏好/用量入口已实现。资料读取不调用模型，生成由作者发起，候选与采用分别确认。
+- 沙箱 29 项扩展回归通过；新增验证 1000 次快速切换只读取首个和最后一个请求，以及过期预览与销毁保护。Python/实际 CLI 10 项定向检查通过，保留原稿、候选、采用、来源和母章节监督规则。
+- 固定二进制集成通过，独立作品 `lg-real-extension-0WDltj` 位于 LitIsLand P0 tmp；7 次审批，拒绝未写入，资料候选归档、采用、旧指纹拒绝、取消和重启恢复均通过。模型输出为本地 fixture。
+- 已安装沙箱 VSIX 的 Mock 宿主通过，约 28 秒：最新重建包另验证未发送草稿往返保留，包括首页返回不重发任务、人物资料、生成候选、拒绝采用和单独确认采用，另保留原有文件/历史交互检查。
+- 实际 VS Code 宿主连接固定核心、真实 LG MCP 与本地模型 fixture，通过 CLI 自动同步和人物更新采用，约 25 秒。独立作品 `/opt/conda/envs/LitIsLand/audits/lg-vscode-p1/lg-library-host-pat9im6c/novel`；读取及 CLI 同步阶段没有模型请求文件，生成后 v3 候选在拒绝采用时保留，明确批准后才采用。最终扩展详情与实际 CLI 返回正文逐字相同。证据 `.test-output/vscode/library-real.json` 和 `real-*.png` 位于 LitIsLand 扩展副本。
+
+- 0.2.0 桌面 F5 实际检查通过，约 21 秒；新首页命令、人物来源、返回导航、待审批重载和原有交互均通过。独立 Electron profile，Mock，无模型账号。
+
+新资料测试不使用个人作品或真实模型账号，不把 fixture 文本称为付费模型创作。原 0.1.0 的真实模型短正文记录保留在下文。正式同步后已运行 10 项 Python/实际 CLI 检查、完整类型检查及 29 项扩展回归，全部通过。实际正式 CLI 作品证据为 `/opt/conda/envs/LitIsLand/audits/lg-vscode-p0/tmp/lg-library-cli-mg8jwtbh`。最终包、源码摘要和安装比对记录见扩展目录 `.test-output/upgrade-0.2.json`。所有重任务共用串行锁；Node 堆默认 256 MiB，Electron 桌面测试 512 MiB，启动预算不等于总 RSS 硬上限。
+
+复现真实宿主资料检查：先在 LitIsLand 扩展目录运行 `python tests/setup-library-fixture.py --root <LitIsLand审计目录> --source <隔离Python源码根目录>`，保留输出中的新作品、fixture 启动器和 Python/source 路径。安装本版 VSIX 后，运行 `tests/run-vscode-smoke.mjs`，显式设置 `LG_TEST_VSCODE_REAL_LIBRARY=1`、`LG_TEST_VSCODE_WORKSPACE`、`LG_TEST_FIXTURE_PYTHON`、`LG_TEST_PYTHON`、`LG_TEST_SOURCE_PYTHONPATH` 和 `LG_TEST_RUNTIME_MANIFEST`，以及下文既有浏览器/字体/动态库环境。每次创建新作品；不盲目重跑已修改的作品。测试启动器只写隔离 server-data-dir 的 Machine 设置。
+
+## 0.1.0 历史验收记录
+
+## 已取得的证据（0.1.0）
 
 | 范围 | 结果 |
 | --- | --- |

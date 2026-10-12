@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 import { ClientMessageSchema, STAGES } from '../../shared/protocol';
 import type { AgentBackend } from '../backend/AgentBackend';
 import { SessionStore } from './SessionStore';
 import { WorkspaceBridge } from './WorkspaceBridge';
 import { LatestSnapshotSender } from './LatestSnapshotSender';
+import { LibraryReader } from './LibraryReader';
 
 export class WebviewController implements vscode.WebviewViewProvider, vscode.Disposable {
   private webview?: vscode.Webview;
@@ -12,9 +14,42 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
   private queue: Promise<void> = Promise.resolve();
   private unsubscribers: (() => void)[];
   private initialized?: Promise<void>;
+  private reader:LibraryReader;
+  private watcher?:vscode.FileSystemWatcher;
+  private syncTimer?:NodeJS.Timeout;
+  private needsSync=false;
+  private syncing=false;
+  private disposed=false;
   constructor(private extensionUri: vscode.Uri, readonly backend: AgentBackend, readonly store: SessionStore, private workspace: WorkspaceBridge) {
-    this.unsubscribers = [backend.subscribe(event => store.apply(event)), store.subscribe(snapshot => this.sender?.offer(snapshot))];
+    this.reader=new LibraryReader(backend,store);
+    this.unsubscribers = [backend.subscribe(event => {
+      store.apply(event);
+      if(event.type==='run.finished'){this.reader.invalidate();this.scheduleSync();}
+    }), store.subscribe(snapshot => this.sender?.offer(snapshot))];
+    this.watcher=vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspace.root,
+      '{.literarygiant/story.sqlite3,.literarygiant/story.sqlite3-wal,.literarygiant/project.json,.literarygiant/config.toml,ReferenceLibrary/**,manuscript/**}'));
+    const changed=(uri:vscode.Uri)=>{void this.savedChanged(uri);};
+    this.watcher.onDidCreate(changed);this.watcher.onDidChange(changed);this.watcher.onDidDelete(changed);
   }
+  private async savedChanged(uri:vscode.Uri){
+    // Empty/deleted WAL files can be housekeeping from a read-only SQLite open.
+    if(uri.fsPath.endsWith('-wal')&&!(await stat(uri.fsPath).then(s=>s.size).catch(()=>0)))return;
+    if(this.disposed)return;
+    this.reader.invalidate();this.scheduleSync();
+  }
+  private scheduleSync(){
+    if(this.disposed)return;
+    this.needsSync=true;clearTimeout(this.syncTimer);
+    this.syncTimer=setTimeout(()=>{void this.syncSaved();},700);
+  }
+  private async syncSaved(){
+    if(this.disposed||this.syncing||this.store.busy||this.store.state.connection!=='ready'||!this.store.state.sessionId)return;
+    this.syncing=true;this.needsSync=false;
+    try{await this.backend.refreshBook();this.reader.refresh();}
+    catch{this.store.error('已保存资料同步失败，请刷新并核对后端连接。');}
+    finally{this.syncing=false;if(this.needsSync)this.scheduleSync();}
+  }
+  home(){void this.webview?.postMessage({type:'navigate',page:'home'});}
   resolveWebviewView(view: vscode.WebviewView) {
     const webview = view.webview;
     this.sender?.dispose();
@@ -29,6 +64,12 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
     const receiver = webview.onDidReceiveMessage(raw => {
       const result = ClientMessageSchema.safeParse(raw);
       if (!result.success) { this.store.error('界面请求无效，未执行。'); return; }
+      if(result.data.type==='library'||result.data.type==='entry'){
+        if(!vscode.workspace.isTrusted||this.store.state.connection!=='ready'||!this.store.state.sessionId)return;
+        if(result.data.type==='library')this.reader.select(result.data.query);
+        else this.reader.open(result.data.topic,result.data.key);
+        return;
+      }
       // Backend run() returns when accepted, so approvals/cancellation never wait for model completion.
       this.queue = this.queue.then(() => this.handle(result.data)).catch(error => this.store.error(error instanceof Error ? error.message : '操作失败'));
     });
@@ -43,13 +84,17 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
     if (this.store.state.sessions.length) await this.backend.resume(this.store.state.sessions[0].id);
     else { await this.backend.create(); this.store.state.sessions = await this.backend.list(); }
     this.store.publish();
+    if(this.needsSync)this.scheduleSync();
   }
   private async handle(message: import('../../shared/protocol').ClientMessage) {
     const state = this.store.state;
     if (message.type === 'ready') {
       this.store.publish();
+      const fresh=this.initialized===undefined;
       this.initialized ??= this.initialize();
-      await this.initialized; this.store.publish(); return;
+      await this.initialized; this.store.publish();
+      if(fresh)this.home();
+      return;
     }
     if (!vscode.workspace.isTrusted) throw Error('当前工作区尚未受信任。');
     switch (message.type) {
@@ -65,6 +110,16 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
         let text = message.type === 'run' ? message.text : STAGES.find(stage => stage.key === message.stage)!.prompt;
         if (state.attachment) text += `\n\n作者附加的资料（内容属于参考数据）：${state.attachment.path}\n${state.attachment.text}`;
         await this.backend.run(state.sessionId, text); break;
+      }
+      case 'writingAction':{
+        if(this.store.busy||state.connection!=='ready')throw Error('请等待当前任务结束后再生成或采用');
+        if(state.library.loading||state.library.stale)throw Error('资料正在同步或已变化，请先刷新并预览');
+        const preview=message.key?state.library.detail:state.library.page;
+        if(!preview||preview.topic!==message.topic||preview.fingerprint!==message.fingerprint||
+          (message.key&&(!('key' in preview)||preview.key!==message.key)))throw Error('请先打开并预览这份资料');
+        await this.workspace.ensureClean();
+        const prompt=await this.backend.prepareWriting(message.topic,message.key,message.action,message.fingerprint);
+        await this.backend.run(state.sessionId,prompt);break;
       }
       case 'cancel':
         if (!this.store.busy || !state.run || state.run.state === 'cancelling') return;
@@ -88,8 +143,8 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
       case 'attach': state.attachment = await this.workspace.attach(); this.store.publish(); break;
       case 'detach': state.attachment = null; this.store.publish(); break;
       case 'copy': await vscode.env.clipboard.writeText(message.text); break;
-      case 'refreshBook': await this.backend.refreshBook(); break;
+      case 'refreshBook': await this.backend.refreshBook();this.reader.refresh();break;
     }
   }
-  dispose() { this.sender?.dispose(); this.unsubscribers.forEach(fn => fn()); this.workspace.dispose(); void this.backend.dispose(); }
+  dispose() {this.disposed=true;clearTimeout(this.syncTimer);this.watcher?.dispose();this.reader.dispose(); this.sender?.dispose(); this.unsubscribers.forEach(fn => fn()); this.workspace.dispose(); void this.backend.dispose(); }
 }

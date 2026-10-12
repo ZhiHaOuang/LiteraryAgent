@@ -11,8 +11,11 @@ import './ui/styles/variables.css';
 import './ui/styles/components.css';
 import './ui/styles/timeline.css';
 import './styles.css';
+import {HomePanel,LibraryPanel} from './WorkspacePanels';
+import type {LibraryTopic} from '../shared/protocol';
 
-declare function acquireVsCodeApi(): { postMessage(message: ClientMessage): void; getState(): { draft?: string } | undefined; setState(state: { draft: string }): void };
+type View='home'|'chat'|'book'|'library';
+declare function acquireVsCodeApi(): { postMessage(message: ClientMessage): void; getState(): { draft?: string;view?:View } | undefined; setState(state: { draft: string;view:View }): void };
 const vscode = acquireVsCodeApi();
 const send = (message: ClientMessage) => vscode.postMessage(message);
 const labels: Record<string, string> = { running: '运行中', waiting: '等待确认', cancelling: '正在取消', completed: '已完成', failed: '失败', cancelled: '已取消', interrupted: '连接中断', pending: '等待审批', responding: '正在回复', resolved: '已处理', expired: '已失效' };
@@ -51,12 +54,13 @@ function App() {
   const [draft, setDraft] = useState(vscode.getState()?.draft ?? '');
   const input = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
-  const [tab, setTab] = useState<'chat' | 'book'>('chat');
+  const [tab, setTab] = useState<View>(vscode.getState()?.view??'home');
   const [menu, setMenu] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
   const sent = useRef(false);
   useEffect(() => {
     const receive = (event: MessageEvent) => {
+      if(event.data?.type==='navigate'&&event.data.page==='home'){setTab('home');return;}
       if (event.data?.type !== 'snapshot') return;
       const parsed = SnapshotSchema.safeParse(event.data.snapshot);
       if (!parsed.success) return;
@@ -71,13 +75,15 @@ function App() {
     if (input.current) input.current.textContent = draft;
     return () => window.removeEventListener('message', receive);
   }, []);
-  useEffect(() => { vscode.setState({ draft }); }, [draft]);
+  useEffect(() => { vscode.setState({ draft,view:tab }); }, [draft,tab]);
+  useEffect(()=>{if(tab==='chat'&&input.current)input.current.textContent=draft;},[tab]);
   useEffect(() => {
     const el = scroll.current;
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 180) el.scrollTop = el.scrollHeight;
   }, [snapshot?.sequence]);
   const busy = !!snapshot?.run && ['running', 'waiting', 'cancelling'].includes(snapshot.run.state);
-  const ready = snapshot?.connection === 'ready';
+  const ready = snapshot?.connection === 'ready'&&!!snapshot.sessionId;
+  const open=(topic:LibraryTopic)=>{setTab('library');send({type:'library',query:{topic,query:'',offset:0}});};
   const submit = (e: React.FormEvent) => {
     e.preventDefault(); if (!ready || busy || !draft.trim() || sent.current) return;
     sent.current = true; send({ type: 'run', text: draft });
@@ -86,9 +92,9 @@ function App() {
     copyToClipboard: async text => send({ type: 'copy', text }), openFile: path => send({ type: 'open', path }), features: { canCopy: true } }}>
     <main className="workbench">
       <header className="topbar"><div className="brand"><span className="brand-mark">LG</span><div><strong>LiteraryGiant</strong><small>把故事写下去</small></div></div><span className="connection">{snapshot?.mode === 'mock' ? '离线演示' : '本地 Agent'} · {ready ? '已连接' : snapshot?.connection === 'disconnected' ? '已断开' : '连接中'}</span></header>
-      <nav className="tabs"><button className={tab === 'chat' ? 'selected' : ''} onClick={() => setTab('chat')}>创作对话</button><button className={tab === 'book' ? 'selected' : ''} onClick={() => setTab('book')}>作品概况</button></nav>
+      <nav className="tabs"><button className={tab==='home'?'selected':''} onClick={()=>setTab('home')}>{tab==='home'?'作品首页':'返回首页'}</button><button className={tab === 'chat' ? 'selected' : ''} onClick={() => setTab('chat')}>创作对话</button><button className={tab === 'book' ? 'selected' : ''} onClick={() => setTab('book')}>作品概况</button><button className={tab==='library'?'selected':''} onClick={()=>open(snapshot?.library.query.topic??'characters')}>资料库</button></nav>
       {snapshot?.error && <div className="error" role="alert">{snapshot.error}</div>}
-      {tab === 'book' && snapshot ? <BookPanel book={snapshot.book} approvals={snapshot.approvals.filter(a => a.state === 'pending').map(a => a.title)} /> : <>
+      {tab==='home'?snapshot?<HomePanel snapshot={snapshot} send={send} chat={()=>setTab('chat')} open={open}/>:<p className="muted">正在读取作品首页…</p>:tab==='library'&&snapshot?<LibraryPanel snapshot={snapshot} send={send} chat={()=>setTab('chat')} open={open}/>:tab === 'book' && snapshot ? <BookPanel book={snapshot.book} approvals={snapshot.approvals.filter(a => a.state === 'pending').map(a => a.title)} /> : <>
         <div className="session-bar"><select aria-label="创作会话" value={snapshot?.sessionId ?? ''} disabled={busy || !ready} onChange={e => send({ type: 'select', sessionId: e.target.value })}>{snapshot?.sessions.map(session => <option key={session.id} value={session.id}>{session.title}</option>)}</select><button disabled={busy || !ready} onClick={() => send({ type: 'create' })}>新对话</button></div>
         <div className="transcript" ref={scroll} aria-label="对话记录" aria-live="polite">
           {!snapshot?.items.length && <div className="welcome"><span className="eyebrow">从一个念头开始</span><h1>你的故事，正在成形。</h1><p>和 LG 确定方向、整理世界，再写下第一章。</p><div className="stage-grid">{STAGES.map(stage => <button key={stage.key} disabled={!ready || busy} onClick={() => send({ type: 'stage', stage: stage.key })}>{stage.title}<span>↗</span></button>)}</div></div>}

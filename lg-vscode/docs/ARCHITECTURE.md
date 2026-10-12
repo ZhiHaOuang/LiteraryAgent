@@ -45,3 +45,11 @@ MockBackend 仅在内存中模拟状态，面板明确标示离线演示；其�
 ## 模型参数边界
 
 Python `anthropic_bridge.py` 在完整上游响应确认后才提交工具调用。只对单个、完整的函数调用尝试有限 JSON 标点修复：在解析错误位置增删至多两个分隔符，不改变键名、标量值或顺序，必须通过原工具 schema，且搜索范围内只有一个语义结果。不能修复、响应截断或多个调用中出现错误时不执行工具，不增加模型请求或自动重放写操作。Studio 的审阅工具直接发布五类报告 schema；采用仍要求有效的完整审阅和作者明确批准。
+
+## 0.2.0 文学工作台
+
+`workspace_library.py` 复用 `book_home.snapshot/panel_entries` 与 `project_browser.project_entries`，保留 CLI 的人物聚合和来源、审阅有效性、时间线与伏笔解释。`book_library` 返回最多 24 条摘要；`book_entry` 按需返回有界详情及最近版本。概况也限制摘要数量和长度，避免把全文长期附在每次流式快照里。
+
+`LibraryReader` 只保留一份在途读取和一份最新待处理读取，用代次丢弃迟到结果；内容更新不改变人物的选择键。宿主监听已保存数据库、索引、资料和正文变更，忽略共享内存及空 WAL 整理事件，延迟合并刷新。任务运行期间标记过期，空闲后更新。只读 MCP 不启动模型 turn。
+
+生成操作先由 `book_action_context` 核对当前预览指纹，宿主也核对选中详情及未保存文件。`studio_reference` 使用 ProjectStore 保存人物/世界/大纲资料候选，归档到既有输出分类；`studio_adopt_reference` 单独采用，`studio_accept_proposal` 复用 CLI 的设定提案采用。每个写工具有明确审批策略，拒绝、旧预览、重复采用不能继续写入。候选正文及场景的采用沿用 ProjectStore 监督规则，不另造自动批准链路。
