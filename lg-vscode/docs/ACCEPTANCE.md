@@ -136,3 +136,13 @@ env TMPDIR=/opt/conda/envs/LitIsLand/audits/lg-vscode-p0/tmp LG_TEST_PYTHON=/opt
 ```bash
 env -u DISPLAY TMPDIR=/opt/conda/envs/LitIsLand/audits/lg-vscode-p1/browser-tmp FONTCONFIG_PATH=/opt/conda/envs/LitIsLand/audits/lg-vscode-p1/browser-tmp/fonts LG_VSCODE_TEST_ROOT=/opt/conda/envs/LitIsLand/audits/lg-vscode-p1 LG_TEST_DESKTOP_CODE=/opt/conda/envs/LitIsLand/audits/lg-vscode-p1/VSCode-linux-x64/code LD_LIBRARY_PATH=/opt/conda/envs/LitIsLand/audits/lg-vscode-p1/browser-deps/root/usr/lib/x86_64-linux-gnu:/opt/conda/envs/LitIsLand/audits/lg-vscode-p1/browser-deps/root/lib/x86_64-linux-gnu python scripts/run-guarded.py --lock /opt/conda/envs/LitIsLand/audits/lg-vscode-p1/check.lock --budget-mib 3072 -- node --import tsx --test tests/desktop.e2e.ts
 ```
+
+## 0.3.0 真实书架与共享模型（2026-10-13）
+
+LitIsLand 独立书架 `lg-library-host-ap62pfcg` 的已安装 VSIX 交互测试通过（43.1 秒）。使用固定真实核心与真实 LG MCP，服务商响应为 fixture，不使用真实账号、不调用真实模型。覆盖 CLI 保存后的资料自动同步、候选预览、拒绝及单独采用；新增 API 配置、修改模型 ID、选择已有配置、CLI 改模型后自动重连、跨两本书切换及返回后资料内容一致。管理操作未产生生成请求。证据：`.test-output/vscode/library-real.json`、`desktop-management.json`、`shared-model-book-management.png`。
+
+Python 桌面入口/CLI 模型配置测试覆盖同一存储、不同配置空间隔离、缺失密钥变量、接口校验失败保留旧配置，以及 CLI 运行中的外部账号、密钥和地址变更会更新下一次请求。扩展 29 项单元测试通过，类型检查与构建通过。重型任务串行并使用 run-guarded；隔离测试进程结束后没有残留本批测试作品进程。
+
+本批只接入既有作品并完成实现，不对真实作品做正文生成、修改或创作采用验收。之前版本的真实短正文及桌面 F5 证据保留为历史，本节不宣称重新执行了这些验收。
+
+正式工程启动描述校验通过：《潮线之外》（`Projects/BeyondTheTide`）的标识与路径对应，模型沿用 CLI 当前配置，核心为 `codex-cli 0.154.0`。校验前后 project.json 与 story.sqlite3 摘要一致，没有生成请求；正式三个 bundle 与通过交互检查的 LitIsLand bundle 字节一致。正式 Python 39 项检查通过，追加多账号凭证隔离和 Native 的 9 项检查通过（合计 43 项不同测试）。

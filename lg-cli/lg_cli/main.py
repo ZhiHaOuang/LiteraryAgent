@@ -695,8 +695,12 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
         if conversation is None:
             conversation = conversations.create()
         updated = load_config(config.workspace, environment=config.environment)
+        from hashlib import sha256
+        # Shared desktop/CLI settings can change an account without changing its model.
         identity = (str(config.workspace), conversation, updated.provider, updated.default_model,
-                    updated.project_instructions)
+                    updated.profile_name, updated.environment, updated.protocol, updated.base_url,
+                    updated.auth_mode, updated.codex_auth_home,
+                    sha256((updated.api_key or '').encode()).digest(), updated.project_instructions)
         if live_identity != identity:
             await close_live()
             config = updated

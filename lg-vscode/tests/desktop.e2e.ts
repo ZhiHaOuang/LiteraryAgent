@@ -34,7 +34,7 @@ async function trust(page:Page){
   await expect(trusted).toHaveCount(0);
 }
 
-test('desktop F5 builds and launches the default offline LG development host',{
+test('desktop F5 builds and launches the explicit mock LG development host',{
   timeout:240000,skip:!process.env.LG_TEST_DESKTOP_CODE,
 },async()=>{
   const source=resolve('.'),root=process.env.LG_VSCODE_TEST_ROOT;
@@ -43,7 +43,7 @@ test('desktop F5 builds and launches the default offline LG development host',{
   await mkdir(profile+'/User');
   await writeFile(profile+'/User/settings.json',JSON.stringify({
     'telemetry.telemetryLevel':'off','update.mode':'none','extensions.autoCheckUpdates':false,
-    'extensions.autoUpdate':false,'workbench.startupEditor':'none','window.restoreWindows':'none',
+    'extensions.autoUpdate':false,'workbench.startupEditor':'none','window.restoreWindows':'none','literarygiant.backend':'mock',
   }));
   await mkdir('.test-output/desktop',{recursive:true});
   const original=await readFile('fixtures/workspace/README.md','utf8');

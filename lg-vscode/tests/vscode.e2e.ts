@@ -15,7 +15,7 @@ test('installed VSIX: writing workspace, CLI synchronization and scoped backend 
   page.on('crash',()=>console.log('VS Code browser page crashed'));
   page.on('close',()=>console.log('VS Code browser page closed'));
   let localResourceError:string|undefined;
-  page.on('requestfailed',request=>{const host=new URL(request.url()).hostname;if(host.endsWith('.localhost')) {
+  page.on('requestfailed',request=>{const host=new URL(request.url()).hostname;if(host.endsWith('.localhost')&&request.failure()?.errorText!=='net::ERR_ABORTED') {
     localResourceError='Local webview resource failed: '+request.failure()?.errorText;
     console.log(localResourceError);
   }});
@@ -89,7 +89,7 @@ test('installed VSIX: writing workspace, CLI synchronization and scoped backend 
         const source=workspace+`/cli-input-${commandNumber++}.json`;
         await writeFile(source,JSON.stringify(args));
         const result=await promisify(execFile)(python,['-m','lg_cli.main','-C',workspace,'studio',operation,'--input',source,'--json',...(confirm?['--confirm']:[])],{
-          cwd:workspace,env:{...process.env,PYTHONPATH:process.env.LG_TEST_SOURCE_PYTHONPATH,LITERARYGIANT_REGISTRY_HOME:workspace+'/registry'},timeout:45000,maxBuffer:1024*1024,
+          cwd:workspace,env:{...process.env,HOME:workspace+'/../home',PYTHONPATH:process.env.LG_TEST_SOURCE_PYTHONPATH,LITERARYGIANT_REGISTRY_HOME:workspace+'/registry'},timeout:45000,maxBuffer:1024*1024,
         });return JSON.parse(result.stdout);
       };
       const saved=await cli('reference',{kind:'character',slug:'lin',title:'林砚',content:'CLI 自动同步后的人物总结：维修学徒决定为工友留下。',expected_version_id:1,reason:'actual CLI saved update'},true);
@@ -119,11 +119,51 @@ test('installed VSIX: writing workspace, CLI synchronization and scoped backend 
       await frame.getByRole('button',{name:'返回首页',exact:true}).click();
       await frame.getByRole('button',{name:'打开人物',exact:true}).click();
       await frame.getByRole('button',{name:'查看林砚',exact:true}).click();
-      const page=await cli('library',{topic:'characters',query:'林砚'});
-      const detail=await cli('entry',{topic:'characters',key:page.entries[0].key});
+      const libraryPage=await cli('library',{topic:'characters',query:'林砚'});
+      const detail=await cli('entry',{topic:'characters',key:libraryPage.entries[0].key});
       assert.equal(await frame.locator('.library-body').textContent(),detail.body);
       await screenshot('real-reference-adopted.png');
+      const fixtureHome=workspace+'/../home';
+      const toolCallsBefore=await readFile(workspace+'/fixture-tool-names.json','utf8');
+      const pick=async(label:string)=>{
+        const row=page.locator('.quick-input-list .monaco-list-row').filter({hasText:label}).first();
+        await expect(row).toBeVisible({timeout:20000});await row.click();
+      };
+      const input=async(title:string,value:string)=>{
+        await expect(page.getByText(title,{exact:true})).toBeVisible();
+        const box=page.locator('.quick-input-widget input').first();
+        await expect(box).toBeVisible();await box.fill(value);await page.keyboard.press('Enter');
+      };
+      const refreshed=async(text:string)=>{
+        await expect(async()=>{
+          for(const f of page.frames())if(await f.locator('[aria-label="LG 作品首页"]').count())frame=f;
+          assert.ok(frame);await expect(frame.getByText('本地 Agent · 已连接')).toBeVisible({timeout:1000});
+          await expect(frame.locator('.workbench')).toContainText(text,{timeout:1000});
+        }).toPass({timeout:45000});
+      };
+      await frame.getByRole('button',{name:'模型管理',exact:true}).click();await pick('fixture-b');
+      await refreshed('fixture-b-model');
+      await promisify(execFile)(python,['-m','lg_cli','-C',workspace,'auth','model','fixture-cli-model'],{
+        cwd:workspace,env:{...process.env,HOME:fixtureHome,PYTHONPATH:process.env.LG_TEST_SOURCE_PYTHONPATH},timeout:20000,
+      });
+      await refreshed('fixture-cli-model');
+      await frame!.getByRole('button',{name:'模型管理',exact:true}).click();await pick('修改配置中的模型 ID');await pick('fixture-b');await input('模型 ID（保存后激活此配置）','fixture-ui-model');
+      await refreshed('fixture-ui-model');
+      const profiles=()=>readFile(fixtureHome+'/.literarygiant/environments/sandbox/credentials.json','utf8').then(JSON.parse);
+      assert.equal((await profiles()).profiles['fixture-b'].model,'fixture-ui-model');
+      await frame!.getByRole('button',{name:'模型管理',exact:true}).click();await pick('新增 API 模型配置');await pick('StepFun');
+      await input('新配置名称','fixture-new');await input('模型 ID','fixture-new-model');await input('API Base URL','https://api.stepfun.com');await input('密钥环境变量名（不要输入密钥）','LG_DESKTOP_FIXTURE_KEY');
+      await refreshed('fixture-new-model');assert.equal((await profiles()).active,'fixture-new');
+      await frame!.getByRole('button',{name:'选择作品',exact:true}).click();await pick('second');
+      await refreshed('second');await expect(frame!.locator('[aria-label="LG 作品首页"]')).toContainText('second');
+      await frame!.getByRole('button',{name:'选择作品',exact:true}).click();await pick('novel');
+      await refreshed('novel');
+      await frame!.getByRole('button',{name:'打开人物',exact:true}).click();await frame!.getByRole('button',{name:'查看林砚',exact:true}).click();
+      assert.equal(await frame!.locator('.library-body').textContent(),detail.body);
+      assert.equal(await readFile(workspace+'/fixture-tool-names.json','utf8'),toolCallsBefore,'Book/model management must not call a model');
+      await screenshot('shared-model-book-management.png');
       await writeFile('.test-output/vscode/library-real.json',JSON.stringify({workspace,backend:'pinned-core-fixture',cliAutoSync:true,readingCalledModel:false,referenceVersion:3,declinePreservedCandidate:true,adopted:true,cliAndUIBodyEqual:true},null,2));
+      await writeFile('.test-output/vscode/desktop-management.json',JSON.stringify({workspace,sharedModelStore:true,cliModelChangeReconnected:true,editedModel:true,addedProfile:true,switchedBooks:true,bookDataPreserved:true,managementCalledModel:false},null,2));
       return;
     }
     await expect(frame.locator('.library-body')).toContainText('来源');

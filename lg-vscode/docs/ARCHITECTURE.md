@@ -3,7 +3,7 @@
 ```mermaid
 flowchart LR
   UI[React Webview] -->|自有契约| Host[WebviewController / SessionStore]
-  Host --> Mock[MockBackend]
+  Host -->|仅开发或隔离测试| Mock[MockBackend]
   Host --> Adapter[CodexBackend / RpcTransport]
   Adapter -->|原始 app-server JSONL RPC| Core[固定 app-server]
   Launcher[LG Python 启动层] -->|校验与启动| Core
@@ -53,3 +53,13 @@ Python `anthropic_bridge.py` 在完整上游响应确认后才提交工具调用
 `LibraryReader` 只保留一份在途读取和一份最新待处理读取，用代次丢弃迟到结果；内容更新不改变人物的选择键。宿主监听已保存数据库、索引、资料和正文变更，忽略共享内存及空 WAL 整理事件，延迟合并刷新。任务运行期间标记过期，空闲后更新。只读 MCP 不启动模型 turn。
 
 生成操作先由 `book_action_context` 核对当前预览指纹，宿主也核对选中详情及未保存文件。`studio_reference` 使用 ProjectStore 保存人物/世界/大纲资料候选，归档到既有输出分类；`studio_adopt_reference` 单独采用，`studio_accept_proposal` 复用 CLI 的设定提案采用。每个写工具有明确审批策略，拒绝、旧预览、重复采用不能继续写入。候选正文及场景的采用沿用 ProjectStore 监督规则，不另造自动批准链路。
+
+## 0.3.0 真实书架与共享模型
+
+`DesktopHost` 管理实际作品选择、模型原生对话框和后端重连；`DesktopClient` 通过 Python `lg_cli.desktop` 调用 CLI 的 Bookshelf、ProjectRegistry、load_config 和 credentials。作品不复制、不重新初始化；凭证仍在 Python 存储中。新增 API 配置仅传递密钥环境变量名，订阅登录及隐藏输入通过显式 CLI 管理入口进行。
+
+正式安装只启动 CodexBackend；Mock 必须处于开发宿主或明确的 LitIsLand 测试目录，普通用户设置不能开启演示。管理入口即使在后端配置失败时仍保留。共享凭证/配置文件变化合并为重连，忽略仅权限修复的事件；任务运行时延后，手动切换前检查任务及未保存文件。重连关闭旧进程、监听器和消息接收器，只恢复当前作品历史。
+
+CLI 每次创作前重读同一配置；连接复用身份包括配置空间、账号、协议、地址、模型和密钥摘要。同模型不同账号或更新密钥也会重新建立连接，摘要不输出到日志或界面。固定核心和协议生成类型没有修改。
+
+Python 还过滤当前配置空间所有已保存 API 配置对应的密钥环境变量值，防止切换账号后旧账号的自定义环境变量进入核心子进程。

@@ -1,8 +1,8 @@
 # LiteraryGiant VS Code
 
-LG 写作工作台 0.2.0。作品首页、文学资料、对话、候选版本与作者审批。
+LG 写作工作台 0.3.0。作品首页、文学资料、对话、候选版本与作者审批。
 
-默认离线 MockBackend，不需要模型账号或运行时。真实模式直接使用固定 app-server 的 JSONL RPC，通过 LG Python 启动层保留文学工具、凭据隔离和作品存储。Linux/LitIsLand 已完成固定后端、真实短正文、桌面 F5 与隔离 VSIX 交互验证，具体证据及已知限制见 [验收说明](docs/ACCEPTANCE.md)。
+正式版直接使用与 CLI 共用的固定 app-server 内核、模型配置和作品存储，通过 LG Python 启动层保留文学工具与凭据隔离。Mock 仅用于明确启用的开发或 LitIsLand 测试，正式安装不提供离线演示入口。Linux/LitIsLand 已完成固定后端、真实短正文、桌面 F5 与隔离 VSIX 交互验证，具体证据及已知限制见 [验收说明](docs/ACCEPTANCE.md)。
 
 
 ## 先按 CLI 逻辑使用
@@ -17,9 +17,19 @@ CLI 保存作品数据库、资料索引或审阅结果后，扩展会合并变�
 
 时间线、偏好及用量目前以 CLI 已存数据浏览为主；不新增自动推断或自动修改。详情最多显示 6 万字符，超过时明确提示且禁用直接采用；版本区显示最近 50 条，完整历史仍可通过 CLI 查询。当前 CLI 原有部分浏览查询保留 1000 条边界，本版没有宣称消除此限制。
 
-配套 LG Python 源码必须包含 `workspace_library.py` 和新的 Studio 工具。仅显示 Python 包版本 0.3.0 不足以判断配套是否完整；旧 Python 在读取新资料接口时会显示版本/资料读取错误。真实模式的模型配置仍通过 CLI 管理。
+配套 LG Python 源码必须包含 `workspace_library.py` 和新的 Studio 工具。仅显示 Python 包版本 0.3.0 不足以判断配套是否完整；旧 Python 在读取新资料接口时会显示版本/资料读取错误。本版还需要 `desktop.py` 管理入口和支持 `--environment` 的 `app_server.py`。
 
 新增 CLI 入口使用同一组工具：`studio library`、`entry`、`action-context` 为只读；`reference`、`adopt-reference`、`accept-proposal` 的写入需要 `--confirm`。与现有 Studio 操作一样，参数从 `--input <JSON文件>` 读取。
+
+## 真实作品与共享模型管理
+
+顶部「选择作品」直接读取 CLI 书架；切换使用原有数据库、章节与参考资料，不复制或重新初始化作品。当前目录为已初始化作品时优先使用该作品，否则沿用 CLI 最近位置或选择当前书架中的第一本书。也可打开其他书架或作品。`literarygiant.bookPath` 可固定作品路径；选书后会同步更新该设置和 CLI 最近位置。
+
+「模型管理」显示 CLI 当前配置空间中的账号与模型。选择已保存配置、修改模型 ID、新增 API 配置，均复用 CLI 的凭证存储及服务商/协议/地址校验；保存后重连，下一次 CLI 加载配置也使用这一选择。新增配置的密钥通过环境变量名交给 Python 读取，不在界面输入密钥。需要隐藏输入密钥、更新账号或显式登录 ChatGPT 订阅时，选择「在 CLI 中管理配置…」。不自动登录或回退服务商。
+
+CLI 修改共享模型配置后，扩展在空闲时重连；运行中的任务使用启动时的配置，完成后再更新。任务执行或等待审批时禁止切换作品和模型；切换前检查作品内未保存文件。原会话保存在同一作品的 LG 内核目录，重连只恢复历史，不重发任务。未发送的界面草稿会保留，切换作品后请核对目标再发送。
+
+「运行环境」设置配套 Python 和固定 runtime.json 的绝对路径。「重新连接」重载配置并恢复当前作品会话。模型管理即使在连接失败时仍可使用；没有配置时提示配置原因，正式版不会退回演示数据。`literarygiant.environment` 沿用 CLI 的配置空间，留空使用 CLI 默认规则。
 
 ## 开发
 
@@ -32,9 +42,9 @@ npm test
 npm run build
 ```
 
-按 F5 启动扩展开发宿主，点击活动栏中的 LiteraryGiant 书本图标，或执行「LG：打开写作工作台」。LG 使用独立侧栏，避免被资源管理器压缩。默认使用仓库内的隔离演示文件夹。修改代码时运行 `npm run watch`，然后在开发宿主执行 Reload Window。无需反复安装 VSIX。
+按 F5 启动扩展开发宿主，点击活动栏中的 LiteraryGiant 书本图标，或执行「LG：打开写作工作台」。LG 使用独立侧栏，避免被资源管理器压缩。开发启动目录可在 `.vscode/launch.json` 中选择已初始化的作品目录；正式配置与 CLI 保持一致。修改代码时运行 `npm run watch`，然后在开发宿主执行 Reload Window。无需反复安装 VSIX。
 
-普通离线对话会展示模拟流式输出和工具审批；`/error`、`/input`、`/slow`、`/disconnect` 分别演示错误、用户问题、取消与断线。断线后通过 Reload Window 重启后端，不自动重发任务。
+显式开发测试可使用 `literarygiant.backend=mock`（仅开发宿主及隔离测试有效）。模拟对话会展示流式输出和工具审批；`/error`、`/input`、`/slow`、`/disconnect` 分别演示错误、用户问题、取消与断线。断线后通过 Reload Window 重启后端，不自动重发任务。
 
 ## 浏览器交互验证
 
@@ -65,7 +75,7 @@ python scripts/run-guarded.py --lock /opt/conda/envs/LitIsLand/audits/lg-vscode-
 
 ## 真实 LG 后端
 
-在运行扩展宿主的机器上安装包含 `lg_cli.app_server` 的配套 LG Python 包，并通过 LG 自身的配置流程设置模型。打开一个独立 LG 作品目录，将以下设置写入 VS Code 用户设置；路径须替换为该机器上真实的绝对路径：
+在运行扩展宿主的机器上安装包含 `lg_cli.app_server` 和 `lg_cli.desktop` 的配套 LG Python 包。打开作品、书架或包含 `Projects` 书架的仓库，将以下设置写入 VS Code 用户设置；路径须替换为该机器上真实的绝对路径：
 
 ```json
 {
@@ -75,7 +85,7 @@ python scripts/run-guarded.py --lock /opt/conda/envs/LitIsLand/audits/lg-vscode-
 }
 ```
 
-更改后执行 Reload Window。扩展强制核验 `codex-cli 0.154.0` 的配套 manifest、commit 与二进制校验和，不回退到 PATH，不自动登录或更换账号。密钥由 Python 配置层读取，不能填入 Webview。
+设置后点击「重新连接」。扩展强制核验 `codex-cli 0.154.0` 的配套 manifest、commit 与二进制校验和，不回退到 PATH，不自动登录或更换账号。密钥由 Python 配置层读取，不能填入 Webview。
 
 只信任你认可的作品目录。发送任务及批准写入前须保存或关闭未保存的编辑器；模型输出先作为候选，采用需要经过现有 LG 审阅校验和单次明确审批。断线后先恢复历史并检查作品实际状态，再决定是否继续。
 

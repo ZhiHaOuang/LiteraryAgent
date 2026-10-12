@@ -22,7 +22,7 @@ const Description = z.object({ schema: z.literal(1), workspace: z.string(), mode
   runtimeVersion: z.literal('codex-cli 0.154.0'), baseInstructions: z.string() });
 type Description = z.infer<typeof Description>;
 type PendingRequest = { rpcId: RpcId; threadId: string; runId: string; kind: 'decision' | 'elicitation' | 'input'; questionIds?: string[] };
-export type BackendSettings = { python: string; manifest: string; workspace: string; env?: NodeJS.ProcessEnv };
+export type BackendSettings = { python: string; manifest: string; workspace: string; environment?:string; env?: NodeJS.ProcessEnv };
 
 export class CodexBackend extends EventBackend implements AgentBackend {
   private rpc?: RpcTransport;
@@ -39,7 +39,9 @@ export class CodexBackend extends EventBackend implements AgentBackend {
   protected launch(): LaunchSpec {
     const { python, manifest, workspace, env } = this.settings;
     if (!isAbsolute(python) || !isAbsolute(manifest)) throw Error('请在用户设置中指定绝对 Python 路径与 runtime manifest');
-    return { command: python, args: ['-m', 'lg_cli.app_server', '--workspace', workspace, '--runtime-manifest', manifest], cwd: workspace, env };
+    const args=['-m', 'lg_cli.app_server', '--workspace', workspace, '--runtime-manifest', manifest];
+    if(this.settings.environment)args.push('--environment',this.settings.environment);
+    return { command: python, args, cwd: workspace, env };
   }
   async connect() {
     const spec = this.launch();
@@ -57,7 +59,7 @@ export class CodexBackend extends EventBackend implements AgentBackend {
         this.emit({ type: 'backend.status', status: 'disconnected', error: reason });
       });
       this.rpc.start();
-      await this.rpc.request('initialize', { clientInfo: { name: 'literarygiant_vscode', title: 'LG Writing Workbench', version: '0.2.0' }, capabilities: { experimentalApi: true } });
+      await this.rpc.request('initialize', { clientInfo: { name: 'literarygiant_vscode', title: 'LG Writing Workbench', version: '0.3.0' }, capabilities: { experimentalApi: true } });
       await this.rpc.notify('initialized', {});
       this.emit({ type: 'backend.status', status: 'ready' });
     } catch (error) {

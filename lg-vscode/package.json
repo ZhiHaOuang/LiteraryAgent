@@ -2,7 +2,7 @@
   "name": "literarygiant-vscode",
   "displayName": "LiteraryGiant",
   "description": "LG 写作工作台：对话、作品概况、审批与版本差异",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "literarygiant",
   "private": true,
   "engines": {
@@ -33,6 +33,22 @@
       {
         "command": "literarygiant.home",
         "title": "LG：返回作品首页"
+      },
+      {
+        "command": "literarygiant.selectBook",
+        "title": "LG：选择作品"
+      },
+      {
+        "command": "literarygiant.models",
+        "title": "LG：模型管理"
+      },
+      {
+        "command": "literarygiant.reconnect",
+        "title": "LG：重新连接"
+      },
+      {
+        "command": "literarygiant.setup",
+        "title": "LG：配置运行环境"
       }
     ],
     "viewsContainers": {
@@ -59,24 +75,35 @@
         "literarygiant.backend": {
           "type": "string",
           "enum": [
-            "mock",
             "codex"
           ],
-          "default": "mock",
-          "scope": "machine",
-          "description": "Mock 为离线演示；Codex 使用经过验证的 LG 后端。"
+          "default": "codex",
+          "scope": "machine-overridable",
+          "description": "正式版本使用与 CLI 共用的 LG 内核。"
         },
         "literarygiant.pythonPath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "machine-overridable",
           "description": "安装 LG 的 Python 绝对路径。"
         },
         "literarygiant.runtimeManifest": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "machine-overridable",
           "description": "LG 指定的 runtime.json 绝对路径，不从 PATH 查找。"
+        },
+        "literarygiant.bookPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "现有 LG 作品路径，可相对当前工作区；留空时沿用 CLI 最近位置或当前书架。"
+        },
+        "literarygiant.environment": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "CLI 的 LG 配置空间；留空时使用 CLI 的默认规则。"
         }
       }
     }

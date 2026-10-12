@@ -93,6 +93,13 @@ function App() {
     <main className="workbench">
       <header className="topbar"><div className="brand"><span className="brand-mark">LG</span><div><strong>LiteraryGiant</strong><small>把故事写下去</small></div></div><span className="connection">{snapshot?.mode === 'mock' ? '离线演示' : '本地 Agent'} · {ready ? '已连接' : snapshot?.connection === 'disconnected' ? '已断开' : '连接中'}</span></header>
       <nav className="tabs"><button className={tab==='home'?'selected':''} onClick={()=>setTab('home')}>{tab==='home'?'作品首页':'返回首页'}</button><button className={tab === 'chat' ? 'selected' : ''} onClick={() => setTab('chat')}>创作对话</button><button className={tab === 'book' ? 'selected' : ''} onClick={() => setTab('book')}>作品概况</button><button className={tab==='library'?'selected':''} onClick={()=>open(snapshot?.library.query.topic??'characters')}>资料库</button></nav>
+      <section className="session-bar" aria-label="作品与模型管理">
+        <button disabled={busy} onClick={()=>send({type:'manage',action:'selectBook'})}>选择作品</button>
+        <button disabled={busy} onClick={()=>send({type:'manage',action:'models'})}>模型管理</button>
+        <button disabled={busy} onClick={()=>send({type:'manage',action:'reconnect'})}>重新连接</button>
+        <button disabled={busy} onClick={()=>send({type:'manage',action:'setup'})}>运行环境</button>
+      </section>
+      {snapshot?.configuration&&<p className="muted" title={snapshot.configuration.workspace}>当前模型：{snapshot.configuration.model||'账号默认'} · {snapshot.configuration.profile||snapshot.configuration.provider} · 与 CLI 共享配置</p>}
       {snapshot?.error && <div className="error" role="alert">{snapshot.error}</div>}
       {tab==='home'?snapshot?<HomePanel snapshot={snapshot} send={send} chat={()=>setTab('chat')} open={open}/>:<p className="muted">正在读取作品首页…</p>:tab==='library'&&snapshot?<LibraryPanel snapshot={snapshot} send={send} chat={()=>setTab('chat')} open={open}/>:tab === 'book' && snapshot ? <BookPanel book={snapshot.book} approvals={snapshot.approvals.filter(a => a.state === 'pending').map(a => a.title)} /> : <>
         <div className="session-bar"><select aria-label="创作会话" value={snapshot?.sessionId ?? ''} disabled={busy || !ready} onChange={e => send({ type: 'select', sessionId: e.target.value })}>{snapshot?.sessions.map(session => <option key={session.id} value={session.id}>{session.title}</option>)}</select><button disabled={busy || !ready} onClick={() => send({ type: 'create' })}>新对话</button></div>

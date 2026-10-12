@@ -79,10 +79,12 @@ export const SnapshotSchema = z.object({
   run: z.object({ id, state: z.enum(['running', 'waiting', 'cancelling', 'completed', 'failed', 'cancelled', 'interrupted']) }).nullable(),
   items: z.array(ItemSchema), approvals: z.array(ApprovalSchema), inputs: z.array(InputRequestSchema), book: BookSchema,
   error: z.string().nullable(), attachment: z.object({ path: z.string(), text: z.string() }).nullable(), library: LibraryStateSchema.default(emptyLibrary),
+  configuration:z.object({workspace:z.string(),environment:z.string(),profile:z.string(),model:z.string(),provider:z.string()}).optional(),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ready') }).strict(),
+  z.object({type:z.literal('manage'),action:z.enum(['selectBook','models','reconnect','setup'])}).strict(),
   z.object({ type: z.literal('create') }).strict(),
   z.object({ type: z.literal('select'), sessionId: id }).strict(),
   z.object({ type: z.literal('run'), text: z.string().trim().min(1).max(100_000) }).strict(),

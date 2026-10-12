@@ -20,7 +20,10 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
   private needsSync=false;
   private syncing=false;
   private disposed=false;
-  constructor(private extensionUri: vscode.Uri, readonly backend: AgentBackend, readonly store: SessionStore, private workspace: WorkspaceBridge) {
+  private closing?:Promise<void>;
+  private viewBindings:vscode.Disposable[]=[];
+  constructor(private extensionUri: vscode.Uri, readonly backend: AgentBackend, readonly store: SessionStore, private workspace: WorkspaceBridge,
+    private management?:(action:import('./DesktopHost').DesktopAction)=>Promise<void>,private startupError?:string) {
     this.reader=new LibraryReader(backend,store);
     this.unsubscribers = [backend.subscribe(event => {
       store.apply(event);
@@ -50,7 +53,9 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
     finally{this.syncing=false;if(this.needsSync)this.scheduleSync();}
   }
   home(){void this.webview?.postMessage({type:'navigate',page:'home'});}
+  ensureClean(){return this.workspace.ensureClean();}
   resolveWebviewView(view: vscode.WebviewView) {
+    this.viewBindings.forEach(binding=>binding.dispose());this.viewBindings=[];
     const webview = view.webview;
     this.sender?.dispose();
     const sender = new LatestSnapshotSender(snapshot => webview.postMessage({ type: 'snapshot', snapshot }));
@@ -73,12 +78,13 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
       // Backend run() returns when accepted, so approvals/cancellation never wait for model completion.
       this.queue = this.queue.then(() => this.handle(result.data)).catch(error => this.store.error(error instanceof Error ? error.message : '操作失败'));
     });
-    view.onDidDispose(() => {
+    this.viewBindings.push(receiver,view.onDidDispose(() => {
       receiver.dispose(); sender.dispose();
       if (this.webview === webview) { this.webview = undefined; this.sender = undefined; }
-    });
+    }));
   }
   private async initialize() {
+    if(this.startupError){this.store.state.connection='disconnected';throw Error(this.startupError);}
     await this.backend.connect();
     this.store.state.sessions = await this.backend.list();
     if (this.store.state.sessions.length) await this.backend.resume(this.store.state.sessions[0].id);
@@ -87,12 +93,14 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
     if(this.needsSync)this.scheduleSync();
   }
   private async handle(message: import('../../shared/protocol').ClientMessage) {
+    if(this.disposed)return;
     const state = this.store.state;
+    if(message.type==='manage'){await this.management?.(message.action);return;}
     if (message.type === 'ready') {
       this.store.publish();
       const fresh=this.initialized===undefined;
       this.initialized ??= this.initialize();
-      await this.initialized; this.store.publish();
+      try{await this.initialized;}catch(error){this.initialized=undefined;throw error;} this.store.publish();
       if(fresh)this.home();
       return;
     }
@@ -146,5 +154,10 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
       case 'refreshBook': await this.backend.refreshBook();this.reader.refresh();break;
     }
   }
-  dispose() {this.disposed=true;clearTimeout(this.syncTimer);this.watcher?.dispose();this.reader.dispose(); this.sender?.dispose(); this.unsubscribers.forEach(fn => fn()); this.workspace.dispose(); void this.backend.dispose(); }
+  shutdown():Promise<void>{
+    if(this.closing)return this.closing;
+    this.disposed=true;clearTimeout(this.syncTimer);this.viewBindings.forEach(binding=>binding.dispose());this.watcher?.dispose();this.reader.dispose();this.sender?.dispose();this.unsubscribers.forEach(fn=>fn());this.workspace.dispose();
+    this.closing=this.backend.dispose();return this.closing;
+  }
+  dispose(){void this.shutdown();}
 }

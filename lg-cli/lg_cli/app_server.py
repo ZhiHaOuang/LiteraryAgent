@@ -74,9 +74,10 @@ def main() -> None:
     parser.add_argument('--workspace', required=True, type=Path)
     parser.add_argument('--runtime-manifest', required=True, type=Path)
     parser.add_argument('--describe', action='store_true')
+    parser.add_argument('--environment')
     args = parser.parse_args()
     try:
-        code = launch(load_config(args.workspace), args.runtime_manifest, describe=args.describe)
+        code = launch(load_config(args.workspace, environment=args.environment), args.runtime_manifest, describe=args.describe)
     except (ConfigError, ValueError, OSError):
         # Never copy upstream bodies, command environments or credentials to the client.
         print('LG launcher failed: verify the LG profile, absolute runtime manifest and binary checksum.', file=sys.stderr)

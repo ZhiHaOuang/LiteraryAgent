@@ -32,5 +32,5 @@ for command in commands:
     evidence.write_text(json.dumps(report, indent=2))
     if result.returncode:
         raise SystemExit(result.returncode)
-report['vsixSHA256'] = hashlib.sha256((target / 'literarygiant-vscode-0.2.0.vsix').read_bytes()).hexdigest()
+report['vsixSHA256'] = hashlib.sha256((target / 'literarygiant-vscode-0.3.0.vsix').read_bytes()).hexdigest()
 evidence.write_text(json.dumps(report, indent=2))

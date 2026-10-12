@@ -260,6 +260,54 @@ class ProviderProfileTests(unittest.TestCase):
         self.assertEqual(text, 'continue the novel')
         session.run_command.assert_not_called()
 
+    def test_external_profile_key_and_endpoint_changes_update_next_cli_request(self):
+        from lg_cli.desktop import control
+        save_profile('experiment', 'one', 'synthetic-one', provider='stepfun', model='same-model')
+        save_profile('experiment', 'two', 'synthetic-two', provider='stepfun', model='same-model')
+        save_profile('experiment', 'one')
+        config = load_config(self.root, environment='experiment')
+        session = Mock()
+        requests = []
+
+        class Agent:
+            thread_id = 'main'
+            def __init__(self, current, on_event, **kwargs):
+                self.config = current
+            async def start(self, **kwargs):
+                pass
+            async def run(self, text):
+                requests.append(self.config)
+            async def close(self):
+                pass
+
+        def run(handler, model, provider):
+            async def exercise():
+                async def request(number):
+                    await handler('continue the novel')
+                    async def wait():
+                        while len(requests) < number:
+                            await asyncio.sleep(0.01)
+                    await asyncio.wait_for(wait(), 5)
+                await request(1)
+                control(self.root, 'experiment', {'action':'use','name':'two'})
+                await request(2)
+                save_profile('experiment', 'two', 'synthetic-new', replace=True)
+                await request(3)
+                save_profile('experiment', 'two', 'synthetic-new', replace=True, base_url='https://example.com/messages')
+                await request(4)
+                await handler('/exit')
+                await session.shutdown_handler()
+                return 0
+            return asyncio.run(exercise())
+
+        session.run.side_effect = run
+        with patch('lg_cli.main.LiteraryInput', return_value=session), \
+             patch('lg_cli.live_agent.LiveAgent', Agent), redirect_stdout(io.StringIO()):
+            self.assertEqual(interactive_loop(config), 0)
+        self.assertEqual([c.profile_name for c in requests], ['one','two','two','two'])
+        self.assertEqual([c.api_key for c in requests], ['synthetic-one','synthetic-two','synthetic-new','synthetic-new'])
+        self.assertEqual(requests[-1].base_url, 'https://example.com/messages')
+
     def test_tui_cancel_preserves_active_profile(self):
         save_profile("test", "old", "key")
         dialog = Mock()

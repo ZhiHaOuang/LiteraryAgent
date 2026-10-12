@@ -15,6 +15,9 @@ from tests.test_anthropic_bridge import message_events
 
 workspace = Path(sys.argv[sys.argv.index('--workspace') + 1])
 config = replace(make_config(workspace), provider='stepfun', protocol='anthropic', default_model='step-3.5-flash')
+if os.environ.get('LG_DESKTOP_FIXTURE_KEY'):
+    from lg_cli.config import load_config
+    config=replace(config,default_model=load_config(workspace).default_model)
 handled = set()
 original_popen = app_server.subprocess.Popen
 

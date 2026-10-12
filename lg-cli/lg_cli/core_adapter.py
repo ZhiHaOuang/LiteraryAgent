@@ -655,9 +655,12 @@ def _exec_args(
 def _adapter_env(config: LGConfig) -> dict[str, str]:
     env = dict(os.environ)
     from .providers import PROVIDERS
+    from .credentials import read_profiles
     secrets = {"LITERARYGIANT_API_KEY", "LG_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "LG_BRIDGE_TOKEN", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_ORGANIZATION", "OPENAI_PROJECT_ID"}
     secrets.update(name for preset in PROVIDERS.values() for name in preset.key_envs)
-    secrets.update(name for name, value in env.items() if config.api_key and value == config.api_key)
+    keys = {p.get('key') for p in read_profiles(config.environment or 'sandbox')['profiles'].values()}
+    keys.add(config.api_key)
+    secrets.update(name for name, value in env.items() if value and value in keys)
     for name in secrets:
         env.pop(name, None)
     if not config.uses_anthropic and not config.uses_responses and config.auth_mode != "chatgpt":
