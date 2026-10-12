@@ -1,0 +1,102 @@
+{
+  "name": "literarygiant-vscode",
+  "displayName": "LiteraryGiant",
+  "description": "LG 写作工作台：对话、作品概况、审批与版本差异",
+  "version": "0.1.0",
+  "publisher": "literarygiant",
+  "private": true,
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.cjs",
+  "extensionKind": ["workspace"],
+  "activationEvents": [
+    "onView:literarygiant.chat"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "LG 需要启动本地后端并访问作品。"
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "literarygiant.open",
+        "title": "LG：打开写作工作台"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [{ "id": "literarygiant", "title": "LiteraryGiant", "icon": "media/lg.svg" }]
+    },
+    "views": {
+      "literarygiant": [
+        {
+          "id": "literarygiant.chat",
+          "name": "LG 写作工作台",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "LiteraryGiant",
+      "properties": {
+        "literarygiant.backend": {
+          "type": "string",
+          "enum": [
+            "mock",
+            "codex"
+          ],
+          "default": "mock",
+          "scope": "machine",
+          "description": "Mock 为离线演示；Codex 使用经过验证的 LG 后端。"
+        },
+        "literarygiant.pythonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "安装 LG 的 Python 绝对路径。"
+        },
+        "literarygiant.runtimeManifest": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "LG 指定的 runtime.json 绝对路径，不从 PATH 查找。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
+    "package": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "markdown-it": "14.1.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@fontsource/noto-sans-sc": "5.3.0",
+    "@playwright/test": "^1.57.0",
+    "@sparticuz/chromium": "143.0.4",
+    "@types/markdown-it": "14.1.2",
+    "@types/node": "20.19.1",
+    "@types/react": "19.2.10",
+    "@types/react-dom": "19.2.3",
+    "@types/vscode": "1.96.0",
+    "@vscode/vsce": "3.6.0",
+    "autoprefixer": "10.4.22",
+    "esbuild": "0.25.3",
+    "postcss": "8.5.6",
+    "tailwindcss": "3.4.18",
+    "tsx": "4.20.3",
+    "typescript": "5.8.2"
+  }
+}

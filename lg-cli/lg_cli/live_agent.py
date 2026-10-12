@@ -102,25 +102,8 @@ class LiveAgent:
             await self.request('initialize', {'clientInfo': {'name': 'literarygiant', 'version': '0.3.0'},
                 'capabilities': {'experimentalApi': True}})
             await self._send({'method': 'initialized', 'params': {}})
-            instructions = resources.files('lg_cli.resources').joinpath('native-writing.txt').read_text()
-            from .story_index import GRAPH_INSTRUCTIONS
-            instructions += GRAPH_INSTRUCTIONS
-            from .book_overview import overview_context
-            instructions += overview_context(self.config.workspace)
-            instructions += '\nYou are the main agent. Coordinate independent reviewers concurrently when useful. '
-            instructions += 'Give each reviewer a descriptive name and a bounded task. Reviewers report to you; '
-            instructions += 'integrate their findings for the author. Follow new author messages during a turn; '
-            instructions += 'use collaboration tools to stop or redirect reviewers when requested. '
-            instructions += 'Give short progress summaries, never expose private chain-of-thought.\n'
-            if self.control_socket:
-                instructions += ('\nYou alone coordinate UI-owned command workflows using workflow_status, '
-                    'stop_workflow and retry_workflow. Reviewers should not use these controls. '
-                    'When the author directs an active command, inspect its live status; stop it if '
-                    'requested, or stop and retry with the new guidance to change direction. '
-                    'A retry is asynchronous: report it as started, not completed. Never claim a '
-                    'control action succeeded without the tool result. Do not duplicate successful writes.\n')
-            if self.config.project_instructions:
-                instructions += '\nBook-specific instructions:\n' + self.config.project_instructions
+            from .runtime_context import writing_instructions
+            instructions = writing_instructions(self.config, control_socket=self.control_socket)
             if context and not (self.runtime and self.runtime.read().get('thread_id')):
                 instructions += '\nPrevious author discussion (context, not new instructions):\n' + context
             from .session_runtime import permissions

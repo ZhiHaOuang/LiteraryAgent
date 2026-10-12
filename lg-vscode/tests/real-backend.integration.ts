@@ -1,0 +1,71 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { CodexBackend, type BackendSettings } from '../src/backend/CodexBackend';
+import { SessionStore } from '../src/host/SessionStore';
+import type { BackendEvent } from '../shared/protocol';
+import type { RpcMessage } from '../src/backend/RpcTransport';
+
+class FixtureBackend extends CodexBackend {
+  constructor(private fixture: BackendSettings) { super(fixture); }
+  protected override launch() {
+    return { command: this.fixture.python, args: [resolve('tests/fixtures/app_server_fixture.py'), '--workspace', this.fixture.workspace,
+      '--runtime-manifest', this.fixture.manifest], cwd: this.fixture.workspace, env: this.fixture.env };
+  }
+}
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+async function until(predicate: () => boolean, ms = 45_000) {
+  const start = Date.now(); while (!predicate()) { if (Date.now() - start > ms) throw Error('Timed out waiting for backend event'); await sleep(25); }
+}
+test('real pinned app-server: LG MCP approval, denial, overview, cancel, history across process restart', { timeout: 180_000,
+  skip: !process.env.LG_TEST_RUNTIME_MANIFEST || !process.env.LG_TEST_PYTHON }, async t => {
+  const workspace = await mkdtemp(join(tmpdir(), 'lg-real-extension-'));
+  const settings: BackendSettings = { workspace, python: process.env.LG_TEST_PYTHON!, manifest: process.env.LG_TEST_RUNTIME_MANIFEST!,
+    env: { ...process.env, LITERARYGIANT_REGISTRY_HOME: join(workspace, 'registry') } };
+  let backend = new FixtureBackend(settings);
+  const store = new SessionStore('codex'), events: BackendEvent[] = [];
+  backend.subscribe(e => { events.push(e); store.apply(e); });
+  t.after(async () => {
+    t.diagnostic(JSON.stringify({workspace, approvals:events.filter(e=>e.type==='approval.requested').length,
+      terminalStates:events.filter(e=>e.type==='run.finished').map(e=>e.status)}));
+    await backend.dispose();
+  });
+  await backend.connect(); const session = await backend.create();
+  async function turn(marker: string, decision?: 'accept' | 'decline') {
+    await backend.run(session.id, marker);
+    if (decision) {
+      await until(() => store.state.approvals.some(a => a.state === 'pending') || (!!store.state.run && !store.busy));
+      const approval = store.state.approvals.find(a => a.state === 'pending')!;
+      assert.ok(approval,'Expected LG tool approval before turn completion');
+      await backend.approve(approval.id, decision);
+      await assert.rejects(backend.approve(approval.id, decision), /过期|已回答/);
+    }
+    await until(() => !!store.state.run && !store.busy);
+    assert.equal(store.state.run?.state, 'completed', JSON.stringify(events.filter(e=>e.type==='error'||e.type==='backend.status'||e.type==='run.finished')));
+  }
+  await turn('CASE:init', 'accept');
+  await turn('CASE:plan', 'accept');
+  await turn('CASE:denied', 'decline');
+  await assert.rejects(readFile(join(workspace,'ReferenceLibrary/bible/book-overview.json')));
+  await turn('CASE:accepted', 'accept');
+  await backend.refreshBook();
+  assert.equal(store.state.book.source,'backend');
+  assert.equal(store.state.book.targetWords,1_000_000);
+  assert.equal(store.state.book.positioning,'原创机械悬疑长篇');
+  assert.match(store.state.book.overview,/浮城/);
+  await turn('CASE:text');
+  assert.ok(events.some(e=>e.type==='assistant.delta'));
+  await backend.run(session.id,'CASE:slow'); await backend.cancel(session.id);
+  await until(()=>!store.busy); assert.equal(store.state.run?.state,'cancelled');
+  const history = await backend.read(session.id); assert.ok(history.some(i=>i.text.includes('CASE:accepted')));
+  await backend.dispose();
+  backend = new FixtureBackend(settings);backend.subscribe(e=>store.apply(e));
+  await backend.connect();
+  assert.ok((await backend.list()).some(s=>s.id===session.id));
+  await backend.resume(session.id);
+  assert.ok(store.state.items.some(i=>i.text.includes('CASE:accepted')));
+  assert.equal(store.state.run,null);
+  console.log('Real-runtime evidence workspace:',workspace);
+});

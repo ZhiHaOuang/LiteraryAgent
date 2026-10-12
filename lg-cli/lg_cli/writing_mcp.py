@@ -16,8 +16,12 @@ from .knowledge import KnowledgeGateway
 from .project_store import ProjectStore
 
 
-def create_server(config: LGConfig, *, control_socket: str | None = None) -> FastMCP:
-    server = FastMCP("LiteraryGiant writing tools", log_level="ERROR")
+def create_server(config: LGConfig, *, control_socket: str | None = None, require_elicitation: bool = False) -> FastMCP:
+    if require_elicitation:
+        from .mcp_approval import ApprovingMCP
+        server = ApprovingMCP(config.workspace)
+    else:
+        server = FastMCP("LiteraryGiant writing tools", log_level="ERROR")
     store = ProjectStore(config.workspace)
 
     def approved(function):
@@ -188,6 +192,8 @@ def create_server(config: LGConfig, *, control_socket: str | None = None) -> Fas
             """Main agent: retry a failed/stopped workflow on author request. Optional author guidance reaches every model stage. To redirect active work, stop it first, then retry with guidance. Never retry successful writes."""
             return control_request(control_socket, "retry", job_id=job_id, guidance=guidance)
 
+    from .studio import register_tools
+    register_tools(server, config, approved)
     return server
 
 
@@ -195,8 +201,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--control-socket")
+    parser.add_argument("--require-elicitation", action="store_true")
     args = parser.parse_args()
-    create_server(load_config(args.workspace), control_socket=args.control_socket).run(transport="stdio")
+    create_server(load_config(args.workspace), control_socket=args.control_socket, require_elicitation=args.require_elicitation).run(transport="stdio")
 
 
 if __name__ == "__main__":

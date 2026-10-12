@@ -56,8 +56,10 @@ class NativeTests(unittest.TestCase):
             self.assertEqual(settings["include_collaboration_mode_instructions"], "false")
             self.assertEqual(settings["mcp_servers.lg_writing.required"], "true")
             self.assertEqual(
-                len(json.loads(settings["mcp_servers.lg_writing.enabled_tools"])), 10
+                len(json.loads(settings["mcp_servers.lg_writing.enabled_tools"])), 18
             )
+            from lg_cli.mcp_approval import READ_TOOLS, WRITE_TOOLS
+            self.assertEqual(set(json.loads(settings["mcp_servers.lg_writing.enabled_tools"])), READ_TOOLS | WRITE_TOOLS)
             instructions = Path(json.loads(settings["model_instructions_file"]))
             self.assertIn("LiteraryGiant", instructions.read_text())
 

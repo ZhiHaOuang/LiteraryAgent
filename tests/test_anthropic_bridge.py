@@ -107,6 +107,188 @@ class BridgeTests(unittest.TestCase):
                     )
                     self.assertIn("model_providers.lg_anthropic.stream_max_retries=0", args)
 
+    def test_truncated_tool_json_uses_final_stop_reason_and_never_finishes_tool(self):
+        block = {"type": "tool_use", "id": "call", "name": "tool", "input": {}}
+        delta = {"type": "input_json_delta", "partial_json": '{"value":"PRIVATE'}
+        mapping = {"tool": {"type": "function", "name": "tool", "namespace": None}}
+        for stop, expected in (("max_tokens", "output token limit"), ("tool_use", "not valid JSON")):
+            with self.subTest(stop=stop):
+                emitted = []
+                with self.assertRaisesRegex(ProtocolError, expected) as failure:
+                    for event in translate_stream(message_events(block, delta, stop=stop), mapping):
+                        emitted.append(event)
+                self.assertNotIn("PRIVATE", str(failure.exception))
+                self.assertFalse(any(e["type"] in ("response.output_item.done", "response.completed") for e in emitted))
+
+    def test_invalid_tool_json_reports_only_fixed_kind_and_numeric_location(self):
+        cases = [
+            ('{"value":"PRIVATE" "next":1}', 'missing_comma'),
+            ('{"value" "PRIVATE"}', 'missing_colon'),
+            ('{PRIVATE:1}', 'invalid_property'),
+            ('{"value":PRIVATE}', 'missing_value'),
+            ('{"value":"PRIVATE', 'unterminated_string'),
+            ('{"value":"PRIVATE\\q"}', 'invalid_escape'),
+            ('{"value":"PRIVATE\n"}', 'control_character'),
+            ('{"value":"PRIVATE"} {}', 'extra_data'),
+        ]
+        for raw, kind in cases:
+            with self.subTest(kind=kind):
+                emitted = []
+                with self.assertRaises(ProtocolError) as failure:
+                    for event in translate_stream(message_events(
+                        {"type": "tool_use", "id": "call", "name": "tool", "input": {}},
+                        {"type": "input_json_delta", "partial_json": raw}, stop='tool_use'),
+                        {"tool": {"type": "function", "name": "tool", "namespace": None}}):
+                        emitted.append(event)
+                message = str(failure.exception)
+                self.assertIn(f'json_error={kind}, offset=', message)
+                self.assertIn(f'chars={len(raw)}', message)
+                self.assertNotIn('PRIVATE', message)
+                self.assertFalse(any(e['type'] in ('response.output_item.done', 'response.completed') for e in emitted))
+
+    @unittest.skipUnless(os.environ.get('LG_TEST_CODEX_BINARY'), 'set LG_TEST_CODEX_BINARY for native integration')
+    def test_real_core_rejects_unrepairable_tool_json_without_execution_or_retry(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            calls = []
+
+            def stream(payload):
+                calls.append(payload)
+                tool = next(t for t in payload['tools'] if 'cmd' in t['input_schema'].get('properties', {}))
+                yield from message_events(
+                    {'type': 'tool_use', 'id': 'invalid_call', 'name': tool['name'], 'input': {}},
+                    {'type': 'input_json_delta', 'partial_json':
+                        '{"cmd":"touch MUST_NOT_EXIST" "private":"PRIVATE_SENTINEL"}'}, stop='tool_use')
+
+            config = replace(make_config(root), provider='deepseek-anthropic', default_model='deepseek-flash',
+                base_url='https://api.deepseek.com/anthropic', enable_shell=True)
+            factory = lambda cfg: AnthropicBridge(cfg, stream_factory=stream)
+            with patch.dict(os.environ, {'LG_CODEX_COMMAND': os.environ['LG_TEST_CODEX_BINARY'],
+                    'LG_CODEX_RUNTIME_MANIFEST': ''}), patch(
+                    'lg_cli.anthropic_bridge.AnthropicBridge', side_effect=factory):
+                result = CodexExecAdapter(root / 'missing').run(prompt='Test invalid tool JSON handling',
+                    config=config, mode='outline')
+            self.assertFalse(result.ok)
+            self.assertEqual(len(calls), 1)
+            self.assertFalse((root / 'MUST_NOT_EXIST').exists())
+            self.assertIn('no unique schema-valid result', result.error or '')
+            self.assertNotIn('PRIVATE_SENTINEL', result.error or '')
+
+    def test_tool_argument_repair_is_bounded_preserves_values_and_schema(self):
+        schema = {'type': 'object', 'properties': {'value': {'type': 'string'},
+            'count': {'type': 'integer'}}, 'required': ['value', 'count'], 'additionalProperties': False}
+        request = {'model': 'test', 'input': 'original task', 'tools': [
+            {'type': 'function', 'name': 'save', 'parameters': schema}]}
+        for invalid, success in (('{"value":"PRIVATE" "count":1}', True),
+                ('{"value":"PRIVATE","count":1]', True),
+                ('{"value":["PRIVATE"] "count":1}', False),
+                ('{"value":"PRIVATE" "count":1,"extra":true}', False),
+                ('{"value":"PRIVATE', False), ('{"value":PRIVATE,"count":1}', False)):
+            with self.subTest(invalid=invalid):
+                calls, emitted = [], []
+                def factory(payload):
+                    calls.append(payload)
+                    return message_events(
+                        {'type': 'tool_use', 'id': 'first',
+                         'name': payload['tools'][0]['name'], 'input': {}},
+                        {'type': 'input_json_delta', 'partial_json': invalid},
+                        'tool_use')
+                bridge = AnthropicBridge(make_config(Path('/tmp/test-bridge')), stream_factory=factory)
+                if success:
+                    emitted = list(bridge.response_events(request))
+                    done = [e['item'] for e in emitted if e['type'] == 'response.output_item.done']
+                    self.assertEqual(len(done), 1)
+                    self.assertEqual(done[0]['call_id'], 'first')
+                    self.assertEqual(json.loads(done[0]['arguments']), {'value': 'PRIVATE', 'count': 1})
+                    self.assertEqual(sum(e['type'] == 'response.created' for e in emitted), 1)
+                else:
+                    with self.assertRaises(ProtocolError) as failure:
+                        for event in bridge.response_events(request):
+                            emitted.append(event)
+                    self.assertNotIn('PRIVATE', str(failure.exception))
+                    self.assertFalse(any(e['type'] == 'response.output_item.done' for e in emitted))
+                self.assertEqual(len(calls), 1)
+                self.assertFalse(any(e['type'] == 'response.function_call_arguments.delta' for e in emitted))
+
+    def test_tool_completion_waits_for_message_stop_and_never_repairs_truncation(self):
+        mapping = {'tool': {'type': 'function', 'name': 'save', 'namespace': None}}
+        for raw in ('{"value":"PRIVATE"}', '{"value":"PRIVATE" "count":1}'):
+            calls, emitted = [], []
+            with self.assertRaisesRegex(ProtocolError, 'output token limit'):
+                for event in translate_stream(message_events(
+                        {'type': 'tool_use', 'id': 'call', 'name': 'tool', 'input': {}},
+                        {'type': 'input_json_delta', 'partial_json': raw}, 'max_tokens'), mapping,
+                        repair_tool=lambda *args: calls.append(args)):
+                    emitted.append(event)
+            self.assertEqual(calls, [])
+            self.assertFalse(any(e['type'] == 'response.output_item.done' for e in emitted))
+
+    def test_multiple_tool_response_fails_without_partial_execution_or_repair(self):
+        mapping = {'tool': {'type': 'function', 'name': 'save', 'namespace': None}}
+        events = list(message_events({'type': 'tool_use', 'id': 'first', 'name': 'tool', 'input': {}},
+            {'type': 'input_json_delta', 'partial_json': '{"value":1}'}, 'tool_use'))
+        second = list(message_events({'type': 'tool_use', 'id': 'second', 'name': 'tool', 'input': {}},
+            {'type': 'input_json_delta', 'partial_json': '{"value":2 "other":3}'}, 'tool_use'))
+        for event in second:
+            if 'index' in event:
+                event['index'] = 1
+        calls, emitted = [], []
+        with self.assertRaisesRegex(ProtocolError, 'not valid JSON'):
+            for event in translate_stream(events[:-2] + second[1:], mapping,
+                    repair_tool=lambda *args: calls.append(args)):
+                emitted.append(event)
+        self.assertEqual(calls, [])
+        self.assertFalse(any(e['type'] == 'response.output_item.done' for e in emitted))
+
+    @unittest.skipUnless(os.environ.get('LG_TEST_CODEX_BINARY'), 'set LG_TEST_CODEX_BINARY for native integration')
+    def test_real_core_executes_repaired_tool_once(self):
+        from lg_cli.native import writing_args
+        from lg_cli.project_store import ProjectStore
+        root = Path(tempfile.mkdtemp(prefix='lg-repaired-tool-'))
+        self.assertIn('/LitIsLand/', str(root))
+        calls = []
+        args = {'slug': 'repair-test', 'title': '独立修复测试', 'content': '维修师拉下断电开关。',
+                'sequence': 1, 'expected_version_id': 0, 'reason': 'Isolated bridge regression'}
+        valid = json.dumps(args, separators=(',', ':'))
+        invalid = valid.replace(',"sequence"', '"sequence"')
+
+        def stream(payload):
+            calls.append(payload)
+            if len(calls) > 1:
+                self.assertEqual(len(calls), 2)
+                results = [part for msg in payload['messages'] for part in msg['content']
+                           if part['type'] == 'tool_result']
+                self.assertEqual(len(results), 1)
+                self.assertEqual(results[0]['tool_use_id'], 'original_call')
+                yield from message_events()
+                return
+            tool = next(t for t in payload['tools'] if 'Save short original prose' in t.get('description', ''))
+            yield from message_events(
+                {'type': 'tool_use', 'id': 'original_call',
+                 'name': tool['name'], 'input': {}},
+                {'type': 'input_json_delta', 'partial_json': invalid}, 'tool_use')
+
+        config = replace(make_config(root), provider='deepseek-anthropic', default_model='deepseek-flash',
+            base_url='https://api.deepseek.com/anthropic', enable_shell=False)
+        ProjectStore(root).initialize(name='Isolated repaired tool test')
+        class WritingBridge(AnthropicBridge):
+            def codex_args(self):
+                return super().codex_args() + writing_args(config)
+        factory = lambda cfg: WritingBridge(cfg, stream_factory=stream)
+        with patch.dict(os.environ, {'LG_CODEX_COMMAND': os.environ['LG_TEST_CODEX_BINARY'],
+                'LG_CODEX_RUNTIME_MANIFEST': '', 'LITERARYGIANT_REGISTRY_HOME': str(root / 'registry')}), patch(
+                'lg_cli.anthropic_bridge.AnthropicBridge', side_effect=factory):
+            result = CodexExecAdapter(root / 'missing').run(prompt='Run the isolated execution count test',
+                config=config, mode='chat')
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(len(calls), 2)
+        store = ProjectStore(root)
+        documents = store.list_documents(kind='chapter')
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(documents[0].content, args['content'])
+        self.assertEqual(len(store.list_versions(documents[0].id)), 1)
+        print('Repaired tool execution evidence:', root)
+
     def test_plain_text_schema_failure_gets_one_private_bounded_repair(self):
         request = {"model": "test", "input": "hello", "text": {"format": {
             "type": "json_schema", "schema": {"type": "object", "properties": {

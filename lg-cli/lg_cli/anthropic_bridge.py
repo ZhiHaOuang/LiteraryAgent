@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import secrets
 import threading
 import uuid
@@ -26,6 +27,44 @@ class SchemaOutputError(ProtocolError):
     def __init__(self, message: str, value: Any):
         super().__init__(message)
         self.value = value
+
+
+def _json_error_location(error: json.JSONDecodeError) -> str:
+    # JSONDecodeError.doc contains private tool input; only fixed labels and
+    # numeric positions may cross the HTTP error boundary.
+    kinds = {
+        "Expecting ',' delimiter": 'missing_comma',
+        "Expecting ':' delimiter": 'missing_colon',
+        'Expecting property name enclosed in double quotes': 'invalid_property',
+        'Expecting value': 'missing_value',
+        'Unterminated string starting at': 'unterminated_string',
+        'Invalid \\escape': 'invalid_escape',
+        'Invalid control character at': 'control_character',
+        'Extra data': 'extra_data',
+    }
+    kind = kinds.get(error.msg, 'invalid_json')
+    return f'json_error={kind}, offset={error.pos}, chars={len(error.doc)}'
+
+
+def _argument_scalars(text: str) -> list[tuple[type, Any]]:
+    """Compare keys and scalar values even when container punctuation is invalid."""
+    if len(text) > 1024 * 1024:
+        raise ProtocolError('tool argument repair exceeds the input limit')
+    decoder = json.JSONDecoder()
+    result = []
+    position = 0
+    while position < len(text):
+        if text[position] in ' \t\r\n{}[],:':
+            position += 1
+            continue
+        try:
+            value, position = decoder.raw_decode(text, position)
+        except json.JSONDecodeError:
+            raise ProtocolError('tool argument repair cannot preserve scalar content') from None
+        if isinstance(value, (dict, list)) or isinstance(value, float) and not math.isfinite(value):
+            raise ProtocolError('tool argument repair cannot preserve scalar content')
+        result.append((type(value), value))
+    return result
 
 
 def _content(value: Any) -> list[dict[str, Any]]:
@@ -208,7 +247,7 @@ def translate_request(request: dict[str, Any], max_tokens: int) -> tuple[dict, d
     return payload, mapping
 
 
-def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
+def translate_stream(events: Iterable[dict], mapping: dict, *, repair_tool=None) -> Iterable[dict]:
     response_id = "resp_" + uuid.uuid4().hex
     output: list[dict] = []
     blocks: dict[int, dict] = {}
@@ -216,6 +255,7 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
     stop_reason = None
     started = False
     generated_chars = {"text": 0, "tool_json": 0, "reasoning": 0}
+    deferred_input_error: ProtocolError | None = None
 
     def event(kind: str, **fields: Any) -> dict:
         return {"type": "response." + kind, **fields}
@@ -315,6 +355,7 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
                 "json": "",
                 "initial": block.get("input", {}),
                 "closed": False,
+                "wire_name": block.get("name"),
             }
             yield event(
                 "output_item.added", output_index=index, item=copy.deepcopy(item)
@@ -343,13 +384,6 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
             ):
                 generated_chars["tool_json"] += len(delta["partial_json"])
                 state["json"] += delta["partial_json"]
-                if state["spec"]["type"] == "function":
-                    yield event(
-                        "function_call_arguments.delta",
-                        item_id=item["id"],
-                        output_index=state["index"],
-                        delta=delta["partial_json"],
-                    )
             else:
                 raise ProtocolError("unsupported upstream delta")
         elif kind == "content_block_stop":
@@ -361,10 +395,16 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
             if spec["type"] != "text":
                 try:
                     args = json.loads(state["json"]) if state["json"] else state["initial"]
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as exc:
+                    # The final stop reason follows content_block_stop. Do not
+                    # mislabel token-truncated tool input as a complete bad call.
                     if spec["type"] == "structured":
-                        raise SchemaOutputError("structured output is not valid JSON", state["json"]) from None
-                    raise ProtocolError("upstream tool input is not valid JSON") from None
+                        deferred_input_error = SchemaOutputError("structured output is not valid JSON", state["json"])
+                    else:
+                        state["input_error"] = ProtocolError(
+                            "upstream tool input is not valid JSON; " + _json_error_location(exc))
+                    state["closed"] = True
+                    continue
                 if not isinstance(args, dict):
                     if spec["type"] == "structured":
                         raise SchemaOutputError("structured output must be an object", args)
@@ -392,8 +432,12 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
                     item["input"] = args["input"]
                 else:
                     item["arguments"] = json.dumps(args, ensure_ascii=False)
-            item["status"] = "completed"
             state["closed"] = True
+            if spec["type"] in {"function", "custom"}:
+                # No executable item is completed until the whole upstream
+                # message is known to be complete, valid and not truncated.
+                continue
+            item["status"] = "completed"
             yield event(
                 "output_item.done",
                 output_index=state["index"],
@@ -415,6 +459,8 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
                     f"reasoning_chars={generated_chars['reasoning']}; "
                     "increase the output budget or shorten the request"
                 )
+            if deferred_input_error is not None:
+                raise deferred_input_error
             if (
                 not started
                 or not output
@@ -425,6 +471,19 @@ def translate_stream(events: Iterable[dict], mapping: dict) -> Iterable[dict]:
                 raise ProtocolError(
                     "upstream generation stopped without a complete result"
                 )
+            tool_states = [s for s in blocks.values() if s['spec']['type'] in {'function', 'custom'}]
+            invalid = [s for s in tool_states if 'input_error' in s]
+            if invalid:
+                state = invalid[0]
+                if (repair_tool is None or len(tool_states) != 1
+                        or state['spec']['type'] != 'function' or stop_reason != 'tool_use'):
+                    raise state['input_error']
+                args = repair_tool(state['wire_name'], state['json'])
+                state['item']['arguments'] = json.dumps(args, ensure_ascii=False)
+            for state in tool_states:
+                item = state['item']
+                item['status'] = 'completed'
+                yield event('output_item.done', output_index=state['index'], item=copy.deepcopy(item))
             input_tokens = (
                 usage.get("input_tokens", 0)
                 + usage.get("cache_read_input_tokens", 0)
@@ -600,7 +659,8 @@ class AnthropicBridge:
                 raise ProtocolError("StepFun Messages does not document forced tool_choice")
         structured = ((request.get("text") or {}).get("format") or {}).get("type") == "json_schema"
         if not structured:
-            yield from translate_stream(self.events(payload), mapping)
+            repair = lambda name, raw: self.repair_tool_arguments(payload, name, raw)
+            yield from translate_stream(self.events(payload), mapping, repair_tool=repair)
             return
         for attempt in range(2):
             try:
@@ -625,6 +685,52 @@ class AnthropicBridge:
                 continue
             yield from events
             return
+
+    def repair_tool_arguments(self, payload: dict, name: str, raw: str) -> dict:
+        from jsonschema import Draft202012Validator
+
+        if len(raw) > 65536:
+            raise ProtocolError("tool argument repair exceeds the input limit")
+        scalars = _argument_scalars(raw)
+        tool = next(tool for tool in payload["tools"] if tool["name"] == name)
+        validator = Draft202012Validator(tool["input_schema"])
+        pending = [(raw, 0)]
+        seen = {raw}
+        valid = {}
+        parsed = preserved = 0
+        failures = set()
+        while pending:
+            candidate, edits = pending.pop()
+            try:
+                args = json.loads(candidate)
+            except json.JSONDecodeError as error:
+                if edits == 2:
+                    continue
+                position = error.pos
+                variants = [candidate[:position] + token + candidate[position:]
+                            for token in ",:{}[]"]
+                if position < len(candidate) and candidate[position] in ",:{}[]":
+                    variants.append(candidate[:position] + candidate[position + 1:])
+                for variant in variants:
+                    if variant not in seen:
+                        seen.add(variant)
+                        pending.append((variant, edits + 1))
+                continue
+            serialized = json.dumps(args, ensure_ascii=False)
+            parsed += 1
+            same = _argument_scalars(serialized) == scalars
+            preserved += int(same)
+            errors = list(validator.iter_errors(args))
+            failures.update(error.validator for error in errors if error.validator in {
+                'type', 'required', 'additionalProperties', 'enum', 'minItems', 'maxItems',
+                'minLength', 'maxLength', 'minProperties', 'anyOf', 'oneOf'})
+            if (isinstance(args, dict) and validator.is_valid(args)
+                    and same):
+                valid[json.dumps(args, sort_keys=True, ensure_ascii=False)] = args
+        if len(valid) != 1:
+            raise ProtocolError("tool argument punctuation repair has no unique schema-valid result; "
+                f"parsed={parsed}, preserved={preserved}, valid={len(valid)}, schema={','.join(sorted(failures)) or 'none'}")
+        return next(iter(valid.values()))
 
     @staticmethod
     def validate_final_schema(request: dict, response: dict) -> None:

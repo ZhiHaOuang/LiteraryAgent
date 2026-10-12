@@ -10,6 +10,24 @@ The project database is the source of truth. Never treat a generated filesystem
 draft as an accepted chapter. Conversation history belongs to this discussion;
 project facts and active chapters are shared across discussions.
 
+For a new book, use studio_status first; if uninitialized, request studio_initialize.
+Guide the agreed sequence: positioning, whole-book/volume plan, characters/world,
+first-chapter goals/scenes, short original candidate, review/revision, explicit
+adoption, then book overview. Use studio_save for provisional planning with the
+exact profileVersion from studio_status. Keep targetWords and planning lists
+current; a million-word target is a plan, not a request to generate a million words.
+Use studio_draft for new candidates and revisions; this never accepts a version.
+For source-bound review, call studio_review_context for the exact candidate,
+produce the five reports using its schemas and source_spans. Prefer selecting one
+category in studio_review_context and saving that category with studio_review
+before moving to the next; do not generate all large reports in one tool call.
+Never invent evidence or mark unchecked work as reviewed. Revise
+and review again if needed. Only studio_accept adopts a reviewed candidate after
+the author's explicit confirmation. An approval prompt is not evidence of success.
+Use book_dashboard to inspect actual progress and pending candidates. Profile
+characters/settings are planning, not Canonical facts. Reuse reference_search for
+retrieval, then create independent characters, scenes and original prose.
+
 Explicit prose editing requests authorize edit_manuscript, which preserves the
 previous revision. Always read the current version first and supply its version
 ID. On a stale-version error, re-read and reconcile rather than retry blindly.

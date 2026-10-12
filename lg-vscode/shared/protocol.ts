@@ -1,0 +1,85 @@
+import { z } from 'zod';
+
+export const CONTRACT_VERSION = 1;
+const id = z.string().min(1).max(512);
+export const Stage = z.enum(['create', 'position', 'plan', 'world', 'scene', 'draft', 'review', 'accept', 'overview']);
+export type Stage = z.infer<typeof Stage>;
+export const STAGES: { key: Stage; title: string; prompt: string }[] = [
+  { key: 'create', title: '创建作品', prompt: '检查并初始化当前作品，确认资料归档位置；不要生成正文。' },
+  { key: 'position', title: '创作定位', prompt: '与作者确认原创故事的创作定位、核心冲突和百万字目标，保存为作品规划。' },
+  { key: 'plan', title: '全书与分卷', prompt: '根据已有定位规划全书与分卷，只写简洁规划并归档，不生成整书正文。' },
+  { key: 'world', title: '人物与世界观', prompt: '整理已有规划的人物、关系与世界观，区分提案和已确认设定，归档资料。' },
+  { key: 'scene', title: '第一章与场景', prompt: '规划第一章目标、冲突和场景，说明与全书主线的联系，归档场景计划。' },
+  { key: 'draft', title: '正文生成', prompt: '依据已确认计划生成少量第一章原创正文作为候选稿，保留版本与来源，不自动采用。' },
+  { key: 'review', title: '审阅修改', prompt: '审阅第一章候选稿的逻辑、人物动机和表达，保存审查及必要修订，不自动采用。' },
+  { key: 'accept', title: '确认采用', prompt: '展示第一章待采用版本与审查结论，请求作者明确确认后采用，不绕过过期检查。' },
+  { key: 'overview', title: '更新作品概况', prompt: '根据已经保存的作品资料更新全书简介与概况，不把候选稿事实当作正式设定。' },
+];
+export const ItemSchema = z.object({
+  id, runId: id, kind: z.enum(['user', 'assistant', 'tool', 'notice']),
+  title: z.string(), text: z.string(), state: z.enum(['running', 'waiting', 'completed', 'failed', 'cancelled']),
+  structured: z.unknown().optional(),
+  files: z.array(z.string()).optional(),
+  diff: z.object({ path: z.string(), before: z.string(), after: z.string(), applied: z.boolean() }).optional(),
+});
+export type Item = z.infer<typeof ItemSchema>;
+export const ApprovalSchema = z.object({
+  id, runId: id, itemId: id.optional(), title: z.string(), details: z.string(),
+  choices: z.array(z.enum(['accept', 'decline', 'cancel'])).min(1),
+  state: z.enum(['pending', 'responding', 'resolved', 'expired']),
+});
+export type Approval = z.infer<typeof ApprovalSchema>;
+export const InputRequestSchema = z.object({ id, runId: id, questions: z.array(z.object({ id, label: z.string(), options: z.array(z.string()) })) });
+export type InputRequest = z.infer<typeof InputRequestSchema>;
+export const BookSchema = z.object({
+  name: z.string(), overview: z.string(), positioning: z.string(), targetWords: z.number().nonnegative(),
+  writtenWords: z.number().nonnegative(), acceptedWords: z.number().nonnegative(),
+  chapters: z.array(z.object({ id: z.string(), title: z.string(), state: z.string(), words: z.number().nonnegative() })),
+  volumes: z.array(z.string()), characters: z.array(z.string()), relationships: z.array(z.string()),
+  settings: z.array(z.string()), foreshadowing: z.array(z.string()), tasks: z.array(z.string()),
+  pending: z.array(z.string()), source: z.enum(['mock', 'backend']),
+});
+export type Book = z.infer<typeof BookSchema>;
+export const emptyBook = (): Book => ({ name: '尚未读取作品', overview: '', positioning: '', targetWords: 1_000_000,
+  writtenWords: 0, acceptedWords: 0, chapters: [], volumes: [], characters: [], relationships: [], settings: [], foreshadowing: [], tasks: [], pending: [], source: 'mock' });
+export const SnapshotSchema = z.object({
+  version: z.literal(CONTRACT_VERSION), epoch: id, sequence: z.number().int().nonnegative(),
+  connection: z.enum(['connecting', 'ready', 'disconnected']), mode: z.enum(['mock', 'codex']),
+  sessions: z.array(z.object({ id, title: z.string() })), sessionId: z.string(),
+  run: z.object({ id, state: z.enum(['running', 'waiting', 'cancelling', 'completed', 'failed', 'cancelled', 'interrupted']) }).nullable(),
+  items: z.array(ItemSchema), approvals: z.array(ApprovalSchema), inputs: z.array(InputRequestSchema), book: BookSchema,
+  error: z.string().nullable(), attachment: z.object({ path: z.string(), text: z.string() }).nullable(),
+});
+export type Snapshot = z.infer<typeof SnapshotSchema>;
+export const ClientMessageSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('ready') }).strict(),
+  z.object({ type: z.literal('create') }).strict(),
+  z.object({ type: z.literal('select'), sessionId: id }).strict(),
+  z.object({ type: z.literal('run'), text: z.string().trim().min(1).max(100_000) }).strict(),
+  z.object({ type: z.literal('stage'), stage: Stage }).strict(),
+  z.object({ type: z.literal('cancel') }).strict(),
+  z.object({ type: z.literal('approve'), requestId: id, decision: z.enum(['accept', 'decline', 'cancel']) }).strict(),
+  z.object({ type: z.literal('answer'), requestId: id, answers: z.record(z.string().max(10_000)) }).strict(),
+  z.object({ type: z.literal('open'), path: z.string().min(1).max(4096) }).strict(),
+  z.object({ type: z.literal('diff'), itemId: id }).strict(),
+  z.object({ type: z.literal('attach') }).strict(),
+  z.object({ type: z.literal('detach') }).strict(),
+  z.object({ type: z.literal('copy'), text: z.string().max(1_000_000) }).strict(),
+  z.object({ type: z.literal('refreshBook') }).strict(),
+]);
+export type ClientMessage = z.infer<typeof ClientMessageSchema>;
+export type Session = { id: string; title: string };
+export type BackendEvent =
+  | { type: 'backend.status'; status: Snapshot['connection']; error?: string }
+  | { type: 'session.snapshot'; sessionId: string; items: Item[] }
+  | { type: 'run.started'; sessionId: string; runId: string; text: string }
+  | { type: 'assistant.delta'; sessionId: string; runId: string; itemId: string; delta: string }
+  | { type: 'item.updated'; sessionId: string; item: Item }
+  | { type: 'approval.requested'; sessionId: string; approval: Approval }
+  | { type: 'approval.resolved'; sessionId: string; requestId: string }
+  | { type: 'approval.expired'; sessionId: string; requestId: string }
+  | { type: 'userInput.requested'; sessionId: string; request: InputRequest }
+  | { type: 'userInput.resolved'; sessionId: string; requestId: string }
+  | { type: 'run.finished'; sessionId: string; runId: string; status: 'completed' | 'failed' | 'cancelled' | 'interrupted'; error?: string }
+  | { type: 'book.updated'; book: Book }
+  | { type: 'error'; message: string };

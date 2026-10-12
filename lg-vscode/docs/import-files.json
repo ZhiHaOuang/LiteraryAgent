@@ -1,0 +1,101 @@
+{
+  "commit": "ac30c98a266a6335f8ebc7a9011f266cf6b63f13",
+  "files": [
+    {
+      "path": "components/icons/EditIcons.tsx",
+      "sourceSha256": "fd47f992a46b4c77d71ac8bbde954c7da128acbc8597172fdd941ffe74798e14"
+    },
+    {
+      "path": "components/icons/NavigationIcons.tsx",
+      "sourceSha256": "0f428fc4d5fe0e503b76bb8affe24460c7b253b7a4609c6a49c159f79baa9268"
+    },
+    {
+      "path": "components/icons/StopIcon.tsx",
+      "sourceSha256": "b9fc5e37614c6db04a9c4e8e392773f62c5237b3a3b0bf5a0d2acecc49cf0592"
+    },
+    {
+      "path": "components/icons/types.ts",
+      "sourceSha256": "cd83fd55d4c53a70b4375568829c032af61646fe27afa91ddeb464e7f9d8655f"
+    },
+    {
+      "path": "components/layout/CompletionMenu.tsx",
+      "sourceSha256": "7c494f68b404122935cd6aea17272ae2dddf47a306e437cb8a85f8705d642156"
+    },
+    {
+      "path": "components/layout/ContextIndicator.tsx",
+      "sourceSha256": "8cbc791b122f28c6aba7524b9886083e5dffd2d0be0f813e06c79137a1acd61b"
+    },
+    {
+      "path": "components/layout/FileLink.tsx",
+      "sourceSha256": "db9a3060e403d82ab59f3c821afd86db201c4ba84a1696d1a0f2b4a25ba53aa2"
+    },
+    {
+      "path": "components/layout/InputForm.tsx",
+      "sourceSha256": "a657798cddc40a50d5aab15e94bc48cfc0fd44bd39b434c0e50eb793f9cb7052"
+    },
+    {
+      "path": "components/messages/Assistant/AssistantMessage.css",
+      "sourceSha256": "f1af4a30d1e6ab5c2cc6004667b426879e757b9055ea777297ef9874bc25768c"
+    },
+    {
+      "path": "components/messages/Assistant/AssistantMessage.tsx",
+      "sourceSha256": "ec56cb5e6469c2fae9a9aea4b387803bf083b420dd82e8f623d76832417d5c04"
+    },
+    {
+      "path": "components/messages/CollapsibleFileContent.tsx",
+      "sourceSha256": "51b1c90e0914b8e4f65e6f83596978ca81f67d55088fa4d78d62cfc2b630ca80"
+    },
+    {
+      "path": "components/messages/MarkdownRenderer/MarkdownRenderer.css",
+      "sourceSha256": "8adeabf1b52fd2c5292e7dbef1c1d434abf39d1fd9e4f1a0dc1513aa5cecffc5"
+    },
+    {
+      "path": "components/messages/MarkdownRenderer/MarkdownRenderer.tsx",
+      "sourceSha256": "c5264e1713ffa3eefc0d10373e267e699fec399c95ca3f6c3f3f311e14ac7b03"
+    },
+    {
+      "path": "components/messages/MessageContent.tsx",
+      "sourceSha256": "c5c12d352bc8ccd5860703e0eb1c086b00cf7e9e53a31432806213cace6d1ab3"
+    },
+    {
+      "path": "components/messages/UserMessage.tsx",
+      "sourceSha256": "f4c0c3f897823cc2dd4a8384a0d444e054bc63193b1dd6ef6f421af5602fe0a1"
+    },
+    {
+      "path": "components/toolcalls/shared/LayoutComponents.css",
+      "sourceSha256": "fb3cd4f21fbbc1f73e6c340f526c13a6146ab96e072c890682a5026d786ec55c"
+    },
+    {
+      "path": "components/toolcalls/shared/LayoutComponents.tsx",
+      "sourceSha256": "719ba6031a3e08803f8716557d90e4a2de8972c1fa6b5a14902429cd37a09a1a"
+    },
+    {
+      "path": "components/toolcalls/shared/copyUtils.tsx",
+      "sourceSha256": "4ce9f7d4fa28a6bc038b5adbb9de8ae5ee2097abb2cf64732ed4a9dbff83384f"
+    },
+    {
+      "path": "components/ui/Tooltip.tsx",
+      "sourceSha256": "90521b9e243c425f63fedfc9ed3dee36fe3791cff7681aa3d680d7dd5019a4d1"
+    },
+    {
+      "path": "context/PlatformContext.tsx",
+      "sourceSha256": "28b139e3b59cd16284beab3f166f4e879815aa00e89b5baf54f6163f240211f5"
+    },
+    {
+      "path": "styles/components.css",
+      "sourceSha256": "b65758bd40838dd594a7787cb5102e2eb2180f52478805a7cd2359b094d36624"
+    },
+    {
+      "path": "styles/timeline.css",
+      "sourceSha256": "b644994484dfd11083611e05f02f2bc349f6abe7c357421d534f6fab6484542d"
+    },
+    {
+      "path": "styles/variables.css",
+      "sourceSha256": "12f62c820544e95b47c9ae1941ccb3acd46007502209b03d49088496ec10ba46"
+    },
+    {
+      "path": "types/completion.ts",
+      "sourceSha256": "cb3702b3689c3cdd01a3f0fd7d090955762528d792dd4b9a80c91c62996d6c3b"
+    }
+  ]
+}

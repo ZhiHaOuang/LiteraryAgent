@@ -41,7 +41,7 @@ def _load_runtime():
     from .workflow_runner import COMMAND_TO_WORKFLOW, WorkflowExecutionResult, WorkflowRunner
     TASK_COMMANDS = tuple(COMMAND_TO_WORKFLOW)
     TOP_LEVEL_COMMANDS = {*TASK_COMMANDS, *STORY_COMMANDS, 'init', 'status', 'doctor',
-        'skills', 'agents', 'modes', 'run', 'native', 'auth', 'newbook', 'novel'}
+        'skills', 'agents', 'modes', 'run', 'native', 'auth', 'newbook', 'novel', 'studio'}
     globals().update(locals())
     _runtime_loaded = True
 
@@ -118,6 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_options(parser)
     sub = parser.add_subparsers(dest="command")
     add_auth_parser(sub)
+    from .studio_cli import add_parser as add_studio_parser
+    add_studio_parser(sub)
 
     sub.add_parser("init", help="Initialize the LG project workspace.")
     newbook = sub.add_parser("newbook", help="Create a book inside the selected bookshelf.")
@@ -236,6 +238,9 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
     if args.command == "native":
         from .native import launch_native
         return launch_native(config, prompt=" ".join(args.prompt), manifest=args.manifest)
+    if args.command == "studio":
+        from .studio_cli import dispatch
+        return dispatch(args, config)
     if args.command is None:
         if not sys.stdin.isatty():
             prompt = sys.stdin.read().strip()

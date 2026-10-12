@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "LG build", "type": "npm", "script": "build", "problemMatcher": [] },
+    { "label": "LG watch", "type": "npm", "script": "watch", "isBackground": true, "problemMatcher": [] }
+  ]
+}

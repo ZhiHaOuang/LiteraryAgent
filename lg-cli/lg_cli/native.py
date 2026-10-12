@@ -47,7 +47,7 @@ def native_binary(manifest_path: Path) -> Path:
     return binary
 
 
-def writing_args(config: LGConfig, *, control_socket: str | None = None) -> list[str]:
+def writing_args(config: LGConfig, *, control_socket: str | None = None, require_elicitation: bool = False) -> list[str]:
     instructions = resources.files("lg_cli.resources").joinpath("native-writing.txt")
     settings = {
         "project_doc_max_bytes": 0,
@@ -76,6 +76,8 @@ def writing_args(config: LGConfig, *, control_socket: str | None = None) -> list
             "propose_setting",
             "document_diff",
             "restore_manuscript",
+            "book_dashboard", "studio_status", "studio_initialize", "studio_save",
+            "studio_draft", "studio_review_context", "studio_review", "studio_accept",
         ],
         "mcp_servers.lg_writing.default_tools_approval_mode": "approve",
         "features.shell_tool": False,
@@ -88,6 +90,8 @@ def writing_args(config: LGConfig, *, control_socket: str | None = None) -> list
         "features.apps": False,
         "features.recommended_plugins": False,
     }
+    if require_elicitation:
+        settings["mcp_servers.lg_writing.args"].append("--require-elicitation")
     if control_socket:
         settings["mcp_servers.lg_writing.args"].extend(["--control-socket", control_socket])
         settings["mcp_servers.lg_writing.enabled_tools"].extend([
