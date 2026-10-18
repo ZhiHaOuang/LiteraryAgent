@@ -10,14 +10,15 @@ class ApprovalBroker:
         self.emit = emit
         self.pending = {}
 
-    async def request(self, kind, details, *, owner, mode='ask'):
+    async def request(self, kind, details, *, owner, mode='ask',run_id=None):
+        binding={'runId':run_id} if run_id else {}
         if mode == 'full_access':
-            self.emit('approval/resolved', {'owner': owner, 'kind': kind, 'decision': 'accept', 'automatic': True})
+            self.emit('approval/resolved', {'owner': owner, 'kind': kind, 'decision': 'accept', 'automatic': True,**binding})
             return {'decision': 'accept'}
         key = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
         self.pending[key] = (future, owner, kind)
-        self.emit('approval/requested', {'approvalId': key, 'owner': owner, 'kind': kind, 'details': details})
+        self.emit('approval/requested', {'approvalId': key, 'owner': owner, 'kind': kind, 'details': details,**binding})
         try:
             return await future
         finally:
@@ -38,10 +39,10 @@ class ApprovalBroker:
         elif result not in ({'decision':'accept'}, {'decision':'decline'}, {'decision':'cancel'}):
             raise ValueError('Expected accept, decline or cancel.')
         future.set_result(result)
-        self.emit('approval/resolved', {'approvalId': key, 'owner': owner, 'result': result})
+        self.emit('approval/resolved', {'approvalId': key, 'owner': owner, 'kind': kind, 'result': result})
 
     def cancel(self, owner):
         for key, (future, target, kind) in list(self.pending.items()):
             if target == owner and not future.done():
                 future.cancel()
-                self.emit('approval/cancelled', {'approvalId': key, 'owner': owner})
+                self.emit('approval/cancelled', {'approvalId': key, 'owner': owner, 'kind': kind})

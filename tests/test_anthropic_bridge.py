@@ -148,29 +148,38 @@ class BridgeTests(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('LG_TEST_CODEX_BINARY'), 'set LG_TEST_CODEX_BINARY for native integration')
     def test_real_core_rejects_unrepairable_tool_json_without_execution_or_retry(self):
+        from lg_cli.native import writing_args
+        from lg_cli.project_store import ProjectStore
+
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
+            store = ProjectStore(root)
+            store.initialize(name='Invalid tool isolation')
+            before = store.list_documents()
             calls = []
 
             def stream(payload):
                 calls.append(payload)
-                tool = next(t for t in payload['tools'] if 'cmd' in t['input_schema'].get('properties', {}))
+                tool = next(t for t in payload['tools'] if 'Save short original prose' in t.get('description', ''))
                 yield from message_events(
                     {'type': 'tool_use', 'id': 'invalid_call', 'name': tool['name'], 'input': {}},
                     {'type': 'input_json_delta', 'partial_json':
-                        '{"cmd":"touch MUST_NOT_EXIST" "private":"PRIVATE_SENTINEL"}'}, stop='tool_use')
+                        '{"slug":"MUST_NOT_EXIST" "content":["PRIVATE_SENTINEL"]}'}, stop='tool_use')
 
             config = replace(make_config(root), provider='deepseek-anthropic', default_model='deepseek-flash',
-                base_url='https://api.deepseek.com/anthropic', enable_shell=True)
-            factory = lambda cfg: AnthropicBridge(cfg, stream_factory=stream)
+                base_url='https://api.deepseek.com/anthropic', enable_shell=False)
+            class WritingBridge(AnthropicBridge):
+                def codex_args(self):
+                    return super().codex_args() + writing_args(config)
+            factory = lambda cfg: WritingBridge(cfg, stream_factory=stream)
             with patch.dict(os.environ, {'LG_CODEX_COMMAND': os.environ['LG_TEST_CODEX_BINARY'],
-                    'LG_CODEX_RUNTIME_MANIFEST': ''}), patch(
+                    'LG_CODEX_RUNTIME_MANIFEST': '', 'LITERARYGIANT_REGISTRY_HOME': str(root / 'registry')}), patch(
                     'lg_cli.anthropic_bridge.AnthropicBridge', side_effect=factory):
                 result = CodexExecAdapter(root / 'missing').run(prompt='Test invalid tool JSON handling',
                     config=config, mode='outline')
             self.assertFalse(result.ok)
             self.assertEqual(len(calls), 1)
-            self.assertFalse((root / 'MUST_NOT_EXIST').exists())
+            self.assertEqual(store.list_documents(), before)
             self.assertIn('no unique schema-valid result', result.error or '')
             self.assertNotIn('PRIVATE_SENTINEL', result.error or '')
 
@@ -663,6 +672,9 @@ class BridgeTests(unittest.TestCase):
         "set LG_TEST_CODEX_BINARY for native integration",
     )
     def test_real_codex_tool_result_and_schema(self):
+        from lg_cli.native import writing_args
+        from lg_cli.project_store import ProjectStore
+
         for structured in (False, True):
             with (
                 self.subTest(structured=structured),
@@ -683,9 +695,9 @@ class BridgeTests(unittest.TestCase):
                         tool = next(
                             t
                             for t in payload["tools"]
-                            if "cmd" in t["input_schema"].get("properties", {})
+                            if "shared project progress" in t.get("description", "")
                         )
-                        args = {"cmd": "printf LG_TOOL_OK", "max_output_tokens": 100}
+                        args = {}
                     else:
                         results = [
                             part
@@ -695,6 +707,8 @@ class BridgeTests(unittest.TestCase):
                         ]
                         self.assertTrue(results)
                         self.assertEqual(results[-1]["tool_use_id"], "call_plan")
+                        self.assertFalse(results[-1].get("is_error", False))
+                        self.assertIn("LG_TOOL_OK", json.dumps(results))
                         yield from message_events()
                         return
                     yield from message_events(
@@ -713,8 +727,9 @@ class BridgeTests(unittest.TestCase):
                     provider="deepseek-anthropic",
                     default_model="deepseek-flash",
                     base_url="https://api.deepseek.com/anthropic",
-                    enable_shell=not structured,
+                    enable_shell=False,
                 )
+                ProjectStore(Path(raw)).initialize(name="LG_TOOL_OK")
                 schema = Path(raw) / "schema.json"
                 schema.write_text(
                     json.dumps(
@@ -726,13 +741,17 @@ class BridgeTests(unittest.TestCase):
                         }
                     )
                 )
-                factory = lambda cfg: AnthropicBridge(cfg, stream_factory=stream)
+                class WritingBridge(AnthropicBridge):
+                    def codex_args(self):
+                        return super().codex_args() + writing_args(config)
+                factory = lambda cfg: WritingBridge(cfg, stream_factory=stream)
                 with (
                     patch.dict(
                         os.environ,
                         {
                             "LG_CODEX_COMMAND": os.environ["LG_TEST_CODEX_BINARY"],
                             "LG_CODEX_RUNTIME_MANIFEST": "",
+                            "LITERARYGIANT_REGISTRY_HOME": str(Path(raw) / "registry"),
                         },
                     ),
                     patch(

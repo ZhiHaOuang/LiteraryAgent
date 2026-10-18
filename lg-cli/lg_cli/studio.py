@@ -18,6 +18,16 @@ PROFILE_SLUG = 'lg-studio-profile'
 ROUTES = {'position': 'plan', 'plan': 'outline', 'world': 'world', 'scene': 'scene-plan', 'review': 'check'}
 
 
+def review_source(store: ProjectStore, slug: str, version_number: int) -> dict:
+    """Freeze the same chapter/candidate/Canonical evidence for MCP and host reviewers."""
+    from .supervision import chapter_for
+    version = store.get_version(slug, version_number)
+    chapter = chapter_for(store, store.get_document(slug))
+    if chapter is None:
+        raise ValueError('Reviews require a chapter or a scene belonging to one')
+    return BookAnalysisStore(store).candidate_snapshot(chapter, version)
+
+
 def review_reports_schema() -> dict:
     properties = {}
     for category in CATEGORIES:
@@ -101,31 +111,145 @@ def dashboard(config: LGConfig) -> dict:
     return result
 
 
-def register_tools(server, config: LGConfig, approved):
+def register_tools(server, config: LGConfig, approved, *, observed=None):
     store = ProjectStore(config.workspace)
+    observed = observed or (lambda function: function)
 
     @server.tool()
+    @observed
     def book_dashboard() -> dict:
         """Read the same local book overview used by the CLI, extended with planning and pending work."""
         return dashboard(config)
 
     @server.tool()
+    @observed
     def book_library(topic: str, query: str = '', offset: int = 0) -> dict:
         """Read a bounded page from the same saved material and source evidence shown by the CLI. No model call or write."""
         from .workspace_library import library
         return library(config, topic, query, offset)
 
     @server.tool()
+    @observed
     def book_entry(topic: str, key: str) -> dict:
         """Read one CLI material detail, source and recent version labels, only when requested."""
         from .workspace_library import entry
         return entry(config, topic, key)
 
     @server.tool()
+    @observed
     def book_action_context(topic: str, key: str, action: str, expected_fingerprint: str) -> dict:
         """Prepare an author-requested writing action from an unchanged preview. This only reads; it never starts generation or approves writes."""
         from .workspace_library import writing_context
         return writing_context(config, topic, key, action, expected_fingerprint)
+
+    @server.tool()
+    @observed
+    def studio_decision(slug: str) -> dict:
+        """Read a saved creative decision, all three latest options and its explicit selection.
+        The active version is the latest record, not a choice. A null selection means no official direction.
+        Source statuses describe declared sources, not exhaustive model knowledge or character visibility.
+        """
+        return store.decision_snapshot(slug)
+
+    @server.tool()
+    @observed
+    def studio_knowledge(slug: str) -> dict:
+        """Read one versioned character/reader knowledge record and its explicit confirmation.
+        A proposal is not confirmed knowledge, Canonical truth or a Runtime visibility boundary.
+        """
+        return store.knowledge_snapshot(slug)
+
+    @server.tool()
+    @observed
+    def studio_knowledge_view(audience: str, position: int, holder_document: str | None = None,
+                              limit: int = 100) -> dict:
+        """Project confirmed narrative knowledge at one reading/story position.
+        audience is character or reader; character requires the exact holder document. This reads
+        declared records only, never infers knowledge from Canonical facts or isolates model inputs.
+        """
+        return store.knowledge_view(audience=audience, position=position,
+            holder_document=holder_document, limit=limit)
+
+    @server.tool()
+    @approved
+    def studio_knowledge_propose(slug: str, title: str, topic: dict, statement: dict,
+                                 rationale: str, expected_version_id: int) -> dict:
+        """Save a provisional narrative knowledge statement; never confirm or promote Canonical facts.
+        topic: audience character|reader, holder_document_id int|null, key, from_position int.
+        statement: content, stance knows|believes|uncertain, until_position int|null, sources with
+        exact document_id/version_id. New records require expected_version_id=0. Confirmation and
+        withdrawal require separate author creative approval; these records do not isolate Runtime inputs.
+        """
+        return store.propose_knowledge(slug=slug, title=title, topic=topic, statement=statement,
+            rationale=rationale, expected_version_id=expected_version_id)
+
+    @server.tool()
+    @approved
+    def studio_knowledge_confirm(slug: str, proposal_version_number: int, expected_version_id: int) -> dict:
+        """Confirm exactly one saved narrative knowledge proposal after separate creative approval.
+        Bind its proposal version number and the current record head; never infer confirmation from
+        saving a proposal. Character belief and reader revelation are distinct from Canonical truth.
+        """
+        return store.confirm_knowledge(slug, proposal_version_number=proposal_version_number,
+            expected_version_id=expected_version_id)
+
+    @server.tool()
+    @approved
+    def studio_knowledge_withdraw(slug: str, expected_version_id: int) -> dict:
+        """Withdraw the current confirmed narrative knowledge statement with separate creative approval.
+        Bind the current record head. Preserve history, manuscript and Canonical facts; this does not
+        erase information from existing model conversations.
+        """
+        return store.withdraw_knowledge(slug, expected_version_id=expected_version_id)
+
+    @server.tool()
+    @observed
+    def studio_source_impact(slug: str, version_number: int | None = None, limit: int = 100) -> dict:
+        """Read known direct source relationships and captured-source diagnostics for one exact saved source.
+        Version numbers belong to this document; omit one for document-wide direct associations, with the
+        captured-source diagnostic defaulting to its active version. Coverage is partial
+        or unknown, and an index exposure does not prove content was read. This author-global diagnostic
+        does not infer complete semantic dependencies, modify facts/plans/candidates or authorize any write.
+        """
+        return store.source_impact(slug, version_number=version_number, limit=limit)
+
+    @server.tool()
+    @approved
+    def studio_decision_options(slug: str, title: str, topic: dict, options: list[dict],
+                                sources: list[dict], request: str, expected_version_id: int) -> dict:
+        """Save exactly three distinct provisional creative options; never choose a direction.
+        topic is {scope: work|part|chapter, document_id: int|null, key: str}; options contain unique
+        id/title/content; sources contain document_id/version_id. New decisions require expected_version_id=0.
+        Regeneration preserves the current selection, even when it points to an older options version.
+        With no document sources, request is a saved declared request context, not verified author wording.
+        Selection and withdrawal require separate creative approval.
+        """
+        result = store.save_decision_options(slug=slug, title=title, topic=topic, options=options,
+            sources=sources, request=request, expected_version_id=expected_version_id)
+        output = write_workflow_output(config.workspace, 'plan',
+            '# ' + result['title'] + '\n\n创作方向记录：active 版本是最新记录，不等于正式选择。\n\n'
+            + json.dumps(result, ensure_ascii=False, indent=2))
+        return {**result, 'artifact': str(output.output_path.relative_to(config.workspace))}
+
+    @server.tool()
+    @approved
+    def studio_select_decision(slug: str, options_version_number: int, option_id: str,
+                               expected_version_id: int) -> dict:
+        """Select exactly one saved option after independent author creative approval.
+        Bind the options version number and option ID, plus the current record head; never select by title
+        or silently choose the latest options. This does not adopt manuscript or promote Canonical facts.
+        """
+        return store.select_decision_option(slug, options_version_number=options_version_number,
+            option_id=option_id, expected_version_id=expected_version_id)
+
+    @server.tool()
+    @approved
+    def studio_withdraw_decision(slug: str, expected_version_id: int) -> dict:
+        """Withdraw the current official creative choice to an empty selection with separate creative approval.
+        Bind the current record head. Withdrawal remains available when declared sources have changed;
+        it preserves options/history and does not roll back manuscript or Canonical facts.
+        """
+        return store.withdraw_decision(slug, expected_version_id=expected_version_id)
 
     @server.tool()
     @approved
@@ -147,7 +271,7 @@ def register_tools(server, config: LGConfig, approved):
             if document.active_version_id != expected_version_id:
                 raise ValueError('Reference changed; reread before updating')
             version = store.create_version(slug, content=content, state='candidate', reason=reason,
-                                           metadata=metadata, activate=False)
+                                           metadata=metadata, activate=False, expected_version_id=expected_version_id)
         else:
             if expected_version_id != 0:
                 raise ValueError('New reference requires expected_version_id=0')
@@ -170,7 +294,8 @@ def register_tools(server, config: LGConfig, approved):
             raise ValueError('Reference changed after preview')
         if store.get_version(slug, version_number).state != 'candidate':
             raise ValueError('Only a candidate can be adopted once')
-        return {'document': asdict(store.accept_version(slug, version_number)), 'accepted': True}
+        return {'document': asdict(store.accept_version(slug, version_number,
+            expected_version_id=expected_version_id)), 'accepted': True}
 
     @server.tool()
     @approved
@@ -182,6 +307,7 @@ def register_tools(server, config: LGConfig, approved):
         return {'fact': asdict(store.accept_proposal(proposal_id)), 'accepted': True}
 
     @server.tool()
+    @observed
     def studio_status() -> dict:
         """Read the planning profile version before saving a stage. Zero means no profile yet."""
         document, current = profile(store)
@@ -242,7 +368,8 @@ def register_tools(server, config: LGConfig, approved):
             if document.active_version_id != expected_version_id:
                 raise ValueError('Active manuscript changed; reread it before drafting')
             version = store.create_version(slug, content=content, state='candidate', reason=reason,
-                metadata={'story_index': story_index} if story_index is not None else {}, activate=False)
+                metadata={'story_index': story_index} if story_index is not None else {}, activate=False,
+                expected_version_id=expected_version_id)
         else:
             if expected_version_id != 0:
                 raise ValueError('New chapters require expected_version_id=0')
@@ -255,20 +382,16 @@ def register_tools(server, config: LGConfig, approved):
                 'diff': {'path': str(output.output_path.relative_to(config.workspace)), 'before': before, 'after': content, 'applied': False}}
 
     @server.tool()
+    @observed
     def studio_review_context(slug: str, version_number: int, category: str | None = None) -> dict:
         """Read the exact source snapshot and existing review schemas. Review all five categories;
         evidence must quote the supplied sources. No review is valid for a different snapshot.
         """
-        records = BookAnalysisStore(store)
         if category is not None and category not in CATEGORIES:
             raise ValueError('Unknown review category')
-        version = store.get_version(slug, version_number)
-        from .supervision import chapter_for
-        chapter = chapter_for(store, store.get_document(slug))
-        if chapter is None:
-            raise ValueError('Reviews require a chapter or a scene belonging to one')
-        source = records.candidate_snapshot(chapter, version)
+        source = review_source(store, slug, version_number)
         return {'snapshot': source, 'source_spans': source_spans(source), 'sourceFingerprint': fingerprint(source),
+                'generationSourceReview': store.generation_source_review(slug, version_number),
                 'schemas': {key: response_schema(key) for key in ([category] if category else CATEGORIES)}}
 
     @server.tool()
@@ -314,5 +437,5 @@ def register_tools(server, config: LGConfig, approved):
         version = store.get_version(slug, version_number)
         if version.state != 'candidate':
             raise ProjectStoreError('Only a candidate can be adopted; do not repeat a successful adoption')
-        accepted = store.accept_version(slug, version_number)
+        accepted = store.accept_version(slug, version_number, expected_version_id=expected_version_id)
         return {'document': asdict(accepted), 'accepted': True}

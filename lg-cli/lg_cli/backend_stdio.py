@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import sys
+from dataclasses import replace
 
 from .backend import Backend
 from .config import load_config
@@ -69,8 +70,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace', type=Path, required=True)
     parser.add_argument('--environment')
+    parser.add_argument('--runtime-manifest', type=Path)
+    parser.add_argument('--runtime-engine', choices=('codex', 'native'))
     args = parser.parse_args()
-    asyncio.run(serve(load_config(args.workspace.resolve(), environment=args.environment)))
+    config = load_config(args.workspace.resolve(), environment=args.environment)
+    if args.runtime_engine:
+        config = replace(config, runtime_engine=args.runtime_engine)
+    if args.runtime_manifest:
+        config = replace(config, runtime_manifest=args.runtime_manifest.resolve())
+    asyncio.run(serve(config))
 
 
 if __name__ == '__main__':

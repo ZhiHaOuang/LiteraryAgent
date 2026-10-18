@@ -55,11 +55,19 @@ class StoryIndexTests(unittest.TestCase):
             def run(self, **kwargs):
                 result = super().run(**kwargs)
                 payload = json.loads(result.output_text)
-                payload['story_index'] = example_graph()
+                schema = json.loads(kwargs['output_schema'].read_text())
+                if 'story_index' in schema.get('properties', {}):
+                    payload['story_index'] = example_graph()
                 return replace(result, output_text=json.dumps(payload))
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw); init_workspace(root)
-            result = WorkflowRunner(make_config(root), adapter=GraphAdapter()).run('outline','Plan story')
+            from importlib import resources
+            runner = WorkflowRunner(make_config(root), adapter=GraphAdapter())
+            director = runner.registry.agent('director')
+            schema = root / 'stage-output.schema.json'
+            schema.write_text(resources.files('lg_cli.resources').joinpath('stage-output.schema.json').read_text())
+            runner.registry._agents[director.id] = replace(director, output_schema=schema)
+            result = runner.run('outline','Plan story')
             self.assertTrue(result.ok, result.error)
             store = ProjectStore(root)
             self.assertEqual(len(build_index(store)['characters']),2)

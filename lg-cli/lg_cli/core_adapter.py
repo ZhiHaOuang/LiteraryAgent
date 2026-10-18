@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import queue
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from .config import LGConfig
+from .output_schema import read_schema, validate_output
 from .paths import core_codex_root
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ class CoreExecutionResult:
     attempted_candidates: tuple[str, ...] = ()
 
 
-class CodexExecAdapter:
+class CodexStageExecutor:
     """Stable process adapter for `codex exec`.
 
     Prompt text is sent through stdin and never appears in argv. JSONL events
@@ -86,33 +86,29 @@ class CodexExecAdapter:
         self,
         *,
         prompt: str,
+        instructions: str,
         config: LGConfig,
         mode: str,
         model_profile: str | None = None,
         output_schema: Path | None = None,
         on_event: EngineEventCallback | None = None,
     ) -> CoreExecutionResult:
-        if output_schema and output_schema.name in {'stage-output.schema.json', 'scene-draft.schema.json', 'revision.schema.json'}:
-            from .story_index import GRAPH_INSTRUCTIONS
-            prompt += '\n' + GRAPH_INSTRUCTIONS
-        guidance = os.environ.get("LG_WORKFLOW_GUIDANCE", "").strip()
-        if guidance:
-            prompt += "\n\nAuthor's latest instructions for this workflow attempt:\n" + guidance
+        if not instructions.strip():
+            return _failure("Codex stage instructions must not be empty or whitespace", used_stub=True)
+        try:
+            schema_contract = read_schema(output_schema) if output_schema is not None else None
+        except Exception:
+            return _failure("Stage output schema is invalid or unreadable", used_stub=True)
+        try:
+            config.require_api_auth()
+        except ValueError as exc:
+            return _failure(str(exc), used_stub=True)
         if not config.credentials_configured:
             return _failure(
                 "no API key configured; use literary auth add PROVIDER or a provider-scoped environment variable",
                 used_stub=True,
             )
 
-        if config.auth_mode == "chatgpt":
-            from .subscription_auth import pinned_command, subscription_status
-            try:
-                command = pinned_command(config)
-            except ValueError as exc:
-                return _failure(str(exc), used_stub=True)
-            ok, message = subscription_status(config, command=command)
-            if not ok:
-                return _failure(message, used_stub=True)
         candidates = discover_core_commands(self.root, probe=True, runtime_manifest=config.runtime_manifest)
         available = [item for item in candidates if item.available]
         if not available:
@@ -122,7 +118,8 @@ class CodexExecAdapter:
         from .provider_transport import provider_bridge
 
         with provider_bridge(config) as bridge:
-            return self._run_available(available, prompt, config, mode, model_profile, output_schema, on_event, bridge)
+            return self._run_available(available, prompt, config, mode, model_profile, output_schema, on_event, bridge,
+                                       instructions=instructions, schema_contract=schema_contract)
 
     def _run_available(
         self,
@@ -134,7 +131,15 @@ class CodexExecAdapter:
         output_schema: Path | None,
         on_event: EngineEventCallback | None,
         bridge: AnthropicBridge | None,
+        *,
+        instructions: str = '',
+        schema_contract: tuple[str, dict | bool] | None = None,
     ) -> CoreExecutionResult:
+        if schema_contract is None and output_schema is not None:
+            try:
+                schema_contract = read_schema(output_schema)
+            except Exception:
+                return _failure("Stage output schema is invalid or unreadable", used_stub=True)
         attempts: list[str] = []
         for candidate in available:
             attempts.append(candidate.name)
@@ -150,6 +155,8 @@ class CodexExecAdapter:
                     on_event=on_event,
                     attempts=attempts,
                     bridge=bridge,
+                    instructions=instructions,
+                    schema_contract=schema_contract,
                 )
             except KeyboardInterrupt:
                 if self._active_process is not None:
@@ -179,13 +186,36 @@ class CodexExecAdapter:
         on_event: EngineEventCallback | None,
         attempts: list[str],
         bridge: AnthropicBridge | None = None,
+        instructions: str = '',
+        schema_contract: tuple[str, dict | bool] | None = None,
     ) -> CoreExecutionResult:
+        if schema_contract is None and output_schema is not None:
+            try:
+                schema_contract = read_schema(output_schema)
+            except Exception:
+                return _failure("Stage output schema is invalid or unreadable", used_stub=True)
         temp_dir = config.workspace / ".literarygiant" / "tmp"
         if not config.uses_anthropic and not config.uses_responses:
             from .usage_ledger import UsageLedger
             UsageLedger(config.workspace).start_capture()
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return _failure("Stage temporary directory could not be created", used_stub=True)
+        snapshot_path = None
+        if schema_contract is not None:
+            snapshot_path = temp_dir / f"core-schema-{uuid.uuid4().hex}.json"
+            try:
+                descriptor = os.open(snapshot_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, 'w', encoding='utf-8') as target:
+                    target.write(schema_contract[0])
+            except Exception:
+                return _failure("Stage output schema snapshot could not be saved", used_stub=True)
         final_path = temp_dir / f"core-final-{uuid.uuid4().hex}.txt"
+        instructions_path = temp_dir / f"core-instructions-{uuid.uuid4().hex}.txt"
+        descriptor = os.open(instructions_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as target:
+            target.write(instructions)
         command = [
             *candidate.command,
             *_exec_args(
@@ -193,8 +223,9 @@ class CodexExecAdapter:
                 mode=mode,
                 model_profile=model_profile,
                 final_path=final_path,
-                output_schema=output_schema,
+                output_schema=snapshot_path,
                 provider_args=bridge.codex_args() if bridge else None,
+                instructions_path=instructions_path,
             ),
         ]
         env = _adapter_env(config)
@@ -255,8 +286,6 @@ class CodexExecAdapter:
         assert process.stdin is not None
         try:
             process.stdin.write(prompt)
-            if not prompt.endswith("\n"):
-                process.stdin.write("\n")
             process.stdin.close()
         except BrokenPipeError:
             pass
@@ -365,6 +394,19 @@ class CodexExecAdapter:
                 attempted_candidates=tuple(attempts),
             )
 
+        if schema_contract is not None:
+            try:
+                validate_output(final_text, schema_contract[1])
+            except Exception:
+                return _failure(
+                    "Codex stage output does not match the supplied schema",
+                    command_name=candidate.name,
+                    command=command,
+                    returncode=process.returncode,
+                    duration=duration,
+                    attempted_candidates=tuple(attempts),
+                )
+
         return CoreExecutionResult(
             ok=True,
             used_stub=False,
@@ -379,6 +421,20 @@ class CodexExecAdapter:
             events=tuple(events),
             attempted_candidates=tuple(attempts),
         )
+
+
+class CodexExecAdapter(CodexStageExecutor):
+    """Compatibility product entry; explicit inputs bypass literary preparation."""
+
+    def run(self, *, prompt: str, config: LGConfig, mode: str, instructions: str | None = None,
+            model_profile: str | None = None, output_schema: Path | None = None,
+            on_event: EngineEventCallback | None = None) -> CoreExecutionResult:
+        if instructions is None:
+            from .stage_input import prepare_stage_input
+            prepared = prepare_stage_input(prompt, output_schema=output_schema)
+            prompt, instructions = prepared.prompt, prepared.instructions
+        return super().run(prompt=prompt, instructions=instructions, config=config, mode=mode,
+                           model_profile=model_profile, output_schema=output_schema, on_event=on_event)
 
 
 def inspect_core(root: Path | None = None, *, runtime_manifest: Path | None = None) -> CoreStatus:
@@ -410,102 +466,32 @@ def discover_core_commands(root: Path | None = None, *, probe: bool = True, runt
     manifest = os.environ.get("LG_CODEX_RUNTIME_MANIFEST", "").strip() or runtime_manifest
     if manifest:
         return [_locked_runtime(Path(manifest).expanduser(), root, probe=probe)]
-    raw: list[tuple[str, list[str], str, bool]] = []
-
     env_command = os.environ.get("LG_CODEX_COMMAND", "").strip()
     if env_command:
-        raw.append(("env:LG_CODEX_COMMAND", shlex.split(env_command), "environment", True))
-
-    for name, path in (
-        ("vendored release binary", root / "codex-rs" / "target" / "release" / "codex"),
-        ("vendored debug binary", root / "codex-rs" / "target" / "debug" / "codex"),
-    ):
-        raw.append((name, [str(path)], "vendored-binary", True))
-
-    node = shutil.which("node")
-    node_entry = root / "codex-cli" / "bin" / "codex.js"
-    raw.append(
-        (
-            "vendored node wrapper",
-            [node or "node", str(node_entry)],
-            "vendored-wrapper",
-            True,
-        )
-    )
-
-    installed = shutil.which("codex")
-    if installed:
-        raw.append(("installed codex", [installed], "system", True))
-
-    cargo = shutil.which("cargo")
-    manifest = root / "codex-rs" / "Cargo.toml"
-    raw.append(
-        (
-            "vendored cargo build-on-demand",
-            [
-                cargo or "cargo",
-                "run",
-                "--quiet",
-                "--manifest-path",
-                str(manifest),
-                "-p",
-                "codex-cli",
-                "--bin",
-                "codex",
-                "--",
-            ],
-            "vendored-source",
-            False,
-        )
-    )
-
-    candidates: list[CoreCommandCandidate] = []
-    seen: set[tuple[str, ...]] = set()
-    for name, command, source, should_probe in raw:
-        key = tuple(command)
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(
-            _evaluate_candidate(
-                name=name,
-                command=command,
-                source=source,
-                root=root,
-                probe=probe and should_probe,
-            )
-        )
-    return candidates
+        try:
+            command = shlex.split(env_command)
+        except ValueError:
+            return [CoreCommandCandidate("explicit development command", (), False, "Invalid LG_CODEX_COMMAND", "environment")]
+        if not command:
+            return [CoreCommandCandidate("explicit development command", (), False, "Empty LG_CODEX_COMMAND", "environment")]
+        return [_evaluate_candidate(name="env:LG_CODEX_COMMAND", command=command,
+            source="environment", root=root, probe=probe)]
+    return [CoreCommandCandidate("pinned Codex runtime", (), False,
+        "Configure runtime.manifest or LG_CODEX_RUNTIME_MANIFEST; automatic runtime discovery is disabled",
+        "pinned-runtime")]
 
 
 def _locked_runtime(path: Path, root: Path, *, probe: bool) -> CoreCommandCandidate:
     name = "pinned Codex runtime"
     command: tuple[str, ...] = ()
     try:
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
-            raise ValueError("unsupported runtime manifest")
+        from .runtime_manifest import read_runtime_identity
         pin = _read_core_pin(root.parent.parent / "CODEX_CORE_COMMIT") or _bundled_core_pin()
-        if not pin or manifest.get("commit") != pin:
-            raise ValueError("runtime commit does not match CODEX_CORE_COMMIT")
-        binary = Path(manifest["binary"])
-        if not binary.is_absolute():
-            raise ValueError("runtime binary path must be absolute")
-        command = (str(binary),)
-        checksum = hashlib.sha256()
-        with binary.open("rb") as stream:
-            while chunk := stream.read(1024 * 1024):
-                checksum.update(chunk)
-        if checksum.hexdigest() != manifest.get("binary_sha256"):
-            raise ValueError("runtime binary checksum mismatch")
-        expected = manifest.get("version")
-        tag = manifest.get("tag")
-        if not isinstance(tag, str) or not tag.startswith("rust-v") or expected != f"codex-cli {tag[6:]}":
-            raise ValueError("runtime tag and version mismatch")
-        candidate = _evaluate_candidate(
-            name=name, command=list(command), source="pinned-runtime", root=root, probe=probe
-        )
-        if candidate.available and probe and candidate.version != expected:
+        identity = read_runtime_identity(path, pin=pin)
+        command = (str(identity.binary),)
+        candidate = _evaluate_candidate(name=name, command=list(command),
+            source="pinned-runtime", root=root, probe=probe)
+        if candidate.available and probe and candidate.version != identity.version:
             raise ValueError("runtime version probe does not match manifest")
         return candidate
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -527,8 +513,12 @@ def run_model_turn(
         from dataclasses import replace
 
         config = replace(config, timeout_seconds=timeout_seconds)
-    return CodexExecAdapter().run(
-        prompt=prompt,
+    from .execution_adapter import execution_adapter
+    from .stage_input import prepare_stage_input
+    prepared = prepare_stage_input(prompt, output_schema=output_schema)
+    return execution_adapter(config).run(
+        prompt=prepared.prompt,
+        instructions=prepared.instructions,
         config=config,
         mode=mode,
         model_profile=model_profile,
@@ -605,7 +595,9 @@ def _exec_args(
     final_path: Path,
     output_schema: Path | None,
     provider_args: list[str] | None = None,
+    instructions_path: Path | None = None,
 ) -> list[str]:
+    config.require_api_auth()
     args = [
         "exec",
         "--skip-git-repo-check",
@@ -626,9 +618,6 @@ def _exec_args(
         args.extend(["--model", model])
     if provider_args:
         args.extend(provider_args)
-    elif config.auth_mode == "chatgpt":
-        from .subscription_auth import subscription_args
-        args.extend(subscription_args())
     elif config.provider and config.provider != "openai":
         args.extend(["-c", f'model_provider={json.dumps(config.provider)}'])
     # LG already schedules these stages; an unattended exec must not start a
@@ -638,12 +627,28 @@ def _exec_args(
         "skills.bundled.enabled": False,
         "include_apps_instructions": False,
         "include_collaboration_mode_instructions": False,
-        "model_instructions_file": str(resources.files("lg_cli.resources").joinpath("workflow-stage.txt")),
         "features.multi_agent": False,
         "features.multi_agent_v2": False,
         "features.collaboration_modes": False,
         "features.default_mode_request_user_input": False,
     }
+    if instructions_path is not None:
+        stage_settings['model_instructions_file'] = str(instructions_path)
+    if mode != 'code':
+        # Literary source retrieval and persistence belong to LG services.
+        stage_settings.update({
+            'features.shell_tool': False,
+            'features.unified_exec': False,
+            'features.apply_patch_freeform': False,
+            'features.view_image': False,
+            'features.apps': False,
+            'features.plugins': False,
+            'features.recommended_plugins': False,
+            'features.sleep_tool': False,
+            'tools.experimental_request_user_input.enabled': False,
+            'tools.update_plan.enabled': False,
+            'web_search': 'disabled',
+        })
     for key, value in stage_settings.items():
         args.extend(["-c", f"{key}={json.dumps(value)}"])
     if output_schema is not None:
@@ -653,6 +658,7 @@ def _exec_args(
 
 
 def _adapter_env(config: LGConfig) -> dict[str, str]:
+    config.require_api_auth()
     env = dict(os.environ)
     from .providers import PROVIDERS
     from .credentials import read_profiles
@@ -663,9 +669,9 @@ def _adapter_env(config: LGConfig) -> dict[str, str]:
     secrets.update(name for name, value in env.items() if value and value in keys)
     for name in secrets:
         env.pop(name, None)
-    if not config.uses_anthropic and not config.uses_responses and config.auth_mode != "chatgpt":
+    if not config.uses_anthropic and not config.uses_responses:
         env["CODEX_API_KEY"] = config.api_key or ""
-    codex_home = config.codex_auth_home if config.auth_mode == "chatgpt" else config.workspace / ".literarygiant" / "codex-home"
+    codex_home = config.workspace / ".literarygiant" / "codex-home"
     if codex_home is None or codex_home.is_symlink():
         raise ValueError("A private LG Codex home is required")
     codex_home.mkdir(parents=True, exist_ok=True, mode=0o700)

@@ -65,6 +65,13 @@ class ConfigError(ValueError):
     """Raised when LiteraryGiant configuration is invalid."""
 
 
+API_ONLY_MESSAGE = (
+    "LiteraryGiant is API-only; ChatGPT subscription login is no longer supported. "
+    "Create a separate API profile with literary auth add NAME --provider PROVIDER --model MODEL. "
+    "Existing subscription profiles and auth caches are preserved; no automatic fallback is performed."
+)
+
+
 @dataclass(frozen=True)
 class LGConfig:
     workspace: Path
@@ -100,14 +107,15 @@ class LGConfig:
     project_instructions: str = ""
     conversation_chars: int = 10000
     allow_external_reference: bool = False
+    runtime_engine: str = 'codex'
 
     @property
     def credentials_configured(self) -> bool:
-        if self.auth_mode == "chatgpt":
-            return bool(self.codex_auth_home and not self.codex_auth_home.is_symlink()
-                        and (self.codex_auth_home / "auth.json").is_file()
-                        and not (self.codex_auth_home / "auth.json").is_symlink())
-        return bool(self.api_key)
+        return self.auth_mode == "api_key" and bool(self.api_key)
+
+    def require_api_auth(self) -> None:
+        if self.auth_mode != "api_key":
+            raise ConfigError(API_ONLY_MESSAGE)
 
     @property
     def uses_anthropic(self) -> bool:
@@ -158,6 +166,8 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
     saved = read_profiles(environment or "sandbox")
     active = saved.get("active")
     profile = saved["profiles"].get(active) if active else None
+    if profile and profile.get("auth_mode") == "chatgpt":
+        warnings.append(API_ONLY_MESSAGE)
     if profile and environment is None:
         environment = "sandbox"
     user_path = environment_dir(environment) / "config.toml" if environment else user_config_path()
@@ -279,12 +289,20 @@ def load_config(workspace: Path | None = None, *, environment: str | None = None
             8192, 1, 65536,
         ),
         runtime_manifest=_workspace_path(root, runtime["manifest"]) if _string(runtime.get("manifest")) else None,
+        runtime_engine=_runtime_engine(runtime.get('engine')),
         protocol=protocol,
         environment=environment,
         profile_name=active,
         auth_mode=profile.get("auth_mode", "api_key") if profile else "api_key",
         codex_auth_home=environment_dir(environment or "sandbox") / "codex-auth" / active if profile and profile.get("auth_mode") == "chatgpt" else None,
     )
+
+
+def _runtime_engine(value):
+    engine = value if value is not None else 'codex'
+    if engine not in {'codex', 'native'}:
+        raise ConfigError('Runtime engine must be codex or native')
+    return engine
 
 
 def _project_asset_path(root: Path, raw: str) -> Path:

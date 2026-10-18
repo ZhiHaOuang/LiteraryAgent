@@ -16,6 +16,100 @@ from tests.helpers import FakeAdapter, make_config
 
 
 class WorkflowRunnerTests(unittest.TestCase):
+    def test_missing_resume_keeps_exit_code_and_code_recovery_does_not_replay_unverified_effects(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw)
+            init_workspace(root)
+            missing=WorkflowRunner(make_config(root),adapter=FakeAdapter()).resume('missing')
+            self.assertEqual(missing.exit_code,5)
+            failed=WorkflowRunner(make_config(root),adapter=FakeAdapter(fail_at=1)).run('code','Explicit code task')
+            adapter=FakeAdapter()
+            result=WorkflowRunner(make_config(root),adapter=adapter).resume(failed.run_id)
+            self.assertFalse(result.ok)
+            self.assertEqual(adapter.calls,[])
+            self.assertIn('Code checkpoint is unverified',result.error)
+
+    def test_resume_recomputes_changed_skill_and_following_stages_only(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw)
+            init_workspace(root)
+            failed=WorkflowRunner(make_config(root),adapter=FakeAdapter(fail_at=3)).run('outline','Specific outline')
+            adapter=FakeAdapter()
+            runner=WorkflowRunner(make_config(root),adapter=adapter)
+            skill_id=runner._workflow('outline')[1]['stages'][1]['skill']
+            skill=runner.registry.skill(skill_id)
+            runner.registry._skills[skill.id]=replace(skill,instructions=skill.instructions+'\nNew author scope constraint.')
+            events=[]
+            resumed=runner.resume(failed.run_id,on_event=events.append)
+            self.assertTrue(resumed.ok,resumed.error)
+            self.assertEqual(len(adapter.calls),6)
+            self.assertEqual(len([e for e in events if e.data.get('restored')]),1)
+
+    def test_resume_rejects_stale_book_and_modified_checkpoint_content(self):
+        for change in ('canon','content','metadata','legacy'):
+            with self.subTest(change=change),tempfile.TemporaryDirectory() as raw:
+                root=Path(raw)
+                init_workspace(root)
+                failed=WorkflowRunner(make_config(root),adapter=FakeAdapter(fail_at=3)).run('outline','Specific outline')
+                directory=RunStore(root).handle(failed.run_id).directory/'stages'
+                if change=='canon':
+                    ProjectStore(root).add_fact(category='world',key='new-rule',value='New Canonical fact.',state='canonical')
+                elif change=='content':
+                    (directory/'direction-brief.md').write_text('Modified unverified stage output.')
+                elif change=='metadata':
+                    path=directory/'direction-brief.json'
+                    value=json.loads(path.read_text());value['risks']=['Later unverified claim.']
+                    path.write_text(json.dumps(value))
+                else:
+                    path=directory/'direction-brief.json'
+                    value=json.loads(path.read_text());value.pop('input_fingerprint')
+                    path.write_text(json.dumps(value))
+                adapter=FakeAdapter()
+                resumed=WorkflowRunner(make_config(root),adapter=adapter).resume(failed.run_id)
+                self.assertTrue(resumed.ok,resumed.error)
+                self.assertEqual(len(adapter.calls),7)
+                self.assertNotIn('Modified unverified',adapter.calls[0]['prompt'])
+
+    def test_book_change_during_model_does_not_save_current_checkpoint(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw)
+            init_workspace(root)
+            class EditingAdapter(FakeAdapter):
+                def run(self,**kwargs):
+                    ProjectStore(root).add_fact(category='world',key='changed',value='Changed during model execution.',state='canonical')
+                    return super().run(**kwargs)
+            adapter=EditingAdapter()
+            result=WorkflowRunner(make_config(root),adapter=adapter).run('outline','Specific outline')
+            self.assertFalse(result.ok)
+            self.assertEqual(RunStore(root).load(result.run_id)['completed_stages'],[])
+            self.assertEqual(len(adapter.calls),1)
+
+    def test_resume_revalidates_memory_schema_model_and_guidance(self):
+        import os
+        from unittest.mock import patch
+        for change in ('memory','schema','model','guidance'):
+            with self.subTest(change=change),tempfile.TemporaryDirectory() as raw:
+                root=Path(raw)
+                init_workspace(root)
+                config=make_config(root)
+                failed=WorkflowRunner(config,adapter=FakeAdapter(fail_at=3)).run('outline','Specific outline')
+                if change=='memory':
+                    config.memory_path.mkdir(parents=True,exist_ok=True)
+                    (config.memory_path/'STYLE_GUIDE.md').write_text('New author style constraint.')
+                if change=='model':config=replace(config,default_model='different-model')
+                adapter=FakeAdapter()
+                runner=WorkflowRunner(config,adapter=adapter)
+                if change=='schema':
+                    agent_id=runner._workflow('outline')[1]['stages'][1]['agent']
+                    agent=runner.registry.agent(agent_id)
+                    value=json.loads(agent.output_schema.read_text());value['description']='Changed output contract.'
+                    schema=root/'changed.schema.json';schema.write_text(json.dumps(value))
+                    runner.registry._agents[agent.id]=replace(agent,output_schema=schema)
+                with patch.dict(os.environ,{'LG_WORKFLOW_GUIDANCE':'New explicit direction' if change=='guidance' else ''}):
+                    result=runner.resume(failed.run_id)
+                self.assertTrue(result.ok,result.error)
+                self.assertEqual(len(adapter.calls),6 if change=='schema' else 7)
+
     def test_adopt_manuscript_requires_container_and_preserves_scene_state(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

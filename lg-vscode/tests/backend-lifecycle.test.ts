@@ -39,8 +39,10 @@ test('server resolution expires only matching requests and blocks late approval/
 test('expired transport request cannot emit a response',{timeout:10000},async()=>{
   let received!:()=>void;
   const request=new Promise<void>(resolve=>{received=resolve;});
+  const ids=new Set<string|number>();
   const transport=new RpcTransport({command:process.execPath,args:[resolve('tests/fixtures/resolved-server.cjs')],cwd:process.cwd()},message=>{
-    if(message.id===0&&message.method)received();
+    if(message.method&&(message.id===0||message.id==='0'))ids.add(message.id);
+    if(ids.has(0)&&ids.has('0'))received();
   },()=>{});
   try {
     transport.start();

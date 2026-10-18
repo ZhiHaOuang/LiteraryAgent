@@ -234,7 +234,7 @@ class DetailTests(unittest.TestCase):
                 result = super().run(**kwargs)
                 value = json.loads(result.output_text)
                 stage, total = map(int, re.search(r'## Stage\n(\d+)/(\d+)', kwargs['prompt']).groups())
-                if stage < total:
+                if stage < total and 'book_overview' in value:
                     value['book_overview'] = ''
                 return replace(result, output_text=json.dumps(value))
         adapter = Adapter()

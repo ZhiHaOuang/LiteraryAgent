@@ -115,6 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--environment", help="Isolated LG credential/config space; ignores inherited model keys.")
     parser.add_argument("--debug", action="store_true", help="Show tracebacks and model events.")
     parser.add_argument("--conversation", help="Continue a conversation ID belonging to this workspace.")
+    parser.add_argument('--backend-worker',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--approve-fingerprint',help='Approve only the exact creative preview fingerprint returned by an earlier invocation.')
+    parser.add_argument('--operation-mode',choices=('ask','auto_review','full_access'),help='Set the LG operation mode for this conversation; creative permission stays separate.')
     _add_runtime_options(parser)
     sub = parser.add_subparsers(dest="command")
     add_auth_parser(sub)
@@ -153,6 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_resume = run_sub.add_parser("resume", help="Resume a failed or interrupted run.")
     run_resume.add_argument("run_id")
     _add_runtime_options(run_resume, suppress_defaults=True)
+    run_resume.add_argument('--confirm-stopped',action='store_true',help='Confirm a legacy run without process identity has stopped.')
+    run_resume.add_argument('--expected-fingerprint',help=argparse.SUPPRESS)
     adopt = run_sub.add_parser("adopt", help="Import a completed run as a versioned book document.")
     adopt.add_argument("run_id")
     adopt.add_argument("slug")
@@ -201,6 +206,12 @@ def _add_runtime_options(parser: argparse.ArgumentParser, *, suppress_defaults: 
         default=argparse.SUPPRESS if suppress_defaults else None,
         help="Override the configured execution strategy.",
     )
+    parser.add_argument('--runtime-engine', choices=('codex','native'),
+        default=argparse.SUPPRESS if suppress_defaults else None,
+        help='Override the configured execution runtime for this invocation.')
+    parser.add_argument('--runtime-manifest', type=Path,
+        default=argparse.SUPPRESS if suppress_defaults else None,
+        help='Explicit Codex runtime manifest; Native does not use it.')
     parser.add_argument(
         "--json",
         action="store_true",
@@ -220,11 +231,22 @@ def _add_json_option(parser: argparse.ArgumentParser) -> None:
 
 
 def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config: LGConfig) -> int:
+    if args.backend_worker:
+        allowed=(args.command in TASK_COMMANDS or args.command=='run' and args.run_command=='resume'
+            or args.command=='edit' or args.command=='scene' and args.scene_command in {'plan','draft'}
+            or args.command=='analysis' and args.analysis_command in {'chapter','volume'}
+            or args.command=='bible' and args.bible_command=='curate')
+        if not allowed or args.conversation or args.approve_fingerprint or args.operation_mode:
+            raise ValueError('The owned worker accepts only generation/resume tasks without session or approval overrides.')
+    elif getattr(args,'expected_source_fingerprint',None):
+        raise ValueError('Source fingerprint is reserved for the owned analysis worker')
     shelf = Bookshelf.discover(config.workspace)
+    runtime_options = argparse.Namespace(runtime_engine=getattr(args,'runtime_engine',None),
+        runtime_manifest=getattr(args,'runtime_manifest',None))
     if args.command == "novel":
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             raise ValueError("The novel editor requires an interactive terminal")
-        return interactive_loop(config, initial_command="/novel" + (" " + shlex.quote(args.chapter) if args.chapter else ""))
+        return interactive_loop(config, initial_command="/novel" + (" " + shlex.quote(args.chapter) if args.chapter else ""), runtime_options=runtime_options)
     if args.command == "newbook":
         if shelf is None:
             raise ValueError("Select a bookshelf with --shelf /path/to/books first")
@@ -245,9 +267,10 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
         if not sys.stdin.isatty():
             prompt = sys.stdin.read().strip()
             if prompt:
+                args.natural=True
                 return _run_task(_infer_command(prompt), prompt, config, args)
         if sys.stdin.isatty():
-            return interactive_loop(config, debug=args.debug, conversation=args.conversation)
+            return interactive_loop(config, debug=args.debug, conversation=args.conversation, runtime_options=runtime_options)
         registry = DefinitionRegistry(config.workspace)
         print(
             render_dashboard(
@@ -274,6 +297,10 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
     if args.command == "run":
         return _dispatch_run(args, config)
 
+    if not args.backend_worker:
+        from .cli_backend import dispatch_story
+        shared=dispatch_story(args,config)
+        if shared is not None:return shared
     story_result = dispatch_story_command(args, config)
     if story_result is not None:
         return story_result
@@ -293,6 +320,10 @@ def _run_task(command: str, prompt: str, config: LGConfig, args: argparse.Namesp
     if Bookshelf(config.workspace).marker.is_file():
         raise ValueError("Focus a book before starting a writing request")
     ensure_agent_config(config.workspace)
+    if not getattr(args,'backend_worker',False) and command!='code':
+        from .cli_backend import run_workflow,run_agent
+        if getattr(args,'natural',False) and not getattr(args,'dry_run',False):return run_agent(prompt,config,args)
+        return run_workflow(command,prompt,config,args)
     conversation = getattr(args, "conversation", None)
     conversations = ConversationStore(config.workspace)
     request = prompt
@@ -327,6 +358,9 @@ def _run_task(command: str, prompt: str, config: LGConfig, args: argparse.Namesp
 
 
 def _dispatch_run(args: argparse.Namespace, config: LGConfig) -> int:
+    if not args.backend_worker:
+        from .cli_backend import dispatch_run
+        return dispatch_run(args,config)
     store = RunStore(config.workspace)
     if args.run_command == "adopt":
         supervised_accept = args.accept and args.kind in {"chapter", "scene"}
@@ -391,6 +425,7 @@ def _dispatch_run(args: argparse.Namespace, config: LGConfig) -> int:
             dry_run=bool(getattr(args, "dry_run", False)),
             allow_raw=True if getattr(args, "raw", False) else None,
             on_event=renderer,
+            confirm_stopped=args.confirm_stopped,expected_fingerprint=args.expected_fingerprint,
         )
         _print_workflow_result(result, json_mode=bool(getattr(args, "json", False)))
         return result.exit_code
@@ -430,8 +465,11 @@ def _print_workflow_result(result: WorkflowExecutionResult, *, json_mode: bool) 
 
 
 def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str | None = None,
-                     initial_command: str | None = None) -> int:
+                     initial_command: str | None = None, runtime_options: argparse.Namespace | None = None) -> int:
     _load_runtime()
+    def reload_config(workspace):
+        loaded = load_config(workspace, environment=config.environment)
+        return _apply_runtime_overrides(loaded, runtime_options or argparse.Namespace())
     shelf = Bookshelf.discover(config.workspace)
     active_book = shelf is None or shelf.root != config.workspace
     if active_book and not ProjectStore(config.workspace).initialized:
@@ -555,7 +593,7 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
         nonlocal config, conversations, conversation, active_book
         await close_live()
         control.reset()
-        updated = load_config(target, environment=config.environment)
+        updated = reload_config(target)
         init_workspace(target)
         config = updated
         conversations = ConversationStore(target)
@@ -571,7 +609,7 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
         session.append(f"Opened project: {target}\n")
         show_home()
 
-    from .live_agent import LiveAgent
+    from .terminal_backend import TerminalBackendClient
     from .live_view import LiveView
     from .workflow_control import WorkflowControl
     control = WorkflowControl(session)
@@ -588,6 +626,7 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
             await live.close()
             live = None
             live_identity = None
+            control.approval_handler = approve_operation
 
     async def steer_live(text):
         if director_busy:
@@ -595,7 +634,6 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
             if live is None:
                 raise ValueError('主 Agent 未能启动，消息已保留。')
             await live.steer(text)
-            conversations.append(conversation, 'user', text)
         else:
             await talk_to_director(text, preserve_tasks=control.active)
 
@@ -625,15 +663,16 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
     approval_lock = asyncio.Lock()
 
     async def approve_operation(details):
-        mode = live.runtime.read()['mode'] if live else 'ask'
+        from .session_runtime import operation_policy
+        kind, mode = operation_policy(live.runtime.read() if live else {}, details)
         if mode == 'full_access':
             return {'decision': 'accept'}
         if mode == 'auto_review':
             from .creative_review import review_creative
             decision = await review_creative(config, {'operation': details})
-            session.append('操作审查：' + decision['reason'] + '\n')
+            session.append(('创作审查：' if kind == 'creative' else '操作审查：') + decision['reason'] + '\n')
             return decision
-        return await answer_agent_question('lg/operationApproval', details)
+        return await answer_agent_question('lg/creativeApproval' if kind == 'creative' else 'lg/operationApproval', details)
 
     control.approval_handler = approve_operation
 
@@ -687,60 +726,58 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
                 director_busy = False
                 director_ready.set()
 
-    async def run_director(text, *, preserve_tasks=False):
+    async def ensure_live():
         nonlocal live, live_identity, conversation, config
         if not active_book:
-            session.append('先用 /focus 选择一本书。\n')
-            return
+            raise ValueError('先用 /focus 选择一本书。')
         if conversation is None:
             conversation = conversations.create()
-        updated = load_config(config.workspace, environment=config.environment)
+        updated = reload_config(config.workspace)
         from hashlib import sha256
         # Shared desktop/CLI settings can change an account without changing its model.
         identity = (str(config.workspace), conversation, updated.provider, updated.default_model,
                     updated.profile_name, updated.environment, updated.protocol, updated.base_url,
                     updated.auth_mode, updated.codex_auth_home,
-                    sha256((updated.api_key or '').encode()).digest(), updated.project_instructions)
+                    sha256((updated.api_key or '').encode()).digest(), updated.project_instructions,
+                    updated.runtime_engine, updated.runtime_manifest)
         if live_identity != identity:
             await close_live()
             config = updated
             live_view.messages.clear()
             live_view.completed_messages.clear()
-            live = LiveAgent(config, live_view, on_request=answer_agent_question,
-                control_socket=await control.endpoint(), conversation=conversation)
+            live = TerminalBackendClient(config, live_view, on_request=answer_agent_question,
+                control=control, conversation=conversation, on_notice=session.append)
             try:
-                await live.start(context=conversations.context(conversation, limit=config.conversation_chars))
+                await live.start()
             except BaseException:
                 await close_live()
                 raise
             live_identity = identity
-            live_view.thread_id = live.thread_id
+        return live
+
+    async def run_director(text, *, preserve_tasks=False):
+        if not active_book:
+            session.append('先用 /focus 选择一本书。\n')
+            return
+        await ensure_live()
         if not preserve_tasks:
             session.tasks.clear()
         director_ready.set()
         live_view.completed_messages.clear()
-        conversations.append(conversation, 'user', text)
         try:
-            status = control.status()
-            request = text
-            if status['status'] != 'idle':
-                request = ('Current UI-owned workflow (a status snapshot, use workflow_status for current state):\n'
-                    + json.dumps(status, ensure_ascii=False) + '\n\nAuthor message:\n' + text)
-            await live.run(request)
+            await live.run(text)
         except Exception:
             await close_live()
             raise
-        finally:
-            for message in live_view.completed_messages.values():
-                if message:
-                    conversations.append(conversation, 'assistant', message)
 
     async def handle(raw: str) -> bool:
         nonlocal config, conversations, conversation, shelf, active_book
         if raw == '/permissions':
-            from .session_runtime import SessionRuntime
             if director_busy or control.active:
                 raise ValueError('请在当前任务结束后调整权限。')
+            if not active_book:
+                session.append('先用 /focus 选择一本书。\n')
+                return True
             if conversation is None:
                 conversation = conversations.create()
             try:
@@ -756,12 +793,14 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
                 session.close_dialog()
             if creative is not None:
                 await close_live()
-                runtime = SessionRuntime(config.workspace, conversation)
-                runtime.acquire()
+                client = TerminalBackendClient(config, live_view, on_request=answer_agent_question,
+                    control=control, conversation=conversation, on_notice=session.append)
                 try:
-                    runtime.update(mode=mode, creative_mode=creative)
+                    await client.start()
+                    await client.set_permissions(mode, creative)
                 finally:
-                    runtime.release()
+                    await client.close()
+                    control.approval_handler = approve_operation
             return True
         if raw == '/home':
             show_home()
@@ -772,16 +811,18 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
         if raw in {'/profile', '/preferences'}:
             from .preferences import edit_preferences
             await edit_preferences(session, config.workspace, lambda: handle('/model'))
-            config = load_config(config.workspace, environment=config.environment)
+            config = reload_config(config.workspace)
             await close_live()
             show_home()
             return True
-        if raw == '/run list' or raw.startswith('/run show '):
+        if raw == '/run list' or (raw.startswith('/run show ') and len(shlex.split(raw))==3):
             from .run_browser import browse_runs
             parts = shlex.split(raw)
-            if raw != '/run list' and len(parts) != 3:
-                raise ValueError('用法：/run show <运行记录>')
-            await browse_runs(session, RunStore(config.workspace), parts[2] if len(parts) == 3 else None)
+            client=TerminalBackendClient.readonly(config)
+            try:
+                await browse_runs(session,run_id=parts[2] if len(parts)==3 else None,client=client)
+            finally:
+                await client.close()
             return True
         if raw == '/rename' or raw.startswith('/rename '):
             selected = conversation
@@ -853,7 +894,7 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
             if not target.is_absolute():
                 target = (shelf.root if shelf else config.workspace) / target
             selected = Bookshelf(target)
-            updated = load_config(selected.root, environment=config.environment)
+            updated = reload_config(selected.root)
             selected.initialize()
             shelf, config, active_book = selected, updated, False
             conversations, conversation = ConversationStore(config.workspace), None
@@ -985,31 +1026,148 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
         if not active_book and nested[0] not in {"auth", "status", "doctor", "skills", "agents", "modes", "project"}:
             session.append('Choose a book with /focus or create one with /newbook "Title".\n')
             return True
-        creative_command = nested[:2] in (['version', 'accept'], ['scene', 'accept'], ['scene', 'approve'],
-            ['bible', 'promote']) or nested[:3] == ['bible', 'proposal', 'accept']
-        if creative_command:
-            from .session_runtime import SessionRuntime
-            if conversation is None:
-                conversation = conversations.create()
-            runtime = live.runtime if live else SessionRuntime(config.workspace, conversation)
-            mode = runtime.read()['creative_mode']
-            from .creative_review import command_preview
-            preview = command_preview(config, nested)
-            if mode == 'auto_review':
-                from .creative_review import review_creative
-                decision = await review_creative(config, preview)
-                session.append('创作审查：' + decision['reason'] + '\n')
-            elif mode == 'ask':
-                decision = await answer_agent_question('lg/creativeApproval', preview)
-            else:
-                decision = {'decision': 'accept'}
-            if decision['decision'] != 'accept':
-                session.append('未采用修改。\n')
+        story_command = (nested[:2] in (['scene','plan'],['scene','draft'],['bible','curate']) or nested[0]=='edit')
+        if nested[0]=='studio':
+            from .studio_cli import read_arguments,confirmation
+            from .studio_operations import prepare
+            parsed=build_parser().parse_args(nested)
+            arguments=read_arguments(parsed)
+            preview=await prepare(config,parsed.operation,arguments)
+            if preview['write'] and not parsed.confirm:
+                session.append(json.dumps(confirmation(parsed,arguments,preview),ensure_ascii=False)+'\n')
                 return True
-            if command_preview(config, nested) != preview:
-                raise ValueError('审批期间资料已变化，请重新确认。')
+            client=await ensure_live()
+            finished=await client.studio({'operation':parsed.operation,'arguments':arguments,
+                'expectedFingerprint':preview['fingerprint']},confirm_fingerprint=preview['fingerprint'] if parsed.confirm else None)
+            session.append(json.dumps(finished['result']['value'],ensure_ascii=False)+'\n' if finished['status']=='completed'
+                else '工作台操作未完成：'+finished.get('error',finished['status'])+'\n')
+            return True
+        if nested[:2] in (['analysis','chapter'],['analysis','volume']):
+            from .cli_backend import analysis_params
+            parsed=build_parser().parse_args(nested)
+            client=await ensure_live()
+            params=analysis_params(parsed)
+            preview=await client.analysis_preview(params)
+            finished=await client.analysis({**params,'expectedFingerprint':preview['fingerprint']},confirm_fingerprint=preview['fingerprint'])
+            session.append(json.dumps(finished['result']['analysisResult'],ensure_ascii=False)+'\n' if finished['status']=='completed'
+                else '分析未完成：'+finished.get('error',finished['status'])+'\n')
+            return True
+        if nested[0] in {'chat','outline','world','character','plot','ref','check','write'} or story_command:
+            parsed = build_parser().parse_args(nested)
+            client = await ensure_live()
+            if story_command:
+                if parsed.request_stdin:
+                    raise ValueError('Interactive commands receive text here; stdin requests belong to the worker interface.')
+                command = 'scene-'+parsed.scene_command if nested[0]=='scene' else ('bible-curate' if nested[0]=='bible' else 'revise')
+                params = {'command':command,'request':' '.join(parsed.request),'document':parsed.reference}
+                if nested[0]=='edit':
+                    params['revisionMode']=parsed.mode
+                    if parsed.source_version is not None:
+                        params['sourceVersion']=parsed.source_version
+                    if parsed.passage is not None:
+                        params['passage']=parsed.passage
+            else:
+                params = {'command':nested[0],'request':' '.join(parsed.prompt or [])}
+            for option,key in [('dry_run','dryRun'),('raw','allowRaw'),('no_reference','noReference'),
+                ('quiet','quiet'),('debug','debug'),
+                ('model','model'),('strategy','strategy'),('runtime_engine','runtimeEngine')]:
+                value = getattr(parsed,option,None)
+                if value is not None:
+                    params[key] = value
+            if debug:
+                params['debug'] = True
+            if getattr(parsed,'runtime_manifest',None):
+                params['runtimeManifest'] = str(parsed.runtime_manifest.expanduser().resolve())
+            finished = await client.workflow(params)
+            if finished['status']=='failed':
+                session.append(f"工作流失败：{finished.get('error','请检查运行记录')}\n")
+            elif finished['status']=='completed':
+                value=(finished.get('result') or {}).get('workflowResult') or {}
+                if value.get('text'):session.append(value['text'],role='assistant')
+            return True
+        if nested[:2]==['scene','approve']:
+            parsed = build_parser().parse_args(nested)
+            client = await ensure_live()
+            finished = await client.creative({'action':'approveScene','document':parsed.reference})
+            session.append('场景计划已批准。\n' if finished['status']=='completed' else
+                '场景计划未批准。'+(' '+finished.get('error','') if finished['status']=='failed' else '')+'\n')
+            return True
+        if nested[:2] in (['version','accept'],['scene','accept']):
+            parsed=build_parser().parse_args(nested)
+            client=await ensure_live()
+            finished=await client.creative({'action':'acceptVersion','document':parsed.reference,
+                'version':parsed.version,'final':parsed.final,'review':True})
+            session.append('已采用指定版本。\n' if finished['status']=='completed' else
+                '未采用指定版本。'+(' '+finished.get('error','') if finished['status']=='failed' else '')+'\n')
+            return True
+        if nested[:2]==['run','adopt']:
+            parsed=build_parser().parse_args(nested)
+            client=await ensure_live()
+            finished=await client.import_run({'runId':parsed.run_id,'slug':parsed.slug,'kind':parsed.kind,'title':parsed.title})
+            if finished['status']!='completed':
+                session.append('导入未完成。'+(' '+finished.get('error','') if finished['status']=='failed' else '')+'\n')
+                return True
+            imported=finished['result']
+            session.append('已导入 '+imported['slug']+' v'+str(imported['version'])+'。\n')
+            if parsed.accept:
+                accepted=await client.creative({'action':'acceptVersion','document':imported['slug'],
+                    'version':imported['version'],'review':True})
+                session.append('已采用导入版本。\n' if accepted['status']=='completed' else
+                    '导入候选已保留，未采用。'+(' '+accepted.get('error','') if accepted['status']=='failed' else '')+'\n')
+            return True
+        if nested[:2]==['run','resume']:
+            parsed=build_parser().parse_args(nested)
+            client=await ensure_live()
+            params={'runId':parsed.run_id,'confirmStopped':parsed.confirm_stopped}
+            for option,key in [('dry_run','dryRun'),('raw','allowRaw'),('no_reference','noReference'),
+                    ('quiet','quiet'),('debug','debug'),('model','model'),('strategy','strategy'),
+                    ('runtime_engine','runtimeEngine')]:
+                value=getattr(parsed,option,None)
+                if value is not None:params[key]=value
+            if getattr(parsed,'runtime_manifest',None):
+                params['runtimeManifest']=str(parsed.runtime_manifest.expanduser().resolve())
+            finished=await client.resume_workflow(params)
+            if finished['status']=='failed':session.append('恢复失败：'+finished.get('error','请检查运行记录')+'\n')
+            elif finished['status']=='completed':
+                value=(finished.get('result') or {}).get('workflowResult') or {}
+                if value.get('text'):session.append(value['text'],role='assistant')
+            return True
+        if nested[:2] in (['run','list'],['run','show']):
+            parsed=build_parser().parse_args(nested)
+            client=TerminalBackendClient.readonly(config)
+            try:
+                if parsed.run_command=='list':
+                    value=await client.list_runs(max(1,min(parsed.limit,200)))
+                    text=json.dumps(value,ensure_ascii=False) if parsed.json else ('Recent LG runs\n'+'\n'.join(
+                        str(item['run_id'])+' '+str(item['status'])+' '+str(item['command']) for item in value['runs']))
+                else:
+                    value=await client.read_run(parsed.run_id,events=parsed.events)
+                    if parsed.json:text=json.dumps(value,ensure_ascii=False)
+                    else:
+                        from contextlib import redirect_stdout
+                        import io
+                        output=io.StringIO()
+                        with redirect_stdout(output):_print_run_manifest(value['run'])
+                        text=output.getvalue()+'\n'.join(str(event.get('sequence',''))+' '+event.get('type','')+' '
+                            +str(event.get('stage_id') or '')+' '+str(event.get('message','')) for event in value.get('events',[]))
+            finally:
+                await client.close()
+            session.append(text+'\n')
+            return True
+        creative_command = nested[:2]==['bible','promote'] or nested[:3] == ['bible', 'proposal', 'accept']
+        if creative_command:
+            from .cli_backend import creative_params
+            parsed=build_parser().parse_args(nested)
+            client=await ensure_live()
+            finished=await client.creative(creative_params(parsed))
+            session.append('已完成指定事实确认。\n' if finished['status']=='completed' else
+                '未采用修改。'+(' '+finished.get('error','') if finished['status']=='failed' else '')+'\n')
+            return True
         env_args = ["--environment", config.environment] if config.environment else []
-        argv = ["-C", str(config.workspace), *env_args, *(["--debug"] if debug else []), *nested]
+        runtime_args = ['--runtime-engine',config.runtime_engine]
+        if config.runtime_manifest:
+            runtime_args += ['--runtime-manifest',str(config.runtime_manifest)]
+        argv = ["-C", str(config.workspace), *env_args, *runtime_args, *(["--debug"] if debug else []), *nested]
         if nested[0] in TASK_COMMANDS:
             if conversation is None:
                 conversation = conversations.create()
@@ -1023,7 +1181,7 @@ def interactive_loop(config: LGConfig, *, debug: bool = False, conversation: str
             if nested[0] == "auth":
                 def refresh_auth():
                     nonlocal config
-                    config = load_config(config.workspace, environment=config.environment)
+                    config = reload_config(config.workspace)
                     session.model, session.provider = config.model_label, config.provider
                 result = await run_auth(session, external_command, refresh=refresh_auth)
             else:
@@ -1247,6 +1405,10 @@ def _apply_runtime_overrides(config: LGConfig, args: argparse.Namespace) -> LGCo
         )
     if strategy:
         config = replace(config, execution_strategy=strategy)
+    if getattr(args,'runtime_engine',None):
+        config = replace(config,runtime_engine=args.runtime_engine)
+    if getattr(args,'runtime_manifest',None):
+        config = replace(config,runtime_manifest=args.runtime_manifest.expanduser().resolve())
     if getattr(args, "no_reference", False):
         config = replace(config, enable_reference=False)
     return config
@@ -1255,14 +1417,14 @@ def _apply_runtime_overrides(config: LGConfig, args: argparse.Namespace) -> LGCo
 def _normalize_argv(argv: list[str]) -> tuple[list[str], bool]:
     if not argv:
         return argv, False
-    options_with_values = {"-C", "--cwd", "--shelf", "--model", "--strategy", "--environment", "--conversation"}
+    options_with_values = {"-C", "--cwd", "--shelf", "--model", "--strategy", "--environment", "--conversation", '--runtime-engine', '--runtime-manifest','--approve-fingerprint','--operation-mode'}
     index = 0
     while index < len(argv):
         token = argv[index]
         if token in options_with_values:
             index += 2
             continue
-        if any(token.startswith(prefix + "=") for prefix in ("--cwd", "--shelf", "--model", "--strategy", "--environment", "--conversation")):
+        if any(token.startswith(prefix + "=") for prefix in ("--cwd", "--shelf", "--model", "--strategy", "--environment", "--conversation", '--runtime-engine', '--runtime-manifest','--approve-fingerprint','--operation-mode')):
             index += 1
             continue
         if token.startswith("-"):

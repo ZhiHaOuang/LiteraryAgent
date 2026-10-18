@@ -185,6 +185,9 @@ class ProjectStoreTests(unittest.TestCase):
                 source_document=document.id,
                 source_version=version.version_number,
             )
+            with self.assertRaisesRegex(ProjectStoreError, 'source is pending'):
+                store.accept_proposal(proposal.id)
+            store.accept_version(document.id, version.version_number)
             accepted = store.accept_proposal(proposal.id)
             self.assertEqual(accepted.source_version_id, version.id)
             self.assertEqual(store.list_proposals(status="accepted")[0].id, proposal.id)

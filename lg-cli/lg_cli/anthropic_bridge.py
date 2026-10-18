@@ -631,14 +631,17 @@ class AnthropicBridge:
         return self
 
     def open_client(self):
-        from anthropic import Anthropic, DefaultHttpxClient
+        import httpx
+        from anthropic import Anthropic, DEFAULT_CONNECTION_LIMITS, DefaultHttpxClient
 
+        # An explicit transport prevents SDK proxy mounts from overriding trust_env=False.
         return Anthropic(
             api_key=self.config.api_key,
             base_url=self.config.base_url,
             timeout=self.config.timeout_seconds,
             max_retries=0,
-            http_client=DefaultHttpxClient(follow_redirects=False, trust_env=False),
+            http_client=DefaultHttpxClient(follow_redirects=False, trust_env=False,
+                transport=httpx.HTTPTransport(trust_env=False, limits=DEFAULT_CONNECTION_LIMITS)),
         )
 
     def response_events(self, request: dict) -> Iterable[dict]:

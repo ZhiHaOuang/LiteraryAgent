@@ -168,7 +168,9 @@ class HomePolishTests(unittest.TestCase):
     def test_shell_and_public_summaries_are_available_but_private_reasoning_is_not(self):
         with create_pipe_input() as pipe:
             session = LiteraryInput(self.root/'history',input=pipe,output=DummyOutput())
-            events = LiveView(session)
+            from lg_cli.codex_events import CodexEvents
+            view = LiveView(session)
+            events = CodexEvents(lambda m,p:view("lg.event", {"type":m,"runId":"runtime",**p}), lambda:"main")
             events('item/reasoning/textDelta', {'itemId':'private','delta':'PRIVATE'})
             events('item/reasoning/summaryTextDelta', {'itemId':'public','delta':'检查书籍记录'})
             events('item/completed', {'item': {'type':'commandExecution','id':'cmd',

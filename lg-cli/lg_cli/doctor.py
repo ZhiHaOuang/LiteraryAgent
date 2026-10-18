@@ -7,9 +7,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .catalog import load_workflows
-from .config import LGConfig
+from .config import API_ONLY_MESSAGE, LGConfig
 from .core_adapter import CodexExecAdapter, inspect_core
 from .definitions import DefinitionRegistry
+from .execution_adapter import execution_adapter, native_stage_config
 from .knowledge import KnowledgeGateway
 from .paths import product_root
 from .project_store import ProjectStore
@@ -85,10 +86,8 @@ def run_doctor(config: LGConfig, *, probe: bool = False) -> DoctorReport:
         )
     )
 
-    if config.auth_mode == "chatgpt":
-        from .subscription_auth import subscription_status
-        ok, message = subscription_status(config)
-        checks.append(DoctorCheck("subscription-auth", "PASS" if ok else "FAIL", message))
+    if config.auth_mode == "chatgpt" and config.runtime_engine == 'codex':
+        checks.append(DoctorCheck("subscription-auth", "FAIL", API_ONLY_MESSAGE))
     elif config.uses_anthropic:
         try:
             import anthropic
@@ -101,23 +100,30 @@ def run_doctor(config: LGConfig, *, probe: bool = False) -> DoctorReport:
             checks.append(DoctorCheck("provider-bridge", "PASS", "Responses streaming bridge ready (API not probed)"))
         except ImportError:
             checks.append(DoctorCheck("provider-bridge", "FAIL", "Responses transport dependency missing; reinstall literarygiant-cli with dependencies"))
-    core = inspect_core(runtime_manifest=config.runtime_manifest)
-    checks.append(
-        DoctorCheck(
-            "core-runtime",
-            "PASS" if core.runtime_available else "FAIL",
-            _runtime_summary(core),
+    if config.runtime_engine == 'native':
+        try:
+            native_stage_config(config, 'chat')
+            checks.append(DoctorCheck('native-runtime', 'PASS', 'Native API stage configuration ready (API not probed)'))
+        except ValueError as exc:
+            checks.append(DoctorCheck('native-runtime', 'FAIL', str(exc)))
+    else:
+        core = inspect_core(runtime_manifest=config.runtime_manifest)
+        checks.append(
+            DoctorCheck(
+                "core-runtime",
+                "PASS" if core.runtime_available else "FAIL",
+                _runtime_summary(core),
+            )
         )
-    )
-    pin_valid = bool(core.pinned_commit and re.fullmatch(r"[0-9a-f]{40}", core.pinned_commit))
-    checks.append(
-        DoctorCheck(
-            "core-pin",
-            "PASS" if pin_valid else "FAIL",
-            core.pinned_commit or "CODEX_CORE_COMMIT is missing",
+        pin_valid = bool(core.pinned_commit and re.fullmatch(r"[0-9a-f]{40}", core.pinned_commit))
+        checks.append(
+            DoctorCheck(
+                "core-pin",
+                "PASS" if pin_valid else "FAIL",
+                core.pinned_commit or "CODEX_CORE_COMMIT is missing",
+            )
         )
-    )
-    checks.append(_verify_core_tree(core.source_available))
+        checks.append(_verify_core_tree(core.source_available))
 
     try:
         registry = DefinitionRegistry(config.workspace)
@@ -161,14 +167,15 @@ def run_doctor(config: LGConfig, *, probe: bool = False) -> DoctorReport:
 def probe_provider(config: LGConfig) -> DoctorCheck:
     if not config.credentials_configured:
         return DoctorCheck("provider-probe", "FAIL", "No provider API key configured; no request sent")
-    result = CodexExecAdapter().run(
+    result = execution_adapter(config).run(
         prompt="This is a connectivity check, not a writing task. Do not call tools. Reply only LG_READY.",
+        instructions="Perform only the requested connectivity check. Do not call tools. Reply only LG_READY.",
         config=replace(config, max_output_tokens=64, timeout_seconds=60, enable_shell=False),
         mode="chat", model_profile="default",
     )
     ready = result.ok and not result.used_stub and "LG_READY" in result.output_text
     return DoctorCheck("provider-probe", "PASS" if ready else "FAIL",
-        "Real model roundtrip passed through the configured Codex runtime" if ready
+        f"Real model roundtrip passed through the configured {config.runtime_engine} runtime" if ready
         else result.error or "Model did not return the expected connectivity marker")
 
 

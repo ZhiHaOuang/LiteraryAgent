@@ -49,6 +49,7 @@ class FakeAdapter:
         self,
         *,
         prompt,
+        instructions=None,
         config,
         mode,
         model_profile=None,
@@ -59,6 +60,7 @@ class FakeAdapter:
         self.calls.append(
             {
                 "prompt": prompt,
+                "instructions": instructions,
                 "mode": mode,
                 "model_profile": model_profile,
                 "output_schema": output_schema,
@@ -92,6 +94,11 @@ class FakeAdapter:
             },
             "risks": [],
         }
+        if output_schema is not None:
+            schema = json.loads(Path(output_schema).read_text())
+            if (isinstance(schema, dict) and schema.get("additionalProperties") is False
+                    and "book_overview" not in schema.get("properties", {})):
+                payload.pop("book_overview")
         return CoreExecutionResult(
             ok=True,
             used_stub=False,

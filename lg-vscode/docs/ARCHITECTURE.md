@@ -4,37 +4,43 @@
 flowchart LR
   UI[React Webview] -->|自有契约| Host[WebviewController / SessionStore]
   Host -->|仅开发或隔离测试| Mock[MockBackend]
-  Host --> Adapter[CodexBackend / RpcTransport]
-  Adapter -->|原始 app-server JSONL RPC| Core[固定 app-server]
-  Launcher[LG Python 启动层] -->|校验与启动| Core
+  Host --> Adapter[LiteraryBackend / RpcTransport]
+  Adapter -->|lg.backend.v1| Backend[Literary Backend]
+  Backend --> Runtime[AgentRuntime]
+  Runtime --> Core[CodexRuntime / 固定 app-server]
+  Runtime --> Native[NativeRuntime / HTTP 与 MCP]
   Core --> Bridge[Python provider bridge]
   Core --> MCP[LG writing MCP]
   MCP --> Store[ProjectStore / 审阅 / 概况]
-  CLI[LG studio CLI] --> MCP
+  Backend --> Store
+  Native --> MCP
+  CLI[LG CLI] --> Backend
 ```
 
-Python 启动器继承 stdin/stdout，协议不转为 `backend_stdio`。真实模型凭据只在 Python 侧使用；核心进程获得本次 bridge token。固定核心保持原样，文学能力在产品层。
+Python `backend_stdio` 使用 LG JSON-RPC 契约，写作入口与 CLI 共用 Backend。真实模型凭据只在 Python 侧使用；Codex 核心进程获得本次 bridge token。固定核心保持原样，文学能力在产品层。
 
 ## 文件与责任
 
 | 路径 | 责任 |
 | --- | --- |
 | `shared/protocol.ts` | Zod 校验 Webview 请求、自有快照与事件；不向浏览器暴露原始 RPC |
-| `src/backend/CodexBackend.ts` | 握手、会话、流、工具、审批、用户问题、取消及概况读取 |
+| `src/backend/createBackend.ts` | 两种正式设置均选择 LiteraryBackend；codex 指定执行器 |
+| `src/backend/LiteraryBackend.ts` | LG 握手、会话、公开事件、审批、取消及资料读取 |
+| `src/backend/CodexBackend.ts` | 保留旧直连源码和协议回归，生产工厂不再引用 |
 | `src/backend/RpcTransport.ts` | UTF-8 字节分帧、请求 ID、超时、子进程及断线收敛 |
 | `src/backend/generated/` | 固定二进制生成的协议类型闭包，仅用于适配层 |
 | `src/host/LatestSnapshotSender.ts` | 一份在途快照与一份最新待发送快照，限制慢 Webview 导致的发送积压 |
-| `src/host/SessionStore.ts` | 宿主持有权威状态，Webview 重建时重发快照 |
+| `src/host/SessionStore.ts` | 宿主持有界面状态，Webview 重建时重发快照；小说权威状态仍在产品存储 |
 | `src/host/WorkspaceBridge.ts` | 作品路径约束、文件打开、只读 diff、未保存文件保护 |
 | `webview/ui/` | 提取后的展示组件；无需原 Qwen 源码树或 CLI |
 
 ## 审批与恢复
 
-LG 写工具由 MCP elicitation 请求一次性确认。未知表单和未知请求拒绝；没有默认同意或永久允许选项。回复后即移除请求 ID，服务端撤销、任务终止及断线会使剩余审批过期。请求 ID 的数字和字符串类型保持区分。
+LG 写工具由 Backend 的任务范围、操作权限和独立创作权限约束，扩展接收公开审批事件。未知请求拒绝；界面没有永久允许选项。回复后即移除请求 ID，服务端撤销、任务终止及断线会使剩余审批过期。Runtime 负责转换自己的请求，不向 React 暴露 Core RPC。
 
 MCP 在审批前后比较作品指纹，检测到并发改变便拒绝写入。扩展不二次应用工具产生的补丁；diff 来自后端返回的完整 before/after，使用只读文档。候选保存不等于采用；采用走既有版本审阅及过期检查。
 
-超时意味着执行结果可能未知。适配器关闭连接，不自动重试变更。恢复会话只读取历史；若发现仍在运行的任务，先请求中断。会话列表读取到末页；历史按固定版本声明选择完整 thread 历史或 `thread/turns/list` 分页接口。分页按 turn ID 去重，拒绝摘要代替完整内容及重复游标，不把不完整历史当作恢复成功。类型检查、分页 fixture 回归和固定二进制重启恢复集成已通过；多页边界由 fixture 覆盖。
+超时意味着执行结果可能未知。适配器关闭连接，不自动重试变更。LG 历史通过冻结快照分页读取并核对内容哈希；恢复不重放工具或审批。旧 Extension 历史由受限 Codex 解码器读取，再导入新 LG 会话。原始文件保留，完整工具载荷和非文本附件不导入；旧 inProgress 记录也不证明外部进程已经停止。导入后的继续写作使用默认作者权限及当前上下文预算，不直接恢复原 Core thread。
 
 ## 概况
 
@@ -58,7 +64,7 @@ Python `anthropic_bridge.py` 在完整上游响应确认后才提交工具调用
 
 `DesktopHost` 管理实际作品选择、模型原生对话框和后端重连；`DesktopClient` 通过 Python `lg_cli.desktop` 调用 CLI 的 Bookshelf、ProjectRegistry、load_config 和 credentials。作品不复制、不重新初始化；凭证仍在 Python 存储中。新增 API 配置仅传递密钥环境变量名，订阅登录及隐藏输入通过显式 CLI 管理入口进行。
 
-正式安装只启动 CodexBackend；Mock 必须处于开发宿主或明确的 LitIsLand 测试目录，普通用户设置不能开启演示。管理入口即使在后端配置失败时仍保留。共享凭证/配置文件变化合并为重连，忽略仅权限修复的事件；任务运行时延后，手动切换前检查任务及未保存文件。重连关闭旧进程、监听器和消息接收器，只恢复当前作品历史。
+正式安装只启动 LiteraryBackend；codex 设置指定其执行器，literary 沿用 LG 配置。显式执行器要求握手确认，不兼容服务明确失败。Mock 必须处于开发宿主或明确的 LitIsLand 测试目录，普通用户设置不能开启演示。管理入口即使在后端配置失败时仍保留。共享凭证/配置文件变化合并为重连，忽略仅权限修复的事件；任务运行时延后，手动切换前检查任务及未保存文件。重连关闭旧进程、监听器和消息接收器，只恢复当前作品历史。
 
 CLI 每次创作前重读同一配置；连接复用身份包括配置空间、账号、协议、地址、模型和密钥摘要。同模型不同账号或更新密钥也会重新建立连接，摘要不输出到日志或界面。固定核心和协议生成类型没有修改。
 

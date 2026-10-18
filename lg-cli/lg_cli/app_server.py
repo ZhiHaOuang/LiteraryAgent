@@ -18,13 +18,14 @@ from .runtime_context import writing_instructions
 
 
 def launch(config, manifest: Path, *, describe: bool = False) -> int:
+    config.require_api_auth()
     if not manifest.is_absolute():
         raise ConfigError('Runtime manifest must be an absolute path')
     candidate = _locked_runtime(manifest, core_codex_root(), probe=True)
     if not candidate.available:
         raise ConfigError(candidate.reason)
-    if not (config.uses_anthropic or config.uses_responses or config.auth_mode == 'chatgpt'):
-        raise ConfigError('The extension requires an explicitly configured Messages, Responses or ChatGPT profile')
+    if not (config.uses_anthropic or config.uses_responses):
+        raise ConfigError('The extension requires an explicitly configured Messages or Responses API profile')
     if not config.credentials_configured:
         raise ConfigError('Configure an LG provider profile before connecting the extension')
     if describe:
@@ -33,12 +34,6 @@ def launch(config, manifest: Path, *, describe: bool = False) -> int:
             'baseInstructions': writing_instructions(config)}, ensure_ascii=False))
         return 0
     provider = []
-    if config.auth_mode == 'chatgpt':
-        from .subscription_auth import subscription_args, subscription_status
-        ok, message = subscription_status(config, command=list(candidate.command))
-        if not ok:
-            raise ConfigError(message)
-        provider = subscription_args()
     with provider_bridge(config) as bridge:
         env = _adapter_env(config)
         env.pop('CODEX_API_KEY', None)

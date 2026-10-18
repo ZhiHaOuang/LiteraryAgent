@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 from .config import LGConfig
-from .core_adapter import CodexExecAdapter, CoreExecutionResult
+from .core_adapter import CoreExecutionResult
+from .execution_adapter import execution_adapter
 from .definitions import DefinitionRegistry
 from .events import EventSink, EventType, RunEvent
+from .generation_sources import bind_generation_sources, make_receipt, text_sha
 from .logging_utils import append_agent_log, ensure_log_dir, write_text
 from .output_writer import write_workflow_output
+from .output_schema import read_schema, validate_output
 from .project_store import DocumentRecord, DocumentVersion, ProjectStore, SceneCard
 from .run_store import RunHandle, RunStore
-from .story_context import render_scene_card, render_story_context
+from .story_context import render_scene_card, render_story_context, render_story_context_with_sources
+from .stage_input import StageInput, prepare_stage_input
 from .workflow_runner import EXIT_CONFIGURATION, EXIT_MODEL, EXIT_OK, ModelAdapter
 
 REVISION_MODES = {
@@ -47,6 +51,19 @@ class StoryTaskResult:
         return self.exit_code == EXIT_OK
 
 
+@dataclass(frozen=True)
+class _PreparedStoryInput(StageInput):
+    stage_id: str
+    schema_text: str
+    schema_path: Path
+    model_profile: str
+    receipt_json: str
+
+    @property
+    def generation_sources(self) -> dict:
+        return json.loads(self.receipt_json)
+
+
 class StoryWorkflowService:
     """Human-gated scene planning, drafting, and revision workflows.
 
@@ -64,7 +81,7 @@ class StoryWorkflowService:
     ) -> None:
         self.config = config
         self.project = project or ProjectStore(config.workspace)
-        self.adapter = adapter or CodexExecAdapter()
+        self.adapter = adapter or execution_adapter(config)
         self.runs = runs or RunStore(config.workspace)
         self.registry = DefinitionRegistry(config.workspace)
 
@@ -75,24 +92,30 @@ class StoryWorkflowService:
         if not document.content.strip():
             return self._fail(handle, emit, "Source document has no active text.", EXIT_CONFIGURATION,
                               document=document)
-        prompt = "\n\n".join([
-            "# LiteraryGiant Story Bible Curation",
-            "Extract only durable facts supported by the source document. Do not invent or resolve "
-            "conflicts by silently changing canon. Return concise atomic memory_proposals with stable "
-            "category/key pairs, tags, and a rationale citing the source passage. Avoid duplicate facts "
-            "already in Canonical memory. These are proposals, never automatic canon edits.",
-            "## Author Request\n" + request,
-            f"## Source: {document.slug} v{document.active_version_number}\n{document.content}",
-            render_story_context(self.project.context_snapshot(query=document.title)),
-            "Return only the provided JSON schema: summary, memory_proposals, risks.",
-        ])
-        prompt = self._write_prompt(handle, "bible-curate", prompt)
+        try:
+            context, observation = render_story_context_with_sources(self.project.context_snapshot(query=document.title))
+            prompt = "\n\n".join([
+                "# LiteraryGiant Story Bible Curation",
+                "Extract only durable facts supported by the source document. Do not invent or resolve "
+                "conflicts by silently changing canon. Return concise atomic memory_proposals with stable "
+                "category/key pairs, tags, and a rationale citing the source passage. Avoid duplicate facts "
+                "already in Canonical memory. These are proposals, never automatic canon edits.",
+                "## Author Request\n" + request,
+                f"## Source: {document.slug} v{document.active_version_number}\n{document.content}",
+                context,
+                "Return only the provided JSON schema: summary, memory_proposals, risks.",
+            ])
+            observations = [observation, _document_observation(document, document.content)]
+            prepared, preview_prompt = self._write_prompt(handle, "bible-curate", prompt, "memory-proposals.schema.json", observations)
+        except Exception:
+            return self._fail(handle, emit, "Story stage input contract is invalid or could not be saved.",
+                              EXIT_CONFIGURATION, document=document, stage_id="bible-curate")
         if dry_run:
-            return self._plan_only(handle, emit, "bible-curate", prompt, document)
+            return self._plan_only(handle, emit, "bible-curate", preview_prompt, document, prepared)
         if not self.config.credentials_configured:
             return self._fail(handle, emit, "No model credentials configured.", EXIT_CONFIGURATION, document=document)
         emit.emit(EventType.STAGE_STARTED, "MemoryAgent using story-bible-curator", stage_id="bible-curate")
-        result = self._model_run(prompt, "bible-curate", "memory-proposals.schema.json", emit)
+        result = self._model_run(prepared, "bible-curate", "memory-proposals.schema.json", emit)
         if not result.ok:
             return self._fail_from_model(handle, emit, result, document, "bible-curate")
         try:
@@ -108,7 +131,7 @@ class StoryWorkflowService:
             f"- Proposal {key}: [{item['category']}] {item['key']}: {item['value']}"
             for key, item in zip(proposals, payload["memory_proposals"], strict=True)
         )
-        self.runs.write_stage(handle, stage_id="bible-curate", content=text,
+        self.runs.write_stage(handle, stage_id="bible-curate", content=text, generation_sources=prepared.generation_sources,
             metadata={"skill": "story-bible-curator", "agent": "memory", "proposal_ids": proposals,
                       "source_document": document.id, "source_version": document.active_version_number,
                       "risks": payload["risks"], "adapter": _adapter_metadata(result)})
@@ -132,8 +155,15 @@ class StoryWorkflowService:
         scene = self.project.get_scene(scene_reference)
         request_text = request.strip() or "Create a scene plan that satisfies the scene card."
         handle, emit = self._new_run("scene_planning", "scene-plan", request_text, on_event)
-        prompt = _scene_plan_prompt(scene, self.project.context_snapshot(scene=scene.document.id, query=request_text), request_text)
-        return self._execute_scene_plan(handle, emit, scene, prompt, dry_run)
+        try:
+            snapshot = self.project.context_snapshot(scene=scene.document.id, query=request_text)
+            context, observation = render_story_context_with_sources(snapshot)
+            prompt = _scene_plan_prompt(scene, snapshot, request_text, context_text=context)
+            observations = [observation, _scene_observation(scene)]
+        except Exception:
+            return self._fail(handle, emit, "Story context could not be prepared.", EXIT_CONFIGURATION,
+                              document=scene.document, stage_id="scene-plan")
+        return self._execute_scene_plan(handle, emit, scene, prompt, dry_run, observations)
 
     def draft_scene(
         self,
@@ -154,8 +184,15 @@ class StoryWorkflowService:
                 EXIT_CONFIGURATION,
                 document=scene.document,
             )
-        prompt = _scene_draft_prompt(scene, self.project.context_snapshot(scene=scene.document.id, query=request_text), request_text)
-        return self._execute_scene_draft(handle, emit, scene, prompt, dry_run)
+        try:
+            snapshot = self.project.context_snapshot(scene=scene.document.id, query=request_text)
+            context, observation = render_story_context_with_sources(snapshot)
+            prompt = _scene_draft_prompt(scene, snapshot, request_text, context_text=context)
+            observations = [observation, _scene_observation(scene)]
+        except Exception:
+            return self._fail(handle, emit, "Story context could not be prepared.", EXIT_CONFIGURATION,
+                              document=scene.document, stage_id="scene-draft")
+        return self._execute_scene_draft(handle, emit, scene, prompt, dry_run, observations)
 
     def revise_document(
         self,
@@ -184,26 +221,41 @@ class StoryWorkflowService:
                 EXIT_CONFIGURATION,
                 document=document,
             )
-        snapshot = self.project.context_snapshot(
-            scene=document.id if document.kind == "scene" else None,
-            query=f"{document.title} {request_text}",
-        )
-        snapshot["documents"] = [item for item in snapshot["documents"] if item.id != document.id]
+        try:
+            snapshot = self.project.context_snapshot(
+                scene=document.id if document.kind == "scene" else None,
+                scene_version=source.version_number if source is not None and document.kind == "scene" else None,
+                query=f"{document.title} {request_text}",
+            )
+            snapshot["documents"] = [item for item in snapshot["documents"] if item.id != document.id]
+        except Exception:
+            return self._fail(handle, emit, "Story context could not be prepared.", EXIT_CONFIGURATION,
+                              document=document, stage_id="revision")
         if passage is not None and (not passage.strip() or source_text.find(passage) < 0
                                     or source_text.find(passage) != source_text.rfind(passage)):
             return self._fail(handle, emit, "Passage must match exactly once in the selected source version.",
                               EXIT_CONFIGURATION, document=document)
-        surroundings = None
-        if passage is not None:
-            offset = source_text.index(passage)
-            surroundings = (source_text[max(0, offset - 600):offset],
-                            source_text[offset + len(passage):offset + len(passage) + 600])
-        prompt = _revision_prompt(document, passage if passage is not None else source_text, snapshot,
-                                  normalized_mode, request_text, passage_only=passage is not None,
-                                  surroundings=surroundings)
+        try:
+            context, observation = render_story_context_with_sources(snapshot)
+            surroundings = None
+            if passage is not None:
+                offset = source_text.index(passage)
+                surroundings = (source_text[max(0, offset - 600):offset],
+                                source_text[offset + len(passage):offset + len(passage) + 600])
+            prompt = _revision_prompt(document, passage if passage is not None else source_text, snapshot,
+                                      normalized_mode, request_text, passage_only=passage is not None,
+                                      surroundings=surroundings, context_text=context)
+            observations = [observation, _document_observation(document,
+                passage if passage is not None else source_text, source=source, excerpt=passage is not None)]
+            if surroundings is not None:
+                observations.append({'tool': 'revision_surroundings', 'payload_sha256': text_sha(
+                    '\n'.join(surroundings)), 'refs': [], 'coverage': 'unknown'})
+        except Exception:
+            return self._fail(handle, emit, "Story context could not be prepared.", EXIT_CONFIGURATION,
+                              document=document, stage_id="revision")
         return self._execute_revision(handle, emit, document, prompt, dry_run, normalized_mode, source,
                                       passage=passage, source_text=source_text,
-                                      context_documents=tuple(snapshot["documents"]))
+                                      context_documents=tuple(snapshot["documents"]), observations=observations)
 
     def _execute_scene_plan(
         self,
@@ -212,12 +264,17 @@ class StoryWorkflowService:
         scene: SceneCard,
         prompt: str,
         dry_run: bool,
+        observations: list[dict] | None = None,
     ) -> StoryTaskResult:
-        prompt = self._write_prompt(handle, "scene-plan", prompt)
+        try:
+            prepared, preview_prompt = self._write_prompt(handle, "scene-plan", prompt, "scene-plan.schema.json", observations)
+        except Exception:
+            return self._fail(handle, emit, "Story stage input contract is invalid or could not be saved.",
+                              EXIT_CONFIGURATION, document=scene.document, stage_id="scene-plan")
         emit.emit(EventType.CONTEXT_STARTED, "Collected scene card, Story Bible, related scenes, and open threads")
         emit.emit(EventType.CONTEXT_COMPLETED, "Scene planning context is ready")
         if dry_run:
-            return self._plan_only(handle, emit, "scene-plan", prompt, scene.document)
+            return self._plan_only(handle, emit, "scene-plan", preview_prompt, scene.document, prepared)
         if not self.config.credentials_configured:
             return self._fail(
                 handle,
@@ -227,7 +284,7 @@ class StoryWorkflowService:
                 document=scene.document,
             )
         emit.emit(EventType.STAGE_STARTED, "Planning scene card", stage_id="scene-plan")
-        result = self._model_run(prompt, "scene-plan", "scene-plan.schema.json", emit)
+        result = self._model_run(prepared, "scene-plan", "scene-plan.schema.json", emit)
         if not result.ok:
             return self._fail_from_model(handle, emit, result, scene.document, "scene-plan")
         try:
@@ -256,6 +313,7 @@ class StoryWorkflowService:
             handle,
             stage_id="scene-plan",
             content=payload["plan_markdown"],
+            generation_sources=prepared.generation_sources,
             metadata={
                 "summary": payload["summary"],
                 "card_updates": updates,
@@ -294,12 +352,17 @@ class StoryWorkflowService:
         scene: SceneCard,
         prompt: str,
         dry_run: bool,
+        observations: list[dict] | None = None,
     ) -> StoryTaskResult:
-        prompt = self._write_prompt(handle, "scene-draft", prompt)
+        try:
+            prepared, preview_prompt = self._write_prompt(handle, "scene-draft", prompt, "scene-draft.schema.json", observations)
+        except Exception:
+            return self._fail(handle, emit, "Story stage input contract is invalid or could not be saved.",
+                              EXIT_CONFIGURATION, document=scene.document, stage_id="scene-draft")
         emit.emit(EventType.CONTEXT_STARTED, "Collected approved scene plan and relevant project context")
         emit.emit(EventType.CONTEXT_COMPLETED, "Scene drafting context is ready")
         if dry_run:
-            return self._plan_only(handle, emit, "scene-draft", prompt, scene.document)
+            return self._plan_only(handle, emit, "scene-draft", preview_prompt, scene.document, prepared)
         if not self.config.credentials_configured:
             return self._fail(
                 handle,
@@ -309,14 +372,14 @@ class StoryWorkflowService:
                 document=scene.document,
             )
         emit.emit(EventType.STAGE_STARTED, "Drafting scene prose", stage_id="scene-draft")
-        result = self._model_run(prompt, "scene-draft", "scene-draft.schema.json", emit)
+        result = self._model_run(prepared, "scene-draft", "scene-draft.schema.json", emit)
         if not result.ok:
             return self._fail_from_model(handle, emit, result, scene.document, "scene-draft")
         try:
             payload = _parse_scene_draft(result.output_text)
         except ValueError as exc:
             return self._fail(handle, emit, str(exc), EXIT_MODEL, document=scene.document, stage_id="scene-draft")
-        version = self.project.create_version(
+        version = self._create_candidate(prepared,
             scene.document.id,
             content=payload["draft_markdown"],
             state="candidate",
@@ -339,6 +402,7 @@ class StoryWorkflowService:
             handle,
             stage_id="scene-draft",
             content=payload["draft_markdown"],
+            generation_sources=prepared.generation_sources,
             metadata={
                 "summary": payload["summary"],
                 "version_id": version.id,
@@ -387,12 +451,17 @@ class StoryWorkflowService:
         passage: str | None = None,
         source_text: str = "",
         context_documents: tuple[DocumentRecord, ...] = (),
+        observations: list[dict] | None = None,
     ) -> StoryTaskResult:
-        prompt = self._write_prompt(handle, "revision", prompt)
+        try:
+            prepared, preview_prompt = self._write_prompt(handle, "revision", prompt, "revision.schema.json", observations)
+        except Exception:
+            return self._fail(handle, emit, "Story stage input contract is invalid or could not be saved.",
+                              EXIT_CONFIGURATION, document=document, stage_id="revision")
         emit.emit(EventType.CONTEXT_STARTED, "Collected source text, Story Bible, and related writing context")
         emit.emit(EventType.CONTEXT_COMPLETED, f"Revision context is ready for {mode} mode")
         if dry_run:
-            return self._plan_only(handle, emit, "revision", prompt, document)
+            return self._plan_only(handle, emit, "revision", preview_prompt, document, prepared)
         if not self.config.credentials_configured:
             return self._fail(
                 handle,
@@ -402,7 +471,7 @@ class StoryWorkflowService:
                 document=document,
             )
         emit.emit(EventType.STAGE_STARTED, f"Creating {mode} revision", stage_id="revision")
-        result = self._model_run(prompt, "revision", "revision.schema.json", emit)
+        result = self._model_run(prepared, "revision", "revision.schema.json", emit)
         if not result.ok:
             return self._fail_from_model(handle, emit, result, document, "revision")
         try:
@@ -425,7 +494,7 @@ class StoryWorkflowService:
                 return self._fail(handle, emit, "Replacement copied an unchanged paragraph outside the selection; narrow the revision request.",
                                   EXIT_MODEL, document=document, stage_id="revision")
             payload["revision_markdown"] = source_text.replace(passage, payload["revision_markdown"], 1)
-        version = self.project.create_version(
+        version = self._create_candidate(prepared,
             document.id,
             content=payload["revision_markdown"],
             state="candidate",
@@ -449,6 +518,7 @@ class StoryWorkflowService:
             handle,
             stage_id="revision",
             content=payload["revision_markdown"],
+            generation_sources=prepared.generation_sources,
             metadata={
                 "summary": payload["summary"],
                 "mode": mode,
@@ -495,7 +565,11 @@ class StoryWorkflowService:
             model=self.config.model_for_mode("write"),
         )
         emitter = _EventEmitter(self.runs, handle, workflow, sink)
-        emitter.emit(EventType.RUN_STARTED, f"Starting {workflow}", data={"command": command})
+        try:
+            emitter.emit(EventType.RUN_STARTED, f"Starting {workflow}", data={"command": command})
+        except Exception:
+            self.runs.finalize(handle, status="failed", error="Story workflow could not start.")
+            raise ValueError("Story workflow could not start.") from None
         return handle, emitter
 
     def _specialist(self, stage_id: str):
@@ -507,7 +581,8 @@ class StoryWorkflowService:
         }[stage_id]
         return self.registry.agent(agent_id), self.registry.skill(skill_id)
 
-    def _write_prompt(self, handle: RunHandle, stage_id: str, prompt: str) -> str:
+    def _write_prompt(self, handle: RunHandle, stage_id: str, prompt: str, schema_name: str,
+                      observations: list[dict] | None = None) -> tuple[_PreparedStoryInput, str]:
         if stage_id in {'scene-draft', 'revision'}:
             from .book_overview import overview_context
             prompt += '\n' + overview_context(self.config.workspace)
@@ -523,18 +598,53 @@ class StoryWorkflowService:
             prompt,
             "Use the operation's supplied JSON schema, not any alternative schema mentioned in a skill.",
         ])
-        self.runs.write_stage_prompt(handle, stage_id=stage_id, prompt=prompt)
-        write_text(ensure_log_dir(self.config.workspace) / "last_prompt.md", prompt)
-        return prompt
+        source = _resource_path(schema_name)
+        schema_text, _ = read_schema(source)
+        value = prepare_stage_input(prompt, output_schema=source)
+        receipt = make_receipt(mode='story', run_id=handle.run_id, stage_id=stage_id,
+            observations=observations or [], prompt=value.prompt, instructions=value.instructions,
+            unknown_reasons=[
+                'References cover complete retained context sections only; excerpts and budget omissions are not full documents.',
+                'Definitions, project instructions, analyses, overview and untracked context have request digests only.',
+                'Captured request inputs do not prove model attention, influence, or complete generation dependencies.',
+            ])
+        schema_path = self.runs.write_stage_schema(handle, stage_id=stage_id, name=source.name, text=schema_text)
+        prepared = _PreparedStoryInput(value.prompt, value.instructions, stage_id, schema_text,
+                                       schema_path, agent.model_profile, json.dumps(receipt, ensure_ascii=False))
+        self.runs.write_stage_prompt(handle, stage_id=stage_id,
+                                    prompt=prepared.prompt, instructions=prepared.instructions)
+        self.runs.write_generation_sources(handle, stage_id=stage_id, receipt=prepared.generation_sources)
+        write_text(ensure_log_dir(self.config.workspace) / "last_prompt.md", prepared.prompt)
+        if schema_path.read_text(encoding='utf-8') != schema_text:
+            raise ValueError('Story stage schema snapshot changed while preparing input.')
+        return prepared, prompt
+
+    def _create_candidate(self, prepared: _PreparedStoryInput, *args, **kwargs) -> DocumentVersion:
+        with bind_generation_sources(prepared.generation_sources):
+            return self.project.create_version(*args, **kwargs)
 
     def _model_run(
         self,
-        prompt: str,
+        prepared: _PreparedStoryInput,
         stage_id: str,
         schema_name: str,
         emit: _EventEmitter,
     ) -> CoreExecutionResult:
-        agent, _ = self._specialist(stage_id)
+        def failure(message, *, configuration=False):
+            return CoreExecutionResult(ok=False, used_stub=configuration, output_text='', error=message,
+                command_name='lg-story-stage', command=[], returncode=None, stdout='', stderr='',
+                duration_seconds=None)
+
+        try:
+            if (not isinstance(prepared, _PreparedStoryInput) or prepared.stage_id != stage_id
+                or prepared.schema_path.name != schema_name
+                or prepared.schema_path.read_text(encoding='utf-8') != prepared.schema_text
+                or prepared.generation_sources.get('input') != {
+                    'prompt_sha256': text_sha(prepared.prompt),
+                    'instructions_sha256': text_sha(prepared.instructions)}):
+                raise ValueError()
+        except Exception:
+            return failure('Story stage input contract is unavailable or changed.', configuration=True)
 
         def engine_event(payload: dict[str, Any]) -> None:
             item = payload.get("item")
@@ -546,14 +656,28 @@ class StoryWorkflowService:
                 data={"engine_event": payload},
             )
 
-        return self.adapter.run(
-            prompt=prompt,
-            config=self.config,
-            mode="write",
-            model_profile=agent.model_profile,
-            output_schema=_resource_path(schema_name),
-            on_event=engine_event,
-        )
+        try:
+            result = self.adapter.run(
+                prompt=prepared.prompt,
+                instructions=prepared.instructions,
+                config=self.config,
+                mode="write",
+                model_profile=prepared.model_profile,
+                output_schema=prepared.schema_path,
+                on_event=engine_event,
+            )
+        except Exception:
+            return failure('Story stage execution failed.')
+        if not result.ok:
+            return result
+        try:
+            if prepared.schema_path.read_text(encoding='utf-8') != prepared.schema_text:
+                raise ValueError()
+            validate_output(result.output_text, json.loads(prepared.schema_text))
+        except Exception:
+            return replace(result, ok=False, output_text='', error='Story stage output does not match the frozen schema.',
+                           stdout='', stderr='', events=())
+        return result
 
     def _store_memory_proposals(
         self,
@@ -585,17 +709,23 @@ class StoryWorkflowService:
         stage_id: str,
         prompt: str,
         document: DocumentRecord,
+        prepared: _PreparedStoryInput,
     ) -> StoryTaskResult:
-        text = _dry_run_text(stage_id, document, prompt)
-        self.runs.write_stage(handle, stage_id=stage_id, content=text, metadata={"dry_run": True})
-        artifact = write_workflow_output(
-            self.config.workspace,
-            "dry-run",
-            text,
-            output_root=self.config.output_path,
-            run_id=handle.run_id,
-        )
-        emit.emit(EventType.RUN_PLANNED, "Dry-run persisted the prompt and no model was invoked", stage_id=stage_id)
+        try:
+            text = _dry_run_text(stage_id, document, prompt)
+            self.runs.write_stage(handle, stage_id=stage_id, content=text, metadata={"dry_run": True},
+                                  generation_sources=prepared.generation_sources)
+            artifact = write_workflow_output(
+                self.config.workspace,
+                "dry-run",
+                text,
+                output_root=self.config.output_path,
+                run_id=handle.run_id,
+            )
+            emit.emit(EventType.RUN_PLANNED, "Dry-run persisted the prompt and no model was invoked", stage_id=stage_id)
+        except Exception:
+            return self._fail(handle, emit, "Story preview could not be fully saved.", EXIT_CONFIGURATION,
+                              document=document, stage_id=stage_id)
         self.runs.finalize(handle, status="planned", artifact_path=artifact.output_path, latest_path=artifact.latest_path)
         return StoryTaskResult(stage_id, handle.run_id, "planned", text, document, None, artifact.output_path, EXIT_OK)
 
@@ -626,11 +756,20 @@ class StoryWorkflowService:
         document: DocumentRecord | None,
         stage_id: str | None = None,
     ) -> StoryTaskResult:
-        if stage_id:
-            emit.emit(EventType.STAGE_FAILED, message, stage_id=stage_id)
-        emit.emit(EventType.RUN_FAILED, message, stage_id=stage_id, data={"exit_code": exit_code})
         self.runs.finalize(handle, status="failed", error=message)
-        append_agent_log(self.config.workspace, f"story workflow failed run={handle.run_id} error={message}")
+        if stage_id:
+            try:
+                emit.emit(EventType.STAGE_FAILED, message, stage_id=stage_id)
+            except Exception:
+                pass
+        try:
+            emit.emit(EventType.RUN_FAILED, message, stage_id=stage_id, data={"exit_code": exit_code})
+        except Exception:
+            pass
+        try:
+            append_agent_log(self.config.workspace, f"story workflow failed run={handle.run_id} error={message}")
+        except Exception:
+            pass
         return StoryTaskResult(
             stage_id or "story-workflow",
             handle.run_id,
@@ -678,7 +817,23 @@ class _EventEmitter:
                 pass
 
 
-def _scene_plan_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str) -> str:
+def _document_observation(document: DocumentRecord, text: str, *, source: DocumentVersion | None = None,
+                          excerpt: bool = False) -> dict:
+    version_id = source.id if source is not None else document.active_version_id
+    refs = [{'kind': 'document', 'document_id': document.id, 'version_id': version_id,
+        'exposure': 'excerpt' if excerpt else 'content', 'excerpt_sha256': text_sha(text)}] if version_id else []
+    return {'tool': 'story_source_document', 'payload_sha256': text_sha(text), 'refs': refs,
+        'coverage': 'partial' if refs else 'unknown'}
+
+
+def _scene_observation(scene: SceneCard) -> dict:
+    # Scene card fields are independently mutable; a prose version does not version the card.
+    return {'tool': 'render_scene_card', 'payload_sha256': text_sha(render_scene_card(scene)),
+        'refs': [{'kind': 'scene_card', 'document_id': scene.document.id, 'exposure': 'content'}],
+        'coverage': 'partial'}
+
+
+def _scene_plan_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str, *, context_text: str | None = None) -> str:
     return "\n\n".join(
         [
             "# LiteraryGiant Scene Planning",
@@ -689,7 +844,7 @@ def _scene_plan_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str)
                 "Return only JSON conforming to the provided schema."
             ),
             "## Scene Card\n" + render_scene_card(scene),
-            render_story_context(snapshot),
+            render_story_context(snapshot) if context_text is None else context_text,
             "## Author Request\n" + request,
             (
                 "## Required Plan\n"
@@ -707,7 +862,7 @@ def _scene_plan_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str)
     )
 
 
-def _scene_draft_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str) -> str:
+def _scene_draft_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str, *, context_text: str | None = None) -> str:
     return "\n\n".join(
         [
             "# LiteraryGiant Scene Drafting",
@@ -718,7 +873,7 @@ def _scene_draft_prompt(scene: SceneCard, snapshot: dict[str, Any], request: str
                 "Return only JSON conforming to the provided schema."
             ),
             "## Approved Scene Card\n" + render_scene_card(scene),
-            render_story_context(snapshot),
+            render_story_context(snapshot) if context_text is None else context_text,
             "## Author Request\n" + request,
             (
                 "## Draft Requirements\n"
@@ -740,6 +895,7 @@ def _revision_prompt(
     *,
     passage_only: bool = False,
     surroundings: tuple[str, str] | None = None,
+    context_text: str | None = None,
 ) -> str:
     scene = snapshot.get("scene")
     constraints = "Preserve the source narrative POV and tense unless the author explicitly requests a change."
@@ -757,7 +913,7 @@ def _revision_prompt(
                 "Return only JSON conforming to the provided schema."
             ),
             f"## Revision Mode\n{mode}",
-            render_story_context(snapshot),
+            render_story_context(snapshot) if context_text is None else context_text,
             "## Narrative Constraints\n" + constraints,
             ("## Unchanged Surroundings (context only; never include in replacement)\n"
              f"<unchanged_before>\n{surroundings[0]}\n</unchanged_before>\n"

@@ -47,7 +47,8 @@ def native_binary(manifest_path: Path) -> Path:
     return binary
 
 
-def writing_args(config: LGConfig, *, control_socket: str | None = None, require_elicitation: bool = False) -> list[str]:
+def writing_settings(config: LGConfig, *, control_socket: str | None = None,
+                     require_elicitation: bool = False) -> dict:
     instructions = resources.files("lg_cli.resources").joinpath("native-writing.txt")
     settings = {
         "project_doc_max_bytes": 0,
@@ -64,6 +65,9 @@ def writing_args(config: LGConfig, *, control_socket: str | None = None, require
             str(config.workspace),
         ],
         "mcp_servers.lg_writing.startup_timeout_sec": 30,
+        "mcp_servers.lg_writing.cwd": str(config.workspace),
+        "mcp_servers.lg_writing.enabled": True,
+        "mcp_servers.lg_writing.env_vars": [],
         "mcp_servers.lg_writing.required": True,
         "mcp_servers.lg_writing.enabled_tools": [
             "project_memory",
@@ -80,6 +84,9 @@ def writing_args(config: LGConfig, *, control_socket: str | None = None, require
             "studio_draft", "studio_review_context", "studio_review", "studio_accept",
             "book_library", "book_entry", "book_action_context", "studio_reference",
             "studio_adopt_reference", "studio_accept_proposal",
+            "studio_decision", "studio_decision_options", "studio_select_decision", "studio_withdraw_decision", "studio_source_impact",
+            "studio_knowledge", "studio_knowledge_view", "studio_knowledge_propose",
+            "studio_knowledge_confirm", "studio_knowledge_withdraw",
         ],
         "mcp_servers.lg_writing.default_tools_approval_mode": "approve",
         "features.shell_tool": False,
@@ -91,7 +98,23 @@ def writing_args(config: LGConfig, *, control_socket: str | None = None, require
         "features.plugins": False,
         "features.apps": False,
         "features.recommended_plugins": False,
+        "features.view_image": False,
+        "features.image_generation": False,
+        "features.browser_use": False,
+        "features.computer_use": False,
+        "features.enable_mcp_apps": False,
+        "features.skill_mcp_dependency_install": False,
+        "features.code_mode": False,
+        "features.code_mode_only": False,
+        "features.code_mode_host": False,
+        "features.code_mode_prewarm": False,
+        "features.executor_capability_discovery": False,
+        "features.hooks": False,
+        "notify": [],
+        "web_search": "disabled",
     }
+    if config.environment:
+        settings["mcp_servers.lg_writing.args"].extend(["--environment", config.environment])
     if require_elicitation:
         settings["mcp_servers.lg_writing.args"].append("--require-elicitation")
     if control_socket:
@@ -99,6 +122,11 @@ def writing_args(config: LGConfig, *, control_socket: str | None = None, require
         settings["mcp_servers.lg_writing.enabled_tools"].extend([
             "workflow_status", "stop_workflow", "retry_workflow",
         ])
+    return settings
+
+
+def writing_args(config: LGConfig, *, control_socket: str | None = None, require_elicitation: bool = False) -> list[str]:
+    settings = writing_settings(config, control_socket=control_socket, require_elicitation=require_elicitation)
     return [
         arg
         for key, value in settings.items()
@@ -109,13 +137,14 @@ def writing_args(config: LGConfig, *, control_socket: str | None = None, require
 def launch_native(
     config: LGConfig, *, prompt: str = "", manifest: str | None = None
 ) -> int:
+    config.require_api_auth()
     path = manifest or os.environ.get("LG_NATIVE_RUNTIME_MANIFEST")
     if not path:
         raise ConfigError(
             "Set LG_NATIVE_RUNTIME_MANIFEST to a successfully built native-runtime.json"
         )
     binary = native_binary(Path(path).expanduser())
-    if not (config.uses_anthropic or config.uses_responses or config.auth_mode == "chatgpt"):
+    if not (config.uses_anthropic or config.uses_responses):
         raise ConfigError(
             "This native launcher requires a configured Messages or Responses provider"
         )
@@ -125,11 +154,6 @@ def launch_native(
         raise ConfigError("Native mode requires an interactive terminal")
     if not ProjectStore(config.workspace).initialized:
         raise ConfigError("Initialize the novel project with literary init first")
-    if config.auth_mode == "chatgpt":
-        from .subscription_auth import subscription_args, subscription_status
-        ok, message = subscription_status(config)
-        if not ok:
-            raise ConfigError(message)
     with provider_bridge(config) as bridge:
         env = _adapter_env(config)
         env.pop("CODEX_API_KEY", None)
@@ -154,8 +178,8 @@ def launch_native(
             "read-only",
             "--ask-for-approval",
             "on-request",
-            *(bridge.codex_args() if bridge else subscription_args()),
-            *writing_args(config),
+            *(bridge.codex_args() if bridge else []),
+            *writing_args(config, require_elicitation=True),
         ]
         if prompt:
             command.extend(["--", prompt])

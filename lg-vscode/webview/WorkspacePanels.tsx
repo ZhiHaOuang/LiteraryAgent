@@ -42,7 +42,7 @@ export function LibraryPanel({snapshot:s,send,chat,open}:Props){
     {lib.stale&&<p className="sync-note" role="status">已保存资料有变化，正在等待同步；生成与采用暂不可用。</p>}
     {lib.loading&&<p className="muted" role="status">正在读取已保存资料…</p>}
     {lib.error&&<p className="error" role="alert">{lib.error}</p>}
-    {!!actions.length&&<div className="library-actions">{actions.map(action=><button key={action} disabled={!canWrite||(action==='adopt'&&!!lib.detail?.truncated)} onClick={()=>act(action)}>{action==='generate'?'生成更新':action==='review'?'审阅此版本':'确认采用'}</button>)}<p className="muted">生成更新会先保存候选；采用需要预览和单次确认。</p></div>}
+    {!!actions.length&&<div className="library-actions">{actions.map(action=><button key={action} disabled={!canWrite||(['adopt','select','withdraw','confirm-knowledge','withdraw-knowledge'].includes(action)&&!!lib.detail?.truncated)} onClick={()=>act(action)}>{action==='generate'?'生成更新':action==='review'?'审阅此版本':action==='select'?'选择此方向':action==='withdraw'?'撤回当前选择':action==='confirm-knowledge'?'确认此认知':action==='withdraw-knowledge'?'撤回认知确认':'确认采用'}</button>)}<p className="muted">生成更新会先保存候选；采用、方向选择及认知确认／撤回需要准确预览和创作批准。</p></div>}
     {lib.detail?<>
       <p className="source-label">{lib.detail.origin}{lib.detail.status?' · '+status(lib.detail.status):''}</p>
       {lib.detail.truncated&&<p className="sync-note">内容超过 6 万字符，此处仅显示前段；请通过 CLI 查看全文。此预览不能直接采用。</p>}

@@ -19,7 +19,7 @@ Usage:
 
 Environment overrides:
   LG_CODEX_REMOTE=upstream
-  LG_CODEX_REF=rust-v0.154.0  # optional; defaults to latest stable release
+  LG_CODEX_REF=rust-v0.154.0  # explicit target required for fetch/apply
   LG_CODEX_PREFIX=core/codex
   LG_CODEX_PIN_FILE=CODEX_CORE_COMMIT
 
@@ -78,7 +78,12 @@ if ! git cat-file -e "$pinned_sha^{commit}" 2>/dev/null; then
 fi
 
 verify_committed_core() {
-  if ! git diff --quiet -- "$PREFIX" || ! git diff --cached --quiet -- "$PREFIX"; then
+  local bundled_pin="lg-cli/lg_cli/resources/CODEX_CORE_COMMIT.txt"
+  if [[ -f "$bundled_pin" && "$(tr -d '[:space:]' < "$bundled_pin")" != "$pinned_sha" ]]; then
+    echo "Bundled Codex pin does not match $PIN_FILE." >&2
+    return 1
+  fi
+  if [[ -n "$(git status --porcelain --untracked-files=all -- "$PREFIX")" ]]; then
     echo "Cannot verify a dirty Codex prefix: $PREFIX" >&2
     return 2
   fi
@@ -111,21 +116,19 @@ if [[ "$MODE" == "verify" ]]; then
   exit $?
 fi
 
-if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
-  echo "Missing remote '$REMOTE'." >&2
-  echo "Expected something like:" >&2
-  echo "  git remote add upstream https://github.com/openai/codex.git" >&2
-  exit 1
+if [[ -z "$REF" ]]; then
+  if [[ "$MODE" == "apply" ]]; then
+    echo "Codex baseline is frozen. Set LG_CODEX_REF to an explicitly reviewed target before --apply." >&2
+    exit 2
+  fi
+  verify_committed_core
+  echo "Baseline is frozen; no upstream request made. Set LG_CODEX_REF for an explicit upstream comparison."
+  exit 0
 fi
 
-if [[ -z "$REF" ]]; then
-  REF="$(curl --fail --silent --show-error --max-time 30 \
-    https://api.github.com/repos/openai/codex/releases/latest \
-    | python3 -c 'import json,sys; r=json.load(sys.stdin); assert not r["draft"] and not r["prerelease"]; print(r["tag_name"])')"
-  if [[ ! "$REF" =~ ^rust-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Unexpected stable release tag: $REF" >&2
-    exit 1
-  fi
+if ! git remote get-url "$REMOTE" >/dev/null 2>&1; then
+  echo "Missing remote '$REMOTE'." >&2
+  exit 1
 fi
 
 echo "LiteraryAgent repo: $repo_root"
@@ -152,7 +155,7 @@ git log --oneline --decorate -5 "$remote_ref"
 echo
 
 dirty=0
-if ! git diff --quiet || ! git diff --cached --quiet; then
+if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
   dirty=1
   echo "Working tree has uncommitted changes."
   echo "Commit or stash them before applying a Codex core update."
@@ -169,7 +172,7 @@ if [[ "$MODE" == "check" ]]; then
   echo "Check complete. No files changed."
   echo
   echo "When the LiteraryAgent migration is committed, update core/codex with:"
-  echo "  scripts/update_codex_core.sh --apply"
+  echo "  LG_CODEX_REF=$REF scripts/update_codex_core.sh --apply"
   echo
   echo "After resolving conflicts and running tests:"
   echo "  git diff -- core/codex"

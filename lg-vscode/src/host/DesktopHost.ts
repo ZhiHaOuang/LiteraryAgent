@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { stat } from 'node:fs/promises';
-import { CodexBackend } from '../backend/CodexBackend';
+import { createBackend } from '../backend/createBackend';
 import { MockBackend } from '../backend/MockBackend';
 import { DesktopClient, type Inventory } from './DesktopClient';
 import { SessionStore } from './SessionStore';
@@ -74,7 +74,8 @@ export class DesktopHost implements vscode.WebviewViewProvider,vscode.Disposable
     this.inventory=data;
     const store=new SessionStore(mock?'mock':'codex');
     if(data)store.state.configuration={workspace,environment:data.environment,profile:data.active,model:data.model,provider:data.provider};
-    const backend=mock?new MockBackend():new CodexBackend({workspace,python,manifest,environment:data?.environment||config.get<string>('environment','')});
+    const settings={workspace,python,manifest,environment:data?.environment||config.get<string>('environment','')};
+    const backend=mock?new MockBackend():createBackend(settings,config.get<string>('backend','literary'));
     this.controller=new WebviewController(this.context.extensionUri,backend,store,new WorkspaceBridge(workspace),action=>this.perform(action),startupError);
     if(this.view)this.controller.resolveWebviewView(this.view);
     if(data){
@@ -115,7 +116,7 @@ export class DesktopHost implements vscode.WebviewViewProvider,vscode.Disposable
       if(action==='setup'){
         const python=await vscode.window.showInputBox({title:'LG Python 绝对路径',value:this.config().get<string>('pythonPath',''),validateInput:v=>isAbsolute(v)?null:'请输入绝对路径'});
         if(python===undefined)return;
-        const manifest=await vscode.window.showInputBox({title:'LG runtime.json 绝对路径',value:this.config().get<string>('runtimeManifest',''),validateInput:v=>isAbsolute(v)?null:'请输入绝对路径'});
+        const manifest=await vscode.window.showInputBox({title:'Codex runtime.json 绝对路径（可留空，沿用 LG 配置）',value:this.config().get<string>('runtimeManifest',''),validateInput:v=>isAbsolute(v)||!v?null:'请输入绝对路径'});
         if(manifest===undefined)return;
         await this.updateSetting('pythonPath',python);
         await this.updateSetting('runtimeManifest',manifest);

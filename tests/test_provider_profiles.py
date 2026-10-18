@@ -16,6 +16,8 @@ from lg_cli.core_adapter import _adapter_env
 from lg_cli.credentials import checked_name, environment_dir, read_profiles, save_profile
 from lg_cli.main import interactive_loop, main
 from lg_cli.providers import PROVIDERS, validate_endpoint
+from tests.test_backend import FakeAgent
+from lg_cli.intent_router import proposal
 
 
 class ProviderProfileTests(unittest.TestCase):
@@ -169,23 +171,19 @@ class ProviderProfileTests(unittest.TestCase):
         with redirect_stderr(output):
             code = main(["auth", "add", "gpt"])
         self.assertEqual(code, 1)
-        self.assertIn("Subscription", output.getvalue())
+        self.assertIn("API-only", output.getvalue())
         self.assertFalse(read_profiles("sandbox")["profiles"])
 
-    def test_gpt_interactive_choice_is_explicit_and_cancellable(self):
-        for choice in (None, "codex"):
-            dialog = Mock()
-            dialog.run.return_value = choice
-            with (
-                self.subTest(choice=choice),
-                redirect_stdout(io.StringIO()),
-                patch("sys.stdin.isatty", return_value=True),
-                patch("sys.stdout.isatty", return_value=True),
-                patch("lg_cli.auth_ui.radiolist_dialog", return_value=dialog),
-                patch("lg_cli.subscription_auth.login_subscription", return_value=0) as login,
-            ):
-                self.assertEqual(main(["-C", str(self.root), "auth", "add", "gpt"]), 0)
-            self.assertEqual(login.call_count, 1 if choice == "codex" else 0)
+    def test_gpt_interactive_requires_an_explicit_api_provider(self):
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("sys.stdout.isatty", return_value=True),
+            patch("lg_cli.auth_ui.radiolist_dialog") as dialog,
+            redirect_stderr(io.StringIO()) as output,
+        ):
+            self.assertEqual(main(["-C", str(self.root), "auth", "add", "gpt"]), 1)
+        dialog.assert_not_called()
+        self.assertIn("API-only", output.getvalue())
         self.assertFalse(read_profiles("sandbox")["profiles"])
 
     def test_cli_provider_inference_and_model_switch(self):
@@ -220,16 +218,18 @@ class ProviderProfileTests(unittest.TestCase):
         session = Mock()
         session.run_command = AsyncMock(return_value=0)
         requests = []
-        class Agent:
+        class Agent(FakeAgent):
             thread_id = 'main'
             def __init__(self, current, on_event, **kwargs):
+                super().__init__(current, on_event, **kwargs)
                 self.config = current
             async def start(self, **kwargs):
                 pass
-            async def run(self, text):
+            async def run(self, text, output_schema=None):
                 requests.append((self.config, text))
+                return {'status': 'completed'}
             async def close(self):
-                pass
+                await super().close()
         def run(handler, model, provider):
             async def exercise():
                 for value in ("/auth use glm", "continue the novel", "/exit"):
@@ -243,6 +243,7 @@ class ProviderProfileTests(unittest.TestCase):
         with (
             patch("lg_cli.main.LiteraryInput", return_value=session),
             patch("lg_cli.live_agent.LiveAgent", Agent),
+            patch('lg_cli.intent_router.interpret',AsyncMock(return_value=proposal())) as router,
             patch("lg_cli.main.run_in_terminal", side_effect=terminal),
             redirect_stdout(io.StringIO()),
         ):
@@ -257,7 +258,9 @@ class ProviderProfileTests(unittest.TestCase):
         current, text = requests[0]
         self.assertEqual((current.provider, current.default_model, current.environment),
             ('glm', 'glm-test', 'experiment'))
-        self.assertEqual(text, 'continue the novel')
+        self.assertTrue(text.endswith('Author message:\ncontinue the novel'))
+        self.assertIn('Host-enforced author task',text)
+        self.assertEqual(router.call_args.args[0].provider,'glm')
         session.run_command.assert_not_called()
 
     def test_external_profile_key_and_endpoint_changes_update_next_cli_request(self):
@@ -269,16 +272,18 @@ class ProviderProfileTests(unittest.TestCase):
         session = Mock()
         requests = []
 
-        class Agent:
+        class Agent(FakeAgent):
             thread_id = 'main'
             def __init__(self, current, on_event, **kwargs):
+                super().__init__(current, on_event, **kwargs)
                 self.config = current
             async def start(self, **kwargs):
                 pass
-            async def run(self, text):
+            async def run(self, text, output_schema=None):
                 requests.append(self.config)
+                return {'status': 'completed'}
             async def close(self):
-                pass
+                await super().close()
 
         def run(handler, model, provider):
             async def exercise():
@@ -302,11 +307,15 @@ class ProviderProfileTests(unittest.TestCase):
 
         session.run.side_effect = run
         with patch('lg_cli.main.LiteraryInput', return_value=session), \
-             patch('lg_cli.live_agent.LiveAgent', Agent), redirect_stdout(io.StringIO()):
+             patch('lg_cli.live_agent.LiveAgent', Agent), \
+             patch('lg_cli.intent_router.interpret',AsyncMock(return_value=proposal())) as router, \
+             redirect_stdout(io.StringIO()):
             self.assertEqual(interactive_loop(config), 0)
         self.assertEqual([c.profile_name for c in requests], ['one','two','two','two'])
         self.assertEqual([c.api_key for c in requests], ['synthetic-one','synthetic-two','synthetic-new','synthetic-new'])
         self.assertEqual(requests[-1].base_url, 'https://example.com/messages')
+        self.assertEqual([call.args[0].profile_name for call in router.call_args_list],['one','two','two','two'])
+        self.assertEqual(router.call_args.args[0].base_url,'https://example.com/messages')
 
     def test_tui_cancel_preserves_active_profile(self):
         save_profile("test", "old", "key")

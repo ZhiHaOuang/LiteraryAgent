@@ -16,6 +16,27 @@ from tests.helpers import make_config, reference_card
 
 
 class WorkspaceLibraryTests(unittest.TestCase):
+    def test_library_and_entry_reject_changes_during_materialization(self):
+        from lg_cli.workspace_library import _entries
+        for read_detail in (False, True):
+            with self.subTest(detail=read_detail), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw)
+                store = ProjectStore(root)
+                store.initialize(name='读取一致性')
+                document = store.create_document(kind='chapter', slug='one', title='原稿',
+                    content='读取前的已采纳正文。', state='accepted')
+                config = make_config(root)
+                key = library(config, 'chapters')['entries'][0]['key']
+                def concurrent_edit(*args):
+                    rows = _entries(*args)
+                    store.edit_active_document('one', content='作者读取期间保存的新正文。',
+                        expected_version_id=document.active_version_id, reason='并发保存')
+                    return rows
+                with patch('lg_cli.workspace_library._entries', concurrent_edit):
+                    with self.assertRaisesRegex(ValueError, 'changed while reading'):
+                        entry(config, 'chapters', key) if read_detail else library(config, 'chapters')
+                self.assertIn('作者读取期间保存', store.get_document('one').content)
+
     def test_scene_review_and_adoption_follow_parent_chapter_supervision(self):
         async def exercise(root):
             init_workspace(root);config=make_config(root);store=ProjectStore(root);server=create_server(config)

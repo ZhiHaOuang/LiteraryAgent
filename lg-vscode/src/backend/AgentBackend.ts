@@ -1,4 +1,4 @@
-import type { Approval, BackendEvent, Item, Session, LibraryQuery, LibraryPage, LibraryDetail, LibraryTopic, WritingAction } from '../../shared/protocol';
+import type { Approval, BackendEvent, Item, Session, LibraryQuery, LibraryPage, LibraryDetail, LibraryTopic, WritingAction, Stage } from '../../shared/protocol';
 
 export interface AgentBackend {
   connect(): Promise<void>;
@@ -6,7 +6,7 @@ export interface AgentBackend {
   create(): Promise<Session>;
   read(sessionId: string): Promise<Item[]>;
   resume(sessionId: string): Promise<void>;
-  run(sessionId: string, text: string): Promise<void>;
+  run(sessionId: string, text: string, stage?:Stage,authorText?:string): Promise<void>;
   cancel(sessionId: string): Promise<void>;
   approve(requestId: string, decision: Approval['choices'][number]): Promise<void>;
   answer(requestId: string, answers: Record<string, string>): Promise<void>;

@@ -43,8 +43,9 @@ class SubagentDefinition:
 
 
 class DefinitionRegistry:
-    def __init__(self, workspace: Path) -> None:
+    def __init__(self, workspace: Path, *, include_project: bool = True) -> None:
         self.workspace = workspace
+        self.include_project = include_project
         self._skills = self._load_skills()
         self._agents = self._load_agents()
 
@@ -86,11 +87,13 @@ class DefinitionRegistry:
             )
 
         roots = [product_root() / "lg-skills", self.workspace / ".literarygiant" / "skills"]
+        if not self.include_project:
+            roots = roots[:1]
         for root in roots:
             if not root.exists():
                 continue
             for skill_file in sorted(root.glob("*/SKILL.md")):
-                definition = _read_skill_directory(skill_file.parent, root == roots[-1])
+                definition = _read_skill_directory(skill_file.parent, self.include_project and root == roots[-1])
                 definitions[definition.id] = definition
         return definitions
 
@@ -112,11 +115,13 @@ class DefinitionRegistry:
             )
 
         roots = [product_root() / "lg-subagents", self.workspace / ".literarygiant" / "subagents"]
+        if not self.include_project:
+            roots = roots[:1]
         for root in roots:
             if not root.exists():
                 continue
             for manifest_path in sorted(root.glob("*/agent.toml")):
-                definition = _read_agent_directory(manifest_path.parent, root == roots[-1])
+                definition = _read_agent_directory(manifest_path.parent, self.include_project and root == roots[-1])
                 definitions[definition.id] = definition
         return definitions
 

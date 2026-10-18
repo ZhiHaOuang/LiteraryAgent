@@ -2,7 +2,7 @@
 
 LG 写作工作台 0.3.0。作品首页、文学资料、对话、候选版本与作者审批。
 
-正式版直接使用与 CLI 共用的固定 app-server 内核、模型配置和作品存储，通过 LG Python 启动层保留文学工具与凭据隔离。Mock 仅用于明确启用的开发或 LitIsLand 测试，正式安装不提供离线演示入口。Linux/LitIsLand 已完成固定后端、真实短正文、桌面 F5 与隔离 VSIX 交互验证，具体证据及已知限制见 [验收说明](docs/ACCEPTANCE.md)。
+正式版通过 Literary Backend 与 CLI 共用会话、作者授权、模型配置和作品存储，执行器由 LG 配置选择。显式 codex 设置也通过同一服务使用固定 Codex Runtime。Mock 仅用于明确启用的开发或 LitIsLand 测试，正式安装不提供离线演示入口。既有 Linux/LitIsLand 桌面与 VSIX 验收记录见 [验收说明](docs/ACCEPTANCE.md)，后续连接层验证见 [Backend 文档](../docs/extension-backend.md)。
 
 
 ## 先按 CLI 逻辑使用
@@ -17,7 +17,7 @@ CLI 保存作品数据库、资料索引或审阅结果后，扩展会合并变�
 
 时间线、偏好及用量目前以 CLI 已存数据浏览为主；不新增自动推断或自动修改。详情最多显示 6 万字符，超过时明确提示且禁用直接采用；版本区显示最近 50 条，完整历史仍可通过 CLI 查询。当前 CLI 原有部分浏览查询保留 1000 条边界，本版没有宣称消除此限制。
 
-配套 LG Python 源码必须包含 `workspace_library.py` 和新的 Studio 工具。仅显示 Python 包版本 0.3.0 不足以判断配套是否完整；旧 Python 在读取新资料接口时会显示版本/资料读取错误。本版还需要 `desktop.py` 管理入口和支持 `--environment` 的 `app_server.py`。
+配套 LG Python 源码必须包含 `workspace_library.py`、Studio 工具、`desktop.py` 管理入口和 `backend_stdio.py`。仅显示 Python 包版本 0.3.0 不足以判断配套完整；显式 codex 选择需要服务支持 `--runtime-engine` 并在握手中返回相同执行器。版本不匹配时明确报错。
 
 新增 CLI 入口使用同一组工具：`studio library`、`entry`、`action-context` 为只读；`reference`、`adopt-reference`、`accept-proposal` 的写入需要 `--confirm`。与现有 Studio 操作一样，参数从 `--input <JSON文件>` 读取。
 
@@ -75,7 +75,7 @@ python scripts/run-guarded.py --lock /opt/conda/envs/LitIsLand/audits/lg-vscode-
 
 ## 真实 LG 后端
 
-在运行扩展宿主的机器上安装包含 `lg_cli.app_server` 和 `lg_cli.desktop` 的配套 LG Python 包。打开作品、书架或包含 `Projects` 书架的仓库，将以下设置写入 VS Code 用户设置；路径须替换为该机器上真实的绝对路径：
+在运行扩展宿主的机器上安装包含 `lg_cli.backend_stdio` 和 `lg_cli.desktop` 的配套 LG Python 包。打开作品、书架或包含 `Projects` 书架的仓库，将以下设置写入 VS Code 用户设置；路径须替换为该机器上真实的绝对路径：
 
 ```json
 {
@@ -86,6 +86,8 @@ python scripts/run-guarded.py --lock /opt/conda/envs/LitIsLand/audits/lg-vscode-
 ```
 
 设置后点击「重新连接」。扩展强制核验 `codex-cli 0.154.0` 的配套 manifest、commit 与二进制校验和，不回退到 PATH，不自动登录或更换账号。密钥由 Python 配置层读取，不能填入 Webview。
+
+`literarygiant.backend=codex` 指定 Codex 执行器，`literary` 沿用 LG 执行器配置；两者均通过统一 Backend。manifest 可留空沿用 LG 配置。旧对话选择后导入 LG 会话并以默认作者权限接续，原始文件保留；不直接恢复原 Core thread，不重放旧工具或审批。导入界面不展示完整旧工具载荷与附件，也不会中断仍在其他客户端运行的旧任务。
 
 只信任你认可的作品目录。发送任务及批准写入前须保存或关闭未保存的编辑器；模型输出先作为候选，采用需要经过现有 LG 审阅校验和单次明确审批。断线后先恢复历史并检查作品实际状态，再决定是否继续。
 

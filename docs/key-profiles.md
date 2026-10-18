@@ -2,8 +2,8 @@
 
 LG profiles are independent from production Codex login and shell startup files.
 Commands run in the installed LitIsLand environment. Company API profiles need no
-account login. ChatGPT subscription profiles use an explicit official Codex login
-in a separate LG auth directory. See [model providers](model-providers.md).
+account login. LG is API-only; ChatGPT subscription login is disabled.
+See [model providers](model-providers.md) for migration instructions.
 
 The sandbox environment configuration is stored at
 `~/.literarygiant/environments/sandbox/config.toml`, outside Git. The portable,
@@ -51,11 +51,10 @@ include them in unencrypted backups. Listing profiles never displays key fragmen
 The old DeepSeek-only format is read without rewriting; the next explicit change
 saves the versioned format and preserves the existing profiles.
 
-ChatGPT subscription credentials stay in
-`~/.literarygiant/environments/NAME/codex-auth/PROFILE/auth.json` and are managed by
-the pinned Codex executable. LG stores only the profile metadata, not a duplicate
-OAuth token or browser cookie. API keys and subscription access never fall back
-to one another. Re-login may update the selected profile's official auth cache.
+Legacy subscription profile metadata remains readable for migration, but cannot be
+activated or used for model requests. Existing `codex-auth/PROFILE/auth.json`
+files are left untouched. Create a new API profile under a different name; LG
+never converts subscription access into API access or silently selects another key.
 
 Configuration isolation is not a security sandbox. Project data still follows
 `-C`; use a separate workspace for experiments. The prepared sandbox workspace is
@@ -66,7 +65,6 @@ literary --environment sandbox -C ~/.literarygiant/environments/sandbox/workspac
 literary --environment sandbox -C ~/.literarygiant/environments/sandbox/workspace
 ```
 
-`--probe` explicitly makes a small model request, consuming API or subscription
-usage as applicable. Adding API keys, switching and listing profiles do not make
-network requests. `auth login` explicitly starts the official login network flow.
-This does not complete the native TUI build or change the default writing interface.
+`--probe` explicitly makes a small API model request. Adding API keys, switching
+and listing profiles do not make network requests. The legacy `auth login`
+command only reports migration instructions and never launches a login process.

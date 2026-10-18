@@ -20,13 +20,13 @@ def run_details(record):
     return '\n\n'.join(lines)
 
 
-async def browse_runs(session, store, run_id=None):
+async def browse_runs(session, store=None, run_id=None,*,client=None):
     if run_id is not None and (Path(run_id).name != run_id or run_id in {'.', '..'}):
         raise ValueError('无效的运行记录。')
     while True:
         selected = run_id
         if selected is None:
-            records = await asyncio.to_thread(store.list_runs, 200)
+            records = (await client.list_runs(200))['runs'] if client is not None else await asyncio.to_thread(store.list_runs, 200)
             if not records:
                 await session.view_text('运行记录', '本书尚无运行记录。')
                 return
@@ -34,14 +34,14 @@ async def browse_runs(session, store, run_id=None):
                 selected = await session.ask(kind='choice', title='运行记录',
                     text='选择查看详情，Esc 返回', record=False,
                     values=[(r['run_id'], (
-                        ' '.join(r.get('request', '').split())[:60] or '/' + r.get('command', ''),
+                        r.get('requestPreview') or ' '.join(r.get('request', '').split())[:60] or '/' + r.get('command', ''),
                         STATES.get(r.get('status'), '未知') + ' · ' + r.get('updated_at', '')[:16].replace('T', ' ')
                     )) for r in records])
             finally:
                 session.close_dialog()
             if selected is None:
                 return
-        record = await asyncio.to_thread(store.load, selected)
+        record = (await client.read_run(selected))['run'] if client is not None else await asyncio.to_thread(store.load, selected)
         await session.view_text('运行详情', run_details(record))
         if run_id is not None:
             return

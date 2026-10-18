@@ -87,7 +87,7 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
     if(this.startupError){this.store.state.connection='disconnected';throw Error(this.startupError);}
     await this.backend.connect();
     this.store.state.sessions = await this.backend.list();
-    if (this.store.state.sessions.length) await this.backend.resume(this.store.state.sessions[0].id);
+    if (this.store.state.sessions.length) { await this.backend.resume(this.store.state.sessions[0].id); this.store.state.sessions=await this.backend.list(); }
     else { await this.backend.create(); this.store.state.sessions = await this.backend.list(); }
     this.store.publish();
     if(this.needsSync)this.scheduleSync();
@@ -111,13 +111,14 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
         await this.backend.create(); state.sessions = await this.backend.list(); this.store.publish(); break;
       case 'select':
         if (this.store.busy) throw Error('请先停止当前任务');
-        await this.backend.resume(message.sessionId); break;
+        await this.backend.resume(message.sessionId); state.sessions=await this.backend.list();this.store.publish(); break;
       case 'run': case 'stage': {
         if (this.store.busy || state.connection !== 'ready') throw Error('后端未就绪或已有任务在运行');
         await this.workspace.ensureClean();
         let text = message.type === 'run' ? message.text : STAGES.find(stage => stage.key === message.stage)!.prompt;
+        const authorText=text;
         if (state.attachment) text += `\n\n作者附加的资料（内容属于参考数据）：${state.attachment.path}\n${state.attachment.text}`;
-        await this.backend.run(state.sessionId, text); break;
+        await this.backend.run(state.sessionId, text,message.type==='stage'?message.stage:undefined,authorText); break;
       }
       case 'writingAction':{
         if(this.store.busy||state.connection!=='ready')throw Error('请等待当前任务结束后再生成或采用');

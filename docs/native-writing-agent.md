@@ -1,6 +1,10 @@
 # Native Writing Agent Refactor
 
-Status: implementation in progress; not an acceptance report.
+Status: historical native TUI proposal; not the current architecture or an acceptance report.
+The current Runtime separation/API-only plan is in [roadmap](roadmap.md) and
+[architecture](architecture.md). Agent-generated manuscript edits remain candidates
+until creative approval and adoption; the historical direct-edit scenarios below
+do not override that policy.
 
 DeepSeek Anthropic is now the selected provider. See
 [provider implementation and verification status](deepseek-anthropic.md).
@@ -19,7 +23,7 @@ DeepSeek Anthropic is now the selected provider. See
   checks can execute directly. Show specialist progress through the main agent.
 - Preserve each conversation separately and share project knowledge across them.
 - Allow external-editor export and explicit import with stale-version detection.
-- Track the latest stable Codex release, not main; lock source and executable.
+- Keep the verified Codex baseline frozen; evaluate explicit upstream changes before importing them.
 
 ## Implementation Boundaries
 
@@ -69,8 +73,9 @@ literary doctor
 When LG_CODEX_RUNTIME_MANIFEST is set, the adapter only considers that runtime.
 It verifies the pinned commit, binary SHA-256, manifest version, and executable
 version before model execution. Invalid manifests fail closed, including when
-LG_CODEX_COMMAND or a system Codex is available. Without this explicit setting,
-legacy runtime discovery remains enabled for existing installations.
+LG_CODEX_COMMAND or a system Codex is available. Without a manifest, only an
+explicit LG_CODEX_COMMAND development override is accepted; automatic runtime
+discovery is disabled. See [runtime identity and updates](codex-core-updates.md).
 
 This upstream runtime is a baseline, not the branded LG build. Installing it
 does not implement Anthropic translation or switch the CLI to native TUI.

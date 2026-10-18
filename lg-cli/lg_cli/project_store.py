@@ -28,6 +28,8 @@ DOCUMENT_KINDS = {
     "style",
     "note",
     "research",
+    "creative_decision",
+    "narrative_knowledge",
 }
 DOCUMENT_STATES = {"draft", "candidate", "accepted", "final", "archived", "rejected"}
 FACT_STATES = {"idea", "canonical", "archived", "rejected"}
@@ -393,7 +395,11 @@ class ProjectStore:
         reason: str = "Initial document",
     ) -> DocumentRecord:
         self._require_initialized()
+        from .generation_sources import check_metadata
+        check_metadata(metadata)
         normalized_kind = _required_choice("document kind", kind, DOCUMENT_KINDS)
+        from .managed_documents import guard_kind
+        guard_kind(normalized_kind)
         normalized_state = _required_choice("document state", state, DOCUMENT_STATES)
         normalized_slug = _slug(slug)
         normalized_title = title.strip()
@@ -483,6 +489,27 @@ class ProjectStore:
             ).fetchall()
             return [self._document_from_row(connection, row) for row in rows]
 
+    def task_catalog(self, *, limit: int = 2001) -> list[dict[str, Any]]:
+        """Read task selectors and version labels without loading manuscript bodies."""
+        self._require_initialized()
+        with self._connection() as connection:
+            connection.execute('BEGIN')
+            rows=connection.execute('''SELECT d.id,d.slug,d.title,d.kind,d.sequence,d.active_version_id,
+                v.version_number AS active_number FROM documents d
+                LEFT JOIN document_versions v ON v.id=d.active_version_id
+                WHERE d.state NOT IN ('archived','rejected')
+                ORDER BY d.kind,COALESCE(d.sequence,999999),d.id LIMIT ?''',(max(1,min(limit,2001)),)).fetchall()
+            result=[]
+            for row in rows:
+                versions=connection.execute('''SELECT version_number,state FROM document_versions
+                    WHERE document_id=? ORDER BY version_number DESC LIMIT 10''',(row['id'],)).fetchall()
+                count,latest=connection.execute("SELECT COUNT(*),MAX(version_number) FROM document_versions WHERE document_id=? AND state='candidate'",(row['id'],)).fetchone()
+                result.append({'target':'doc:'+str(row['id']),'slug':row['slug'],'title':row['title'],
+                    'kind':row['kind'],'sequence':row['sequence'],'sourceVersion':row['active_version_id'],'activeVersionNumber':row['active_number'],
+                    'versions':[{'number':v['version_number'],'state':v['state']} for v in versions],
+                    'candidateCount':count,'onlyCandidate':latest if count==1 else None,'latestCandidate':latest})
+            return result
+
     def update_document(
         self,
         reference: str | int,
@@ -493,9 +520,13 @@ class ProjectStore:
         metadata: dict[str, Any] | None = None,
     ) -> DocumentRecord:
         self._require_initialized()
+        from .generation_sources import check_metadata
+        check_metadata(metadata)
         with self._connection() as connection:
             document_id = self._resolve_document_id(connection, reference)
             document = self._get_document(connection, document_id)
+            from .managed_documents import guard_kind
+            guard_kind(document.kind)
             next_title = title.strip() if title is not None else document.title
             if not next_title:
                 raise ProjectStoreError("Document title cannot be empty.")
@@ -520,18 +551,29 @@ class ProjectStore:
         reason: str = "",
         metadata: dict[str, Any] | None = None,
         activate: bool = False,
+        expected_version_id: int | None = None,
     ) -> DocumentVersion:
         self._require_initialized()
         normalized_state = _required_choice("version state", state, DOCUMENT_STATES)
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             document_id = self._resolve_document_id(connection, reference)
+            from .managed_documents import guard_kind
+            guard_kind(self._document_kind(connection, document_id))
+            if expected_version_id is not None:
+                document = self._get_document(connection, document_id)
+                if document.active_version_id != expected_version_id:
+                    raise ProjectStoreError("Document changed since it was read; reload before drafting.")
+            version_metadata = dict(metadata or {})
+            if expected_version_id is not None:
+                version_metadata["base_version_id"] = expected_version_id
             version_id = self._insert_version(
                 connection,
                 document_id=document_id,
                 content=content,
                 state=normalized_state,
                 reason=reason or "New revision",
-                metadata=metadata or {},
+                metadata=version_metadata,
             )
             if activate:
                 self._activate_version(connection, document_id, version_id, state=normalized_state)
@@ -550,6 +592,8 @@ class ProjectStore:
             connection.execute("BEGIN IMMEDIATE")
             document_id = self._resolve_document_id(connection, reference)
             document = self._get_document(connection, document_id)
+            from .managed_documents import guard_kind
+            guard_kind(document.kind)
             if document.active_version_id != expected_version_id:
                 raise ProjectStoreError("Document changed since it was read; reload before editing.")
             version_id = self._insert_version(
@@ -621,6 +665,7 @@ class ProjectStore:
         version: int,
         *,
         final: bool = False,
+        expected_version_id: int | None = None,
     ) -> DocumentRecord:
         self._require_initialized()
         target_state = "final" if final else "accepted"
@@ -630,7 +675,14 @@ class ProjectStore:
             connection.execute("BEGIN IMMEDIATE")
             document_id = self._resolve_document_id(connection, reference)
             source_document = self._get_document(connection, document_id)
+            from .managed_documents import guard_kind
+            guard_kind(source_document.kind)
             version_record = self._resolve_version(connection, document_id, version)
+            if expected_version_id is not None and source_document.active_version_id != expected_version_id:
+                raise ProjectStoreError("Active manuscript changed after preview; compare before accepting.")
+            base_version = version_record.metadata.get("base_version_id")
+            if version_record.state == "candidate" and base_version is not None and source_document.active_version_id != base_version:
+                raise ProjectStoreError("Candidate is based on an older active version; reconcile before accepting.")
             if version_record.state == "rejected":
                 raise ProjectStoreError("A rejected version cannot be accepted; restore it as a new candidate first.")
             reports = candidate_reports(self, source_document, version_record, final=final)
@@ -678,6 +730,8 @@ class ProjectStore:
         with self._connection() as connection:
             document_id = self._resolve_document_id(connection, reference)
             document = self._get_document(connection, document_id)
+            from .managed_documents import guard_kind
+            guard_kind(document.kind)
             target = self._resolve_version(connection, document_id, version)
             if document.active_version_id == target.id:
                 raise ProjectStoreError("Cannot reject the active version. Accept or restore another version first.")
@@ -690,16 +744,116 @@ class ProjectStore:
         self._require_initialized()
         with self._connection() as connection:
             document_id = self._resolve_document_id(connection, reference)
+            from .managed_documents import guard_kind
+            guard_kind(self._document_kind(connection, document_id))
             source = self._resolve_version(connection, document_id, version)
-            restored_id = self._insert_version(
-                connection,
-                document_id=document_id,
-                content=source.content,
-                state="candidate",
-                reason=reason,
-                metadata={"restored_from_version": source.version_number},
-            )
+            from .generation_sources import bind_generation_sources, inherited_receipt
+            with bind_generation_sources(inherited_receipt(source.metadata, source.content)):
+                restored_id = self._insert_version(
+                    connection,
+                    document_id=document_id,
+                    content=source.content,
+                    state="candidate",
+                    reason=reason,
+                    metadata={"restored_from_version": source.version_number},
+                )
             return self._get_version(connection, restored_id)
+
+    def save_decision_options(
+        self, *, slug: str, title: str, topic: dict, options: list[dict], sources: list[dict],
+        request: str, expected_version_id: int,
+    ) -> dict[str, Any]:
+        from .creative_decisions import save_options
+        return save_options(self, slug=slug, title=title, topic=topic, options=options, sources=sources,
+            request=request, expected_version_id=expected_version_id)
+
+    def select_decision_option(
+        self, slug: str | int, *, options_version_number: int, option_id: str, expected_version_id: int,
+    ) -> dict[str, Any]:
+        from .creative_decisions import select_option
+        return select_option(self, slug, options_version_number=options_version_number,
+            option_id=option_id, expected_version_id=expected_version_id)
+
+    def withdraw_decision(self, slug: str | int, *, expected_version_id: int) -> dict[str, Any]:
+        from .creative_decisions import withdraw
+        return withdraw(self, slug, expected_version_id=expected_version_id)
+
+    def decision_selection_preview(
+        self, slug: str | int, *, options_version_number: int, option_id: str, expected_version_id: int,
+    ) -> dict[str, Any]:
+        from .creative_decisions import selection_preview
+        return selection_preview(self, slug, options_version_number=options_version_number,
+            option_id=option_id, expected_version_id=expected_version_id)
+
+    def decision_withdrawal_preview(self, slug: str | int, *, expected_version_id: int) -> dict[str, Any]:
+        from .creative_decisions import withdrawal_preview
+        return withdrawal_preview(self, slug, expected_version_id=expected_version_id)
+
+    def decision_snapshot(self, reference: str | int) -> dict[str, Any]:
+        from .creative_decisions import snapshot
+        return snapshot(self, reference)
+
+    def list_decision_snapshots(self, *, limit: int | None = 100) -> list[dict[str, Any]]:
+        from .creative_decisions import snapshots
+        return snapshots(self, limit=limit)
+
+    def decision_context(self, *, limit: int = 100) -> dict[str, Any]:
+        from .creative_decisions import context_snapshot
+        return context_snapshot(self, limit=limit)
+
+    def decision_review_context(
+        self, chapter: str | int, *, projected_versions: dict[int, dict] | None = None,
+    ) -> list[dict[str, Any]]:
+        from .creative_decisions import review_context
+        return review_context(self, chapter, projected_versions=projected_versions)
+
+    def generation_source_review(self, reference: str | int, version_number: int, *, limit: int = 100) -> dict[str, Any]:
+        from .source_review import review
+        return review(self, reference, version_number, limit=limit)
+
+    def source_impact(self, reference: str | int, *, version_number: int | None = None,
+                      limit: int = 100) -> dict[str, Any]:
+        from .source_impact import analyze
+        return analyze(self, reference, version_number=version_number, limit=limit)
+
+    def propose_knowledge(self, *, slug: str, title: str, topic: dict, statement: dict,
+                          rationale: str, expected_version_id: int) -> dict[str, Any]:
+        from .narrative_knowledge import propose
+        return propose(self, slug=slug, title=title, topic=topic, statement=statement,
+                       rationale=rationale, expected_version_id=expected_version_id)
+
+    def confirm_knowledge(self, slug: str | int, *, proposal_version_number: int,
+                          expected_version_id: int) -> dict[str, Any]:
+        from .narrative_knowledge import confirm
+        return confirm(self, slug, proposal_version_number=proposal_version_number,
+                       expected_version_id=expected_version_id)
+
+    def withdraw_knowledge(self, slug: str | int, *, expected_version_id: int) -> dict[str, Any]:
+        from .narrative_knowledge import withdraw
+        return withdraw(self, slug, expected_version_id=expected_version_id)
+
+    def knowledge_snapshot(self, slug: str | int) -> dict[str, Any]:
+        from .narrative_knowledge import snapshot
+        return snapshot(self, slug)
+
+    def list_knowledge_snapshots(self, *, limit: int | None = 100) -> list[dict[str, Any]]:
+        from .narrative_knowledge import snapshots
+        return snapshots(self, limit=limit)
+
+    def knowledge_confirmation_preview(self, slug: str | int, *, proposal_version_number: int,
+                                       expected_version_id: int) -> dict[str, Any]:
+        from .narrative_knowledge import confirmation_preview
+        return confirmation_preview(self, slug, proposal_version_number=proposal_version_number,
+                                    expected_version_id=expected_version_id)
+
+    def knowledge_withdrawal_preview(self, slug: str | int, *, expected_version_id: int) -> dict[str, Any]:
+        from .narrative_knowledge import withdrawal_preview
+        return withdrawal_preview(self, slug, expected_version_id=expected_version_id)
+
+    def knowledge_view(self, *, audience: str, position: int, holder_document: str | int | None = None,
+                       limit: int = 100) -> dict[str, Any]:
+        from .narrative_view import project
+        return project(self, audience=audience, position=position, holder_document=holder_document, limit=limit)
 
     def search_documents(
         self,
@@ -734,10 +888,13 @@ class ProjectStore:
         normalized_value = _required_text("Fact value", value)
         normalized_state = _required_choice("fact state", state, FACT_STATES)
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             source_document_id = (
                 self._resolve_document_id(connection, source_document) if source_document is not None else None
             )
             source_version_id = self._resolve_source_version(connection, source_document_id, source_version)
+            if normalized_state == "canonical":
+                self._require_current_source(connection, source_document_id, source_version_id)
             now = _utc_now()
             cursor = connection.execute(
                 """
@@ -780,10 +937,13 @@ class ProjectStore:
         normalized_value = _required_text("Fact value", value)
         normalized_state = _required_choice("fact state", state, FACT_STATES)
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             source_document_id = (
                 self._resolve_document_id(connection, source_document) if source_document is not None else None
             )
             source_version_id = self._resolve_source_version(connection, source_document_id, source_version)
+            if normalized_state == "canonical":
+                self._require_current_source(connection, source_document_id, source_version_id)
             return self._upsert_fact(
                 connection,
                 category=normalized_category,
@@ -836,6 +996,24 @@ class ProjectStore:
     def promote_fact(self, fact_id: int, *, rationale: str = "Confirmed by author") -> StoryFact:
         return self._set_fact_state(fact_id, "canonical", rationale)
 
+    def fact_sources(self, facts: Iterable[StoryFact]) -> dict[int, dict[str, Any]]:
+        """Project source validity separately from the author's stored confirmation state."""
+        self._require_initialized()
+        with self._connection() as connection:
+            return {fact.id: self._fact_source_status(connection, fact) for fact in facts}
+
+    def _fact_source_status(self, connection: sqlite3.Connection, fact: StoryFact) -> dict[str, Any]:
+        reasons = {
+            'unbound': 'No manuscript source is bound; confirmation state is unchanged.',
+            'current': 'The source is the current accepted source document version.',
+            'stale': 'The source has been replaced; review the claim without automatically changing its confirmation.',
+            'pending': 'The source is not currently accepted; this does not confirm or refute the claim.',
+            'unavailable': 'The source is missing, archived or rejected; author review is needed.',
+        }
+        source = self._source_status(connection, fact.source_document_id, fact.source_version_id)
+        return {**source, 'reason': reasons[source['status']],
+            'needs_review': source['status'] not in {'current', 'unbound'}}
+
     def archive_fact(self, fact_id: int, *, rationale: str = "Archived by author") -> StoryFact:
         return self._set_fact_state(fact_id, "archived", rationale)
 
@@ -861,6 +1039,7 @@ class ProjectStore:
     ) -> FactProposal:
         self._require_initialized()
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             source_document_id = (
                 self._resolve_document_id(connection, source_document) if source_document is not None else None
             )
@@ -884,6 +1063,11 @@ class ProjectStore:
             )
             return self._get_proposal(connection, int(cursor.lastrowid))
 
+    def get_proposal(self, proposal_id: int) -> FactProposal:
+        self._require_initialized()
+        with self._connection() as connection:
+            return self._get_proposal(connection, proposal_id)
+
     def list_proposals(self, *, status: str = "proposed", limit: int = 300) -> list[FactProposal]:
         self._require_initialized()
         with self._connection() as connection:
@@ -897,9 +1081,12 @@ class ProjectStore:
         self._require_initialized()
         normalized_state = _required_choice("fact state", state, FACT_STATES)
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             proposal = self._get_proposal(connection, proposal_id)
             if proposal.status != "proposed":
                 raise ProjectStoreError(f"Fact proposal {proposal_id} is already {proposal.status}.")
+            if normalized_state == "canonical":
+                self._require_current_source(connection, proposal.source_document_id, proposal.source_version_id)
             fact = self._upsert_fact(
                 connection,
                 category=proposal.category,
@@ -916,6 +1103,13 @@ class ProjectStore:
                 (_utc_now(), proposal_id),
             )
             return fact
+
+    def proposal_source_status(self, proposal_id: int) -> dict[str, Any]:
+        """Read provenance validity without changing proposals or confirmed facts."""
+        self._require_initialized()
+        with self._connection() as connection:
+            proposal = self._get_proposal(connection, proposal_id)
+            return self._source_status(connection, proposal.source_document_id, proposal.source_version_id)
 
     def reject_proposal(self, proposal_id: int) -> FactProposal:
         self._require_initialized()
@@ -1124,11 +1318,14 @@ class ProjectStore:
             )
             return self._get_scene(connection, document_id)
 
-    def approve_scene(self, reference: str | int) -> SceneCard:
+    def approve_scene(self, reference: str | int, *,expected_scene: SceneCard | None = None) -> SceneCard:
         self._require_initialized()
         with self._connection() as connection:
+            connection.execute('BEGIN IMMEDIATE')
             document_id = self._resolve_document_id(connection, reference, kind="scene")
             scene = self._get_scene(connection, document_id)
+            if expected_scene is not None and scene != expected_scene:
+                raise ProjectStoreError('Scene card changed after preview; request approval again.')
             if not scene.plan.strip():
                 raise ProjectStoreError("Create or supply a scene plan before approval.")
             connection.execute(
@@ -1376,13 +1573,19 @@ class ProjectStore:
         self,
         *,
         scene: str | int | None = None,
+        scene_version: int | None = None,
         query: str = "",
         max_documents: int = 8,
         max_facts: int = 80,
     ) -> dict[str, Any]:
         """Return structured project context for prompts and review without loading the whole novel."""
         self._require_initialized()
+        if not 1 <= max_documents <= 1000 or not 1 <= max_facts <= 1000:
+            raise ProjectStoreError('Context selection budgets must be between 1 and 1000.')
         selected_scene = self.get_scene(scene) if scene is not None else None
+        if scene_version is not None and selected_scene is None:
+            raise ProjectStoreError('A scene version requires a host-selected scene.')
+        selected_version = self.get_version(selected_scene.document.id, scene_version) if scene_version is not None else None
         terms: list[str] = [query]
         if selected_scene is not None:
             terms.extend(
@@ -1407,17 +1610,24 @@ class ProjectStore:
         selection = """
             SELECT d.id FROM documents d JOIN document_versions v ON v.id = d.active_version_id
             WHERE TRIM(v.content) != '' AND d.state NOT IN ('archived', 'rejected')
+                AND d.kind NOT IN ('creative_decision','narrative_knowledge')
         """
         documents: list[DocumentRecord] = []
         with self._connection() as connection:
+            scope, parameters = self._scene_prose_scope(connection, selected_scene)
+            selection += ' AND (' + scope + ')'
             for kind in ("outline", "world", "character", "style"):
-                row = connection.execute(selection + " AND d.kind = ? ORDER BY d.updated_at DESC, d.id DESC LIMIT 1", (kind,)).fetchone()
+                row = connection.execute(selection + " AND d.kind = ? ORDER BY d.updated_at DESC, d.id DESC LIMIT 1", [*parameters, kind]).fetchone()
                 if row:
                     documents.append(self._get_document(connection, int(row["id"])))
-            rows = connection.execute(selection + " ORDER BY d.updated_at DESC, d.id DESC LIMIT ?", (max_documents,)).fetchall()
+            rows = connection.execute(selection + " ORDER BY d.updated_at DESC, d.id DESC LIMIT ?", [*parameters, max_documents]).fetchall()
             recent = [self._get_document(connection, int(row["id"])) for row in rows]
+            available_texts = connection.execute('SELECT COUNT(*) FROM (' + selection + ')', parameters).fetchone()[0]
+            search_scope = (scope + " AND d.kind NOT IN ('creative_decision','narrative_knowledge') AND d.state NOT IN ('archived','rejected') AND EXISTS "
+                "(SELECT 1 FROM document_versions cv WHERE cv.id=d.active_version_id AND TRIM(cv.content)!='')", parameters)
+            matches = [self._get_document(connection, identity) for identity in self._search_document_ids(
+                connection, joined_query, (), tuple(relevant_tags), max_documents, scope=search_scope)]
         known = {document.id for document in documents}
-        matches = self.search_documents(joined_query, tags=relevant_tags, limit=max_documents)
         for document in [*matches, *recent]:
             if document.id not in known and document.content.strip() and document.state not in {"archived", "rejected"}:
                 documents.append(document)
@@ -1427,11 +1637,36 @@ class ProjectStore:
             with self._connection() as connection:
                 siblings = self._scene_siblings_before(connection, selected_scene)
             seen = {document.id for document in siblings}
-            documents = [*siblings, *[document for document in documents if document.id not in seen]][:max_documents]
+            documents = [*[d for d in siblings if d.content.strip()],
+                *[d for d in documents if d.id not in seen],
+                *[d for d in siblings if not d.content.strip()]][:max_documents]
         unresolved_threads = self.list_foreshadowing(state="open", limit=40)
         if len(unresolved_threads) < 40:
             unresolved_threads.extend(self.list_foreshadowing(state="planned", limit=40 - len(unresolved_threads)))
         timeline = self.list_timeline(state="canonical", limit=80)
+        totals = self.summary()
+        decision_context = self.decision_context(limit=max_documents)
+        view = {'purpose': 'author_scene_support' if selected_scene else 'author_global',
+            'knowledge_filter_applied': False, 'reference_scope': 'author_global',
+            'missing': ['character_beliefs', 'reader_reveal_cutoff', 'story_time_order'],
+            'limits': {'documents': max_documents, 'canonical_facts': max_facts, 'ideas': 30},
+            'truncated': {'documents': available_texts > sum(bool(d.content.strip()) for d in documents),
+                'canonical_facts': totals['canonical_facts'] > len(canonical), 'ideas': totals['ideas'] > len(ideas)}}
+        view['limits']['creative_decisions'] = max_documents
+        view['truncated']['creative_decisions'] = decision_context['truncated']
+        if selected_scene:
+            chapter = self.get_document(selected_scene.chapter_id) if selected_scene.chapter_id else None
+            view['target'] = {'document': selected_scene.document.slug,
+                'version_id': selected_version.id if selected_version else selected_scene.document.active_version_id,
+                'active_version_id': selected_scene.document.active_version_id,
+                'chapter_id': selected_scene.chapter_id, 'chapter_sequence': chapter.sequence if chapter else None,
+                'scene_sequence': selected_scene.document.sequence, 'pov': selected_scene.pov,
+                'story_time_label': selected_scene.time_label}
+            view['prose_cutoff'] = 'strictly preceding scenes and chapters within the same chapter parent'
+            if chapter is None or chapter.sequence is None or selected_scene.document.sequence is None:
+                view['missing'].append('complete_prose_order')
+            view['missing'].append('cross_volume_order')
+            view['missing'].append('current_chapter_excerpt_boundary')
         return {
             "project": self.project_info(),
             "scene": selected_scene,
@@ -1440,26 +1675,48 @@ class ProjectStore:
             "documents": documents,
             "foreshadowing": unresolved_threads,
             "timeline": timeline,
+            "fact_sources": self.fact_sources([*canonical, *ideas]),
+            "creative_decisions": decision_context['decisions'],
+            "view": view,
         }
+
+    def _scene_prose_scope(self, connection: sqlite3.Connection, scene: SceneCard | None) -> tuple[str, list[Any]]:
+        if scene is None:
+            return '1', []
+        allowed = ["d.kind NOT IN ('chapter','scene')"]
+        parameters: list[Any] = []
+        if scene.chapter_id is not None:
+            chapter = self._get_document(connection, scene.chapter_id)
+            if scene.document.sequence is not None and chapter.state not in {'archived','rejected'}:
+                allowed.append("(d.kind='scene' AND d.parent_id=? AND d.sequence < ?)")
+                parameters.extend([chapter.id, scene.document.sequence])
+            if chapter.sequence is not None:
+                # Chapter numbering is only comparable inside the same parent (e.g. volume).
+                allowed.append("(d.kind='chapter' AND d.parent_id IS ? AND d.sequence < ?)")
+                parameters.extend([chapter.parent_id, chapter.sequence])
+                allowed.append("(d.kind='scene' AND EXISTS (SELECT 1 FROM documents pc "
+                    "WHERE pc.id=d.parent_id AND pc.kind='chapter' AND pc.state NOT IN ('archived','rejected') "
+                    "AND pc.parent_id IS ? AND pc.sequence < ?))")
+                parameters.extend([chapter.parent_id, chapter.sequence])
+        return '(' + ' OR '.join(allowed) + ')', parameters
 
     def _scene_siblings_before(self, connection: sqlite3.Connection, scene: SceneCard) -> list[DocumentRecord]:
         if scene.chapter_id is None:
             return []
-        chapter = self._get_document(connection, scene.chapter_id)
+        scope, parameters = self._scene_prose_scope(connection, scene)
         rows = connection.execute(
-            """
+            f"""
             SELECT d.id
             FROM documents d
             JOIN scene_cards s ON s.document_id = d.id
             JOIN documents c ON c.id = s.chapter_id
             LEFT JOIN document_versions v ON v.id = d.active_version_id
-            WHERE (s.chapter_id = ? AND (d.sequence < ? OR (d.sequence = ? AND d.id < ?)))
-               OR (c.sequence < ? AND d.state IN ('accepted', 'final') AND TRIM(v.content) != '')
-            ORDER BY c.sequence DESC, d.sequence DESC, d.id DESC
+            WHERE {scope} AND d.state NOT IN ('archived','rejected')
+              AND (s.chapter_id = ? OR (d.state IN ('accepted', 'final') AND TRIM(v.content) != ''))
+            ORDER BY (TRIM(COALESCE(v.content,'')) != '') DESC, c.sequence DESC, d.sequence DESC, d.id DESC
             LIMIT 2
             """,
-            (scene.chapter_id, scene.document.sequence or 999999, scene.document.sequence or 999999,
-             scene.document.id, chapter.sequence),
+            [*parameters, scene.chapter_id],
         ).fetchall()
         return [self._get_document(connection, int(row["id"])) for row in reversed(rows)]
 
@@ -1467,9 +1724,12 @@ class ProjectStore:
         self._require_initialized()
         normalized_state = _required_choice("fact state", state, FACT_STATES)
         with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             fact = self._get_fact(connection, fact_id)
             if fact.state == normalized_state:
                 return fact
+            if normalized_state == "canonical":
+                self._require_current_source(connection, fact.source_document_id, fact.source_version_id)
             connection.execute(
                 "UPDATE story_facts SET state = ?, updated_at = ? WHERE id = ?",
                 (normalized_state, _utc_now(), fact_id),
@@ -1739,6 +1999,8 @@ class ProjectStore:
         reason: str,
         metadata: dict[str, Any],
     ) -> int:
+        from .generation_sources import version_metadata
+        metadata = version_metadata(metadata, content=content, state=state)
         if 'story_index' in metadata:
             from .story_index import validate_graph
             metadata = dict(metadata, story_index=validate_graph(metadata['story_index']))
@@ -1823,22 +2085,25 @@ class ProjectStore:
         kinds: tuple[str, ...],
         tags: tuple[str, ...],
         limit: int,
+        *,
+        scope: tuple[str, list[Any]] | None = None,
     ) -> list[int]:
+        scope_clause, scope_parameters = scope or ('1', [])
         if not query.strip() and not tags:
-            clauses = []
-            parameters: list[Any] = []
+            clauses = [scope_clause]
+            parameters: list[Any] = list(scope_parameters)
             if kinds:
                 clauses.append(f"kind IN ({','.join('?' for _ in kinds)})")
                 parameters.extend(kinds)
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = connection.execute(
-                f"SELECT id FROM documents {where} ORDER BY updated_at DESC LIMIT ?", [*parameters, limit]
+                f"SELECT d.id FROM documents d {where} ORDER BY updated_at DESC LIMIT ?", [*parameters, limit]
             ).fetchall()
             return [int(row["id"]) for row in rows]
 
         if not query.strip():
-            clauses: list[str] = []
-            parameters: list[Any] = []
+            clauses: list[str] = [scope_clause]
+            parameters: list[Any] = list(scope_parameters)
             if kinds:
                 clauses.append(f"d.kind IN ({','.join('?' for _ in kinds)})")
                 parameters.extend(kinds)
@@ -1857,8 +2122,8 @@ class ProjectStore:
         if query.strip():
             try:
                 fts_query = _fts_query(query)
-                clauses = ["document_fts MATCH ?"]
-                parameters: list[Any] = [fts_query]
+                clauses = ["document_fts MATCH ?", scope_clause]
+                parameters: list[Any] = [fts_query, *scope_parameters]
                 if kinds:
                     clauses.append(f"d.kind IN ({','.join('?' for _ in kinds)})")
                     parameters.extend(kinds)
@@ -1883,8 +2148,8 @@ class ProjectStore:
                 pass
 
         terms = [term.lower() for term in _search_terms(query)]
-        clauses: list[str] = []
-        parameters = []
+        clauses: list[str] = [scope_clause]
+        parameters = list(scope_parameters)
         if kinds:
             clauses.append(f"d.kind IN ({','.join('?' for _ in kinds)})")
             parameters.extend(kinds)
@@ -2007,10 +2272,32 @@ class ProjectStore:
         source_version: int | None,
     ) -> int | None:
         if source_version is None:
-            return None
+            return self._get_document(connection, source_document_id).active_version_id if source_document_id is not None else None
         if source_document_id is None:
             raise ProjectStoreError("A source document is required when a source version is supplied.")
         return self._resolve_version(connection, source_document_id, source_version).id
+
+    def _source_status(self, connection, document_id, version_id) -> dict[str, Any]:
+        if document_id is None and version_id is None:
+            return {"status": "unbound", "reason": "独立设定提案：没有绑定文本来源，仍需作者确认。"}
+        document = connection.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
+        version = connection.execute("SELECT * FROM document_versions WHERE id = ?", (version_id,)).fetchone()
+        if document is None or version is None or version["document_id"] != document_id:
+            return {"status": "unavailable", "reason": "来源或来源版本缺失，请重新核对并提出提案。"}
+        result = {"document": document["slug"], "version": version["version_number"],
+            "versionId": version["id"], "activeVersionId": document["active_version_id"]}
+        if document["state"] in {"archived", "rejected"} or version["state"] in {"archived", "rejected"}:
+            return {**result, "status": "unavailable", "reason": "来源已归档或拒绝，不能用于确认正式事实。"}
+        if version["state"] not in {"accepted", "final"} or document["state"] not in {"accepted", "final"}:
+            return {**result, "status": "pending", "reason": "来源尚未采纳：先采纳来源，再单独确认设定提案。"}
+        if document["active_version_id"] != version_id:
+            return {**result, "status": "stale", "reason": "来源已被新版本替换，请重新提取或重新核对后提出提案。"}
+        return {**result, "status": "current", "reason": "来源为当前已采纳版本；采纳文本不会自动确认此提案。"}
+
+    def _require_current_source(self, connection, document_id, version_id) -> None:
+        status = self._source_status(connection, document_id, version_id)
+        if status["status"] not in {"current", "unbound"}:
+            raise ProjectStoreError("Canonical source is " + status["status"] + ": " + status["reason"])
 
     def _get_proposal(self, connection: sqlite3.Connection, proposal_id: int) -> FactProposal:
         row = connection.execute("SELECT * FROM fact_proposals WHERE id = ?", (proposal_id,)).fetchone()

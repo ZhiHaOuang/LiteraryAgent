@@ -73,6 +73,9 @@ def save_profile(environment: str, name: str, key: str | None = None, *, replace
     if key is not None and (not key.strip() or any(c.isspace() for c in key.strip())):
         raise ValueError("API key must be nonempty and contain no whitespace")
     with _store(environment) as (data, path):
+        if data["profiles"].get(name, {}).get("auth_mode") == "chatgpt":
+            from .config import API_ONLY_MESSAGE
+            raise ValueError(API_ONLY_MESSAGE)
         if key is None:
             if name not in data["profiles"]:
                 raise ValueError("Profile not found; add it first")
@@ -80,8 +83,6 @@ def save_profile(environment: str, name: str, key: str | None = None, *, replace
             if name in data["profiles"] and not replace:
                 raise ValueError("Profile exists; use --replace to explicitly update its key")
             previous = data["profiles"].get(name, {})
-            if previous.get("auth_mode") == "chatgpt":
-                raise ValueError("Subscription profile: use auth login, not API key replacement")
             selected = provider_id(provider or previous.get("provider") or "deepseek")
             same_provider = selected == previous.get("provider")
             settings = profile_settings(selected, model or (previous.get("model") if same_provider else None),
@@ -91,18 +92,6 @@ def save_profile(environment: str, name: str, key: str | None = None, *, replace
             data["profiles"][name]["model"] = validate_model(model)
         data["version"] = 2
         data["active"] = name
-        _write_store(data, path)
-
-
-def save_subscription(environment: str, name: str, model: str = "") -> None:
-    checked_name(name)
-    profile = normalize_profile({"provider": "codex", "auth_mode": "chatgpt", "model": model})
-    with _store(environment) as (data, path):
-        previous = data["profiles"].get(name)
-        if previous and previous.get("auth_mode") != "chatgpt":
-            raise ValueError("Name already belongs to an API profile; choose a separate subscription name")
-        data["profiles"][name] = profile
-        data.update(version=2, active=name)
         _write_store(data, path)
 
 
@@ -124,7 +113,7 @@ def _write_store(data: dict, path: Path) -> None:
 
 
 def add_auth_parser(sub) -> None:
-    auth = sub.add_parser("auth", help="Manage API profiles and explicit ChatGPT subscription login.")
+    auth = sub.add_parser("auth", help="Manage API-only model profiles.")
     commands = auth.add_subparsers(dest="auth_command")
     add = commands.add_parser("add", help="Save a provider key and activate its model profile.")
     add.add_argument("name")
@@ -139,26 +128,25 @@ def add_auth_parser(sub) -> None:
     model = commands.add_parser("model", help="Set the active profile's model without re-entering its key.")
     model.add_argument("model")
     commands.add_parser("providers", help="List supported protocols and default endpoints.")
-    login = commands.add_parser("login", help="Explicit official Codex ChatGPT subscription login (no API key).")
+    login = commands.add_parser("login", help="Unsupported legacy login command; prints API migration instructions.")
     login.add_argument("name", nargs="?", default="gpt")
-    login.add_argument("--model", default="", help="Optional subscription model ID; otherwise use Codex's account default.")
-    login.add_argument("--browser", action="store_true", help="Use browser callback instead of device code.")
+    login.add_argument("--model", default="", help="Legacy option accepted only to display migration guidance.")
+    login.add_argument("--browser", action="store_true", help="Legacy option; browser/device login is disabled.")
     commands.add_parser("status", help="Check the selected credential type; do not send a model request.")
     commands.add_parser("list", help="List profile names only; never show keys.")
 
 
 def dispatch_auth(args, environment: str) -> int:
     if args.auth_command == "login":
-        from .auth_ui import _login_subscription as login_subscription
-        return login_subscription(environment, args.name, Path(args.cwd).resolve() if args.cwd else Path.cwd(), model=args.model, browser=args.browser)
+        from .config import API_ONLY_MESSAGE
+        raise ValueError(API_ONLY_MESSAGE)
     if args.auth_command == "status":
         from .config import load_config
-        from .subscription_auth import subscription_status
         config = load_config(Path(args.cwd).resolve() if args.cwd else None, environment=environment)
         if config.auth_mode == "chatgpt":
-            ok, message = subscription_status(config)
-            print(message)
-            return 0 if ok else 1
+            from .config import API_ONLY_MESSAGE
+            print(API_ONLY_MESSAGE)
+            return 1
         print(f"{environment}/{config.profile_name or '(environment)'}: {'API key configured (not probed)' if config.api_key else 'not configured'}")
         return 0 if config.api_key else 1
     if args.auth_command is None:
@@ -167,29 +155,15 @@ def dispatch_auth(args, environment: str) -> int:
     if args.auth_command == "providers":
         for name, preset in PROVIDERS.items():
             print(f"{name:24} {preset.protocol:10} {preset.base_url or '(explicit URL required)'}")
-        print("codex                    subscription  literary auth login gpt")
         return 0
     if args.auth_command == "add":
         checked_name(args.name)
-        if args.name in {"gpt", "chatgpt"} and not args.provider and sys.stdin.isatty() and sys.stdout.isatty() and not args.key_env:
-            from .auth_ui import radiolist_dialog
-            selected = radiolist_dialog(title="GPT authentication", text="Choose access type",
-                                        values=[("codex", "ChatGPT subscription (official Codex login)"),
-                                                ("openai", "OpenAI API (usage-based billing)"),
-                                                ("responses-compatible", "Existing Responses / CPA proxy")]).run()
-            if selected is None:
-                return 0
-            if selected == "codex":
-                if args.base_url:
-                    raise ValueError("Official subscription login does not accept a proxy Base URL")
-                from .auth_ui import _login_subscription as login_subscription
-                return login_subscription(environment, args.name, Path(args.cwd).resolve() if args.cwd else Path.cwd(), model=args.model or "")
-            args.provider = selected
         if args.name in {"gpt", "chatgpt", "cpa"} and not args.provider:
-            raise ValueError("Subscription: use literary auth login gpt. For paid API access specify --provider openai; for an existing proxy specify --provider responses-compatible. These are separate authentication flows.")
+            raise ValueError("API-only: specify --provider openai or an explicit compatible provider; no provider is selected automatically.")
         previous = read_profiles(environment)["profiles"].get(args.name, {})
         if previous.get("auth_mode") == "chatgpt":
-            raise ValueError("Subscription profile: use auth login, not API key replacement")
+            from .config import API_ONLY_MESSAGE
+            raise ValueError(API_ONLY_MESSAGE)
         provider = args.provider or previous.get("provider") or (args.name if args.name in PROVIDERS else "deepseek")
         model = args.model or (previous.get("model") if provider == previous.get("provider") else None) or PROVIDERS[provider].default_model
         base_url = args.base_url or (previous.get("base_url") if provider == previous.get("provider") else None) or PROVIDERS[provider].base_url

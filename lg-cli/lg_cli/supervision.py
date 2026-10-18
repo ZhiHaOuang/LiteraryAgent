@@ -182,7 +182,10 @@ def candidate_reports(store: ProjectStore, document: DocumentRecord, version: Do
                     or report["library"] != category or report["fingerprint"] != fingerprint(snapshot)
                     or report["base_fingerprint"] != fingerprint(base)):
                 raise ValueError("Stale or wrong-target supervision")
-            validate_report(snapshot, report["report"])
+            current_contract = report.get("contract") == "lg.reference-card.v1"
+            validate_report(snapshot, report["report"],
+                            category=category if current_contract else None,
+                            expected_contract_fingerprint=report.get("contract_fingerprint") if current_contract else None)
         except (OSError, ValueError, KeyError, TypeError, jsonschema.ValidationError) as exc:
             raise ProjectStoreError(f"Missing or stale {category} candidate review; rerun version accept through the CLI.") from exc
         conflicts = unresolved_conflicts(store, report)

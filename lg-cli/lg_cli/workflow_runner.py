@@ -3,19 +3,22 @@ from __future__ import annotations
 from dataclasses import replace
 
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from .catalog import load_workflows
 from .config import LGConfig
-from .core_adapter import CodexExecAdapter, CoreExecutionResult, EngineEventCallback
+from .core_adapter import CoreExecutionResult, EngineEventCallback
+from .execution_adapter import execution_adapter
 from .definitions import DefinitionRegistry
 from .events import EventSink, EventType, RunEvent
 from .knowledge import KnowledgeContext, KnowledgeGateway
 from .logging_utils import append_agent_log, ensure_log_dir, utc_now, write_text
 from .memory import read_memory_context
 from .output_writer import OutputWriteResult, SPECIALIST_OUTPUTS, write_workflow_output
+from .output_schema import read_schema, validate_output
 from .project_store import ProjectStore
 from .prompt_builder import build_stage_prompt
 from .run_store import RunHandle, RunStore
@@ -57,6 +60,7 @@ class ModelAdapter(Protocol):
         self,
         *,
         prompt: str,
+        instructions: str,
         config: LGConfig,
         mode: str,
         model_profile: str | None = None,
@@ -92,7 +96,7 @@ class WorkflowRunner:
         store: RunStore | None = None,
     ) -> None:
         self.config = config
-        self.adapter = adapter or CodexExecAdapter()
+        self.adapter = adapter or execution_adapter(config)
         self.registry = registry or DefinitionRegistry(config.workspace)
         self.knowledge = knowledge or KnowledgeGateway(config)
         self.store = store or RunStore(config.workspace)
@@ -136,9 +140,24 @@ class WorkflowRunner:
         dry_run: bool = False,
         allow_raw: bool | None = None,
         on_event: EventSink | None = None,
+        confirm_stopped: bool = False,
+        expected_fingerprint: str | None = None,
     ) -> WorkflowExecutionResult:
+        # The lock spans execution, so separate clients cannot replay the same recovery.
         try:
-            previous = self.store.load(run_id)
+            self.store.load(run_id)
+        except FileNotFoundError:
+            return self._resume_locked(run_id,dry_run=dry_run,allow_raw=allow_raw,on_event=on_event,
+                confirm_stopped=confirm_stopped,expected_fingerprint=expected_fingerprint)
+        with self.store.resume_lock(run_id):
+            return self._resume_locked(run_id,dry_run=dry_run,allow_raw=allow_raw,on_event=on_event,
+                confirm_stopped=confirm_stopped,expected_fingerprint=expected_fingerprint)
+
+    def _resume_locked(self,run_id,*,dry_run,allow_raw,on_event,confirm_stopped,expected_fingerprint):
+        try:
+            previous = self.store.assert_resumable(run_id,confirm_stopped=confirm_stopped)
+            if expected_fingerprint is not None and _fingerprint(previous)!=expected_fingerprint:
+                raise ValueError('Run changed after selecting it; refresh before resuming')
         except FileNotFoundError as exc:
             return WorkflowExecutionResult(
                 workflow_name="unknown",
@@ -215,6 +234,8 @@ class WorkflowRunner:
             data={"command": command, "resumed_from": resumed_from},
         )
         emit(EventType.CONTEXT_STARTED, "Loading memory and knowledge context")
+        from .mcp_approval import project_fingerprint
+        book_before=project_fingerprint(self.config.workspace)
         memory = read_memory_context(
             self.config.workspace,
             memory_root=self.config.memory_path,
@@ -238,6 +259,8 @@ class WorkflowRunner:
         )
 
         stages = self._selected_stages(workflow)
+        if command!='code' and project_fingerprint(self.config.workspace)!=book_before:
+            return self._fail(handle,workflow_name,emit,error='Book changed while preparing workflow context',exit_code=EXIT_MODEL)
         if dry_run:
             plan = _plan_markdown(
                 workflow_name=workflow_name,
@@ -282,8 +305,8 @@ class WorkflowRunner:
                 workflow_name,
                 emit,
                 error=(
-                    "No API key or subscription login is configured. Use literary auth add "
-                    "for API access or literary auth login for ChatGPT; use --dry-run to inspect the workflow."
+                    "No API key is configured. LiteraryGiant is API-only. Use literary auth add "
+                    "to configure an API profile; use --dry-run to inspect the workflow."
                 ),
                 exit_code=EXIT_CONFIGURATION,
             )
@@ -291,22 +314,13 @@ class WorkflowRunner:
         prior_outputs: list[tuple[str, str]] = []
         final_graph = None
         final_overview = None
-        completed_stage_ids = self._restore_prior_stages(
-            resumed_from=resumed_from,
-            handle=handle,
-            stages=stages,
-            prior_outputs=prior_outputs,
-            emit=emit,
-        )
-        if prior_outputs:
-            final_metadata = self.store.read_stage_metadata(handle.run_id, prior_outputs[-1][0])
-            final_graph = final_metadata.get('story_index')
-            final_overview = final_metadata.get('book_overview')
+        previous = self.store.load(resumed_from) if resumed_from else None
+        restoring = previous is not None
 
         for index, stage in enumerate(stages, start=1):
             stage_id = str(stage.get("id") or f"stage-{index}")
-            if stage_id in completed_stage_ids:
-                continue
+            if command!='code' and project_fingerprint(self.config.workspace)!=book_before:
+                return self._fail(handle,workflow_name,emit,error='Book changed during workflow; restart with current context',exit_code=EXIT_MODEL,stage_id=stage_id)
             try:
                 agent = self.registry.agent(str(stage.get("agent") or "director"))
                 skill = self.registry.skill(str(stage.get("skill") or "direction-expander"))
@@ -345,8 +359,55 @@ class WorkflowRunner:
             if command == 'write':
                 from .book_overview import overview_context
                 prompt = replace(prompt, text=prompt.text + '\n' + overview_context(self.config.workspace))
-            prompt_path = self.store.write_stage_prompt(handle, stage_id=stage_id, prompt=prompt.text)
-            write_text(ensure_log_dir(self.config.workspace) / "last_prompt.md", prompt.text)
+            from .stage_input import prepare_stage_input
+            try:
+                schema_contract = read_schema(agent.output_schema) if agent.output_schema is not None else None
+                prepared = prepare_stage_input(prompt.text, output_schema=agent.output_schema)
+                signature=_fingerprint({'policy':'lg.stage-input.v3','prompt':prepared.prompt,
+                    'instructions':prepared.instructions,
+                    'schema':schema_contract[0] if schema_contract is not None else None,
+                    'book':book_before,'stage':stage,
+                    'provider':self.config.provider,'protocol':self.config.protocol,'endpoint':self.config.base_url,
+                    'model':self.config.model_for_profile(agent.model_profile,mode=command),
+                    'runtime':self.config.runtime_engine})
+                schema_path = self.store.write_stage_schema(handle, stage_id=stage_id,
+                    name=agent.output_schema.name, text=schema_contract[0]) if schema_contract is not None else None
+                prompt_path = self.store.write_stage_prompt(handle, stage_id=stage_id,
+                    prompt=prepared.prompt, instructions=prepared.instructions)
+                write_text(ensure_log_dir(self.config.workspace) / "last_prompt.md", prepared.prompt)
+                if schema_contract is not None and schema_path.read_text(encoding='utf-8') != schema_contract[0]:
+                    raise ValueError()
+            except Exception:
+                return self._fail(handle,workflow_name,emit,error='Stage input contract is invalid or could not be saved',
+                    exit_code=EXIT_CONFIGURATION,stage_id=stage_id)
+            if restoring:
+                try:
+                    content=self.store.read_stage(resumed_from,stage_id) if stage_id in previous.get('completed_stages',[]) else None
+                    metadata=self.store.read_stage_metadata(resumed_from,stage_id) if content is not None else {}
+                except (OSError,ValueError):
+                    content,metadata=None,{}
+                if (content is not None and metadata.get('input_fingerprint')==signature
+                        and metadata.get('output_fingerprint')==_output_fingerprint(content,metadata)
+                        and _verified_stage_output(content,metadata,
+                            schema_contract[1] if schema_contract is not None else None,
+                            require_overview=command=='write' and index==len(stages))):
+                    try:
+                        self.store.write_stage(handle,stage_id=stage_id,content=content,
+                            metadata={**metadata,'restored_from':resumed_from, 'prompt_path':str(prompt_path)})
+                    except Exception:
+                        return self._fail(handle,workflow_name,emit,error='Stage output could not be saved',
+                            exit_code=EXIT_CONFIGURATION,stage_id=stage_id)
+                    prior_outputs.append((stage_id,content.strip()))
+                    final_graph=metadata.get('story_index')
+                    final_overview=metadata.get('book_overview')
+                    emit(EventType.STAGE_COMPLETED,f'Restored verified stage from {resumed_from}',
+                        stage_id=stage_id,data={'restored':True})
+                    continue
+                restoring=False
+                if command=='code':
+                    return self._fail(handle,workflow_name,emit,error='Code checkpoint is unverified; inspect filesystem changes before starting a new explicit code task',exit_code=EXIT_MODEL,stage_id=stage_id)
+                emit(EventType.STAGE_STARTED,'Checkpoint inputs or output changed; recomputing this stage and following stages',
+                    stage_id=stage_id,data={'invalidated':True})
             emit(
                 EventType.STAGE_STARTED,
                 f"{agent.name} using {skill.id}",
@@ -370,12 +431,21 @@ class WorkflowRunner:
                     data={"engine_event": payload},
                 )
 
+            if schema_contract is not None:
+                try:
+                    if schema_path.read_text(encoding='utf-8') != schema_contract[0]:
+                        raise ValueError()
+                except Exception:
+                    return self._fail(handle,workflow_name,emit,error='Stage schema snapshot changed before model execution',
+                        exit_code=EXIT_CONFIGURATION,stage_id=stage_id)
+
             core_result = self.adapter.run(
-                prompt=prompt.text,
+                prompt=prepared.prompt,
+                instructions=prepared.instructions,
                 config=self.config,
                 mode=command,
                 model_profile=agent.model_profile,
-                output_schema=agent.output_schema,
+                output_schema=schema_path,
                 on_event=engine_event,
             )
             if not core_result.ok:
@@ -393,6 +463,18 @@ class WorkflowRunner:
                     exit_code=EXIT_CONFIGURATION if core_result.used_stub else EXIT_MODEL,
                     stage_id=stage_id,
                 )
+
+            if command!='code' and project_fingerprint(self.config.workspace)!=book_before:
+                return self._fail(handle,workflow_name,emit,error='Book changed during model execution; result is not a current checkpoint',exit_code=EXIT_MODEL,stage_id=stage_id)
+
+            if schema_contract is not None:
+                try:
+                    if schema_path.read_text(encoding='utf-8') != schema_contract[0]:
+                        raise ValueError()
+                    validate_output(core_result.output_text, schema_contract[1])
+                except Exception:
+                    return self._fail(handle,workflow_name,emit,error='Stage output does not match the frozen schema',
+                        exit_code=EXIT_MODEL,stage_id=stage_id)
 
             try:
                 parsed = _parse_stage_output(core_result.output_text)
@@ -418,25 +500,29 @@ class WorkflowRunner:
                     self.config.workspace, SPECIALIST_OUTPUTS.get(agent.id, command), artifact,
                     output_root=self.config.output_path, run_id=handle.run_id, stage_id=stage_id,
                 ).output_path
-            self.store.write_stage(
-                handle,
-                stage_id=stage_id,
-                content=artifact.rstrip() + "\n",
-                metadata={
+            stage_content=artifact.rstrip()+'\n'
+            metadata={
                     "stage_id": stage_id,
                     "agent": agent.id,
                     "skill": skill.id,
                     "model_profile": agent.model_profile,
                     "prompt_path": str(prompt_path),
                     "summary": parsed["summary"],
+                    "response_text": core_result.output_text,
                     **({'story_index': final_graph} if final_graph is not None else {}),
                     **({'book_overview': final_overview} if final_overview else {}),
                     "handoff": parsed["handoff"],
                     "risks": parsed["risks"],
                     "adapter": _adapter_metadata(core_result),
                     "artifact_path": str(stage_artifact) if stage_artifact else None,
-                },
-            )
+                    'input_fingerprint':signature,
+                }
+            metadata['output_fingerprint']=_output_fingerprint(stage_content,metadata)
+            try:
+                self.store.write_stage(handle,stage_id=stage_id,content=stage_content,metadata=metadata)
+            except Exception:
+                return self._fail(handle,workflow_name,emit,error='Stage output could not be saved',
+                    exit_code=EXIT_CONFIGURATION,stage_id=stage_id)
             prior_outputs.append((stage_id, artifact))
             emit(
                 EventType.STAGE_COMPLETED,
@@ -540,44 +626,6 @@ class WorkflowRunner:
             )
             return KnowledgeContext((), self.knowledge.library_root, 0, (), (warning,))
         return self.knowledge.search(request, allow_raw=allow_raw)
-
-    def _restore_prior_stages(
-        self,
-        *,
-        resumed_from: str | None,
-        handle: RunHandle,
-        stages: list[dict[str, Any]],
-        prior_outputs: list[tuple[str, str]],
-        emit: Any,
-    ) -> set[str]:
-        if not resumed_from:
-            return set()
-        manifest = self.store.load(resumed_from)
-        previous_completed = set(str(item) for item in manifest.get("completed_stages", []))
-        restored: set[str] = set()
-        for stage in stages:
-            stage_id = str(stage.get("id") or "")
-            if stage_id not in previous_completed:
-                break
-            content = self.store.read_stage(resumed_from, stage_id)
-            if content is None:
-                break
-            self.store.write_stage(
-                handle,
-                stage_id=stage_id,
-                content=content,
-                metadata={**self.store.read_stage_metadata(resumed_from, stage_id),
-                          "stage_id": stage_id, "restored_from": resumed_from},
-            )
-            prior_outputs.append((stage_id, content))
-            restored.add(stage_id)
-            emit(
-                EventType.STAGE_COMPLETED,
-                f"Restored completed stage from {resumed_from}",
-                stage_id=stage_id,
-                data={"restored": True},
-            )
-        return restored
 
     def _fail(
         self,
@@ -716,3 +764,32 @@ def _append_failure(
 
 def _optional_path(value: Any) -> Path | None:
     return Path(value) if isinstance(value, str) and value else None
+
+
+def _fingerprint(value):
+    return hashlib.sha256(json.dumps(value,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+
+
+def _output_fingerprint(content,metadata):
+    return _fingerprint({'content':content,**{key:metadata.get(key) for key in
+        ('summary','handoff','risks','story_index','book_overview','response_text')}})
+
+
+def _verified_stage_output(content, metadata, schema, *, require_overview=False):
+    try:
+        response = metadata['response_text']
+        if not isinstance(response,str):
+            return False
+        if schema is not None:
+            validate_output(response,schema)
+        parsed = _parse_stage_output(response)
+        if require_overview:
+            from .book_overview import validate_overview
+            validate_overview(parsed.get('book_overview'))
+        if content != parsed['artifact_markdown'].strip() + '\n':
+            return False
+        projection = {key:parsed.get(key) for key in ('summary','handoff','risks','story_index')}
+        projection['book_overview'] = parsed.get('book_overview') or None
+        return all(metadata.get(key)==value for key,value in projection.items())
+    except Exception:
+        return False

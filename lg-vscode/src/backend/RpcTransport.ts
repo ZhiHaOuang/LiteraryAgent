@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
 export type RpcId = string | number;
 export type RpcMessage = { id?: RpcId; method?: string; params?: unknown; result?: unknown; error?: { code: number; message: string } };
-export type LaunchSpec = { command: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv };
+export type LaunchSpec = { command: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv; jsonRpc?: boolean };
 
 /** JSONL framing is byte based: a UTF-8 character may straddle any pipe read. */
 export class JsonLines {
@@ -90,7 +90,7 @@ export class RpcTransport {
     await this.send({ id, error: { code, message: 'Unsupported or expired client request' } });
   }
   private send(message: RpcMessage) {
-    const bytes = JSON.stringify(message) + '\n';
+    const bytes = JSON.stringify(this.spec.jsonRpc ? { jsonrpc: '2.0', ...message } : message) + '\n';
     const operation = this.writeQueue.then(() => new Promise<void>((resolve, reject) => {
       if (this.ended || !this.process?.stdin.writable) { reject(Error('app-server 已断开')); return; }
       this.process.stdin.write(bytes, error => error ? reject(error) : resolve());

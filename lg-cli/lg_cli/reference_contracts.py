@@ -3,13 +3,33 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import dataclass
 from importlib import resources
 
 import jsonschema
 
 
+def _catalog_text() -> str:
+    return resources.files('lg_cli.resources').joinpath('reference-contracts.json').read_text(encoding='utf-8')
+
+
 def catalog() -> dict:
-    return json.loads(resources.files('lg_cli.resources').joinpath('reference-contracts.json').read_text())
+    return json.loads(_catalog_text())
+
+
+@dataclass(frozen=True)
+class ReferenceContract:
+    category: str
+    catalog_text: str
+
+    def methods(self) -> str:
+        return _methods(self.category, json.loads(self.catalog_text))
+
+    def apply(self, schema: dict, *, stored=False) -> dict:
+        return _apply_contract(schema, self.category, json.loads(self.catalog_text), stored=stored)
+
+    def finalize(self, response: dict, spans: dict) -> dict:
+        return _finalize_cards(response, self.category, spans, json.loads(self.catalog_text))
 
 
 def _schema(value):
@@ -32,7 +52,10 @@ def _schema(value):
 
 
 def card_schema(category: str) -> dict:
-    data = catalog()
+    return _card_schema(category, catalog())
+
+
+def _card_schema(category: str, data: dict) -> dict:
     if category not in data['libraries']:
         raise ValueError('Unknown reference category: ' + category)
     template = {key: [] for key in ('portable_core', 'implementation_details', 'source_locked_details', 'fusion_hooks')}
@@ -41,7 +64,11 @@ def card_schema(category: str) -> dict:
 
 
 def methods(category: str) -> str:
-    spec = catalog()['libraries'][category]
+    return _methods(category, catalog())
+
+
+def _methods(category: str, data: dict) -> str:
+    spec = data['libraries'][category]
     return ('## Reference methods: ' + category + '\n' + spec['perspective']
         + '\nFocus: ' + ', '.join(spec['focus_fields'])
         + '\nExclude: ' + '；'.join(spec['excluded_perspectives'])
@@ -52,13 +79,17 @@ def methods(category: str) -> str:
 
 
 def apply_contract(schema: dict, category: str, *, stored=False) -> dict:
+    return _apply_contract(schema, category, catalog(), stored=stored)
+
+
+def _apply_contract(schema: dict, category: str, data: dict, *, stored=False) -> dict:
     schema = copy.deepcopy(schema)
     entry = schema['properties']['entries']['items']
-    contract = card_schema(category)
+    contract = _card_schema(category, data)
     if stored:
         for key, value in {
             'schema_version': {'const': 'narrative_instance_card.v1'},
-            'card_type': {'const': catalog()['INSTANCE_CARD_TYPES'][category]},
+            'card_type': {'const': data['INSTANCE_CARD_TYPES'][category]},
             'grounding_mode': {'const': 'llm_grounded'},
             'derivation_warnings': {'type': 'array', 'items': {'type': 'string'}},
             'card_quality': {'type': 'object'},
@@ -72,11 +103,15 @@ def apply_contract(schema: dict, category: str, *, stored=False) -> dict:
 
 
 def finalize_cards(response: dict, category: str, spans: dict) -> dict:
+    return _finalize_cards(response, category, spans, catalog())
+
+
+def _finalize_cards(response: dict, category: str, spans: dict, data: dict) -> dict:
     response = copy.deepcopy(response)
-    data = catalog()
+    contract = _card_schema(category, data)
     for entry in response['entries']:
         card = entry['instance_card']
-        jsonschema.validate(card, card_schema(category))
+        jsonschema.validate(card, contract)
         if category == 'Worldview':
             ids = {e['span_id'] for e in entry['evidence']}
             for example in card['rule_application']['event_examples']:

@@ -14,6 +14,7 @@ class WorkflowControl:
     def __init__(self, session):
         self.session = session
         self.approval_handler = None
+        self.source_handler = None
         self._clients = set()
         self.job = None
         self._server = None
@@ -44,12 +45,15 @@ class WorkflowControl:
             path.chmod(0o600)
         return str(Path(self._directory.name) / 'control.sock')
 
-    async def run(self, argv, *, structured=False, env=None, cwd=None, label=None):
+    async def run(self, argv, *, structured=False, env=None, cwd=None, label=None,
+                  input_text=None, on_record=None, on_finish=None,retry_executor=None):
         if self.active:
             raise ValueError('当前工作流尚未结束。')
         self.job = {'id': uuid.uuid4().hex, 'command': label or list(argv[4:] if len(argv) > 4 else argv),
             'status': 'starting', 'attempt': 1, 'guidance': '', 'returncode': None,
-            'stop_requested': False, 'argv': list(argv), 'structured': structured, 'env': env, 'cwd': cwd}
+            'stop_requested': False, 'argv': list(argv), 'structured': structured, 'env': env, 'cwd': cwd,
+            'input_text':input_text, 'on_record':on_record, 'on_finish':on_finish,'retry_executor':retry_executor,
+            'stop_event':asyncio.Event()}
         return await self._execute(self.job)
 
     def _publish(self):
@@ -63,6 +67,10 @@ class WorkflowControl:
                 details=[json.dumps(self.status(), ensure_ascii=False, indent=2)])
 
     async def _execute(self, job):
+        if job['stop_requested']:
+            job['status']='stopped';job['returncode']=130
+            self._publish();self._changed.set()
+            return 130
         job['status'] = 'stopping' if job['stop_requested'] else 'running'
         self._changed.clear()
         self._publish()
@@ -76,9 +84,15 @@ class WorkflowControl:
                 kwargs['env'] = env
             if job['cwd'] is not None:
                 kwargs['cwd'] = job['cwd']
+            if job['input_text'] is not None:
+                kwargs['input_text'] = job['input_text']
+            if job['on_record'] is not None:
+                kwargs['on_record'] = job['on_record']
             code = await self.session.run_command(job['argv'], **kwargs)
             job['returncode'] = code
             job['status'] = 'stopped' if job['stop_requested'] else 'completed' if code == 0 else 'failed'
+            if job['on_finish']:
+                job['on_finish'](code)
             return code
         except BaseException:
             job['status'] = 'failed'
@@ -93,6 +107,7 @@ class WorkflowControl:
             if not self.active:
                 return self.status()
             self.job['stop_requested'] = True
+            self.job['stop_event'].set()
             self.job['status'] = 'stopping'
             self._publish()
             # A just-scheduled process may not yet have an OS handle.
@@ -110,13 +125,23 @@ class WorkflowControl:
             self._require_job(job_id)
             if self.job['status'] not in {'failed', 'stopped'}:
                 raise ValueError('只能重试失败或已停止的工作流，不能重复执行已成功的修改。')
-            if len(guidance) > 16000:
+            if not isinstance(guidance,str) or len(guidance) > 16000:
                 raise ValueError('修改指令过长，请缩短到 16000 字符以内。')
+            previous = dict(self.job)
             self.job['attempt'] += 1
             self.job['guidance'] = guidance or self.job['guidance']
             self.job['returncode'] = None
             self.job['stop_requested'] = False
+            self.job['stop_event'] = asyncio.Event()
             self.job['status'] = 'starting'
+            if self.job.get('retry_executor'):
+                try:
+                    run = self.job['retry_executor'](self.job)
+                except BaseException:
+                    self.job.update(previous)
+                    raise
+                self._publish()
+                return {**self.status(),'runId':run['runId']}
             self._publish()
             self.session.begin_work()
             async def execute():
@@ -161,10 +186,16 @@ class WorkflowControl:
         try:
             request = json.loads(await asyncio.wait_for(reader.readline(), 5))
             action = request.get('action')
+            guard=getattr(self,'action_guard',None)
+            if guard:guard(action)
             if action == 'approval':
                 if self.approval_handler is None:
                     raise ValueError('No approval handler connected.')
                 result = await self.approval_handler(request.get('details', {}))
+            elif action in {'source_begin', 'source_observed', 'source_aborted'}:
+                if self.source_handler is None:
+                    raise ValueError('No generation source capture handler connected.')
+                result = await self.source_handler(action, request)
             elif action == 'status':
                 result = self.status()
             elif action == 'stop':
@@ -185,18 +216,22 @@ class WorkflowControl:
             writer.close()
             await writer.wait_closed()
 
-    async def close(self):
-        await self.cancel_requests()
-        if self.active:
-            await self.stop(self.job['id'])
-        await asyncio.gather(*self._background, return_exceptions=True)
+    async def retire_endpoint(self):
+        """Revoke an Agent transport without stopping independently owned workflows."""
         if self._server:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+        await self.cancel_requests()
         if self._directory:
             self._directory.cleanup()
             self._directory = None
+
+    async def close(self):
+        await self.retire_endpoint()
+        if self.active:
+            await self.stop(self.job['id'])
+        await asyncio.gather(*self._background, return_exceptions=True)
 
 
 def control_request(path, action, **params):

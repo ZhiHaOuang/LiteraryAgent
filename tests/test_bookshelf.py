@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from lg_cli.conversation_store import ConversationStore
 from lg_cli.dashboard import render_status_bar
 from lg_cli.main import interactive_loop, main
 from lg_cli.project_store import ProjectStore
+from tests.test_backend import FakeAgent
 
 
 class BookshelfTests(unittest.TestCase):
@@ -133,15 +135,31 @@ class BookshelfTests(unittest.TestCase):
             store.append(keys[book.name], "user", f"Only {book.name}'s story")
             store.append(keys[book.name], "assistant", f"Reply for {book.name}")
         captured = []
-        class Agent:
+        class Agent(FakeAgent):
             def __init__(self, config, on_event, **kwargs):
+                self.review_only = kwargs.get('review_only', False)
+                if self.review_only:
+                    self.runtime, self.event = None, on_event
+                    self.turn_id, self.closed = None, False
+                else:
+                    super().__init__(config, on_event, **kwargs)
                 self.config, self.thread_id = config, 'fake'
-            async def start(self, *, context):
-                captured.append((self.config.workspace, context))
-            async def run(self, text):
-                return {'status': 'completed'}
+            async def start(self, *, context=''):
+                if not self.review_only:
+                    captured.append((self.config.workspace, context))
+                    await super().start(context=context)
+            async def run(self, text, output_schema=None):
+                if self.review_only:
+                    from tests.intent_fixture import routed_reply
+                    routed = routed_reply(text)
+                    assert routed is not None and output_schema is not None
+                    return {'status':'completed', 'items':[{'type':'agentMessage','text':json.dumps(routed)}]}
+                return await super().run(text, output_schema=output_schema)
             async def close(self):
-                pass
+                if self.review_only:
+                    self.closed = True
+                else:
+                    await super().close()
         session = Mock()
         session.run_command = AsyncMock(return_value=0)
 
@@ -157,13 +175,13 @@ class BookshelfTests(unittest.TestCase):
                     self.assertNotIn(
                         f"Only {'Two' if book == first else 'One'}'s story", texts
                     )
-                    await handler("continue")
+                    await handler("Discuss the current story context.")
                     self.assertEqual(captured[-1][0], book)
                     self.assertIn(f"Only {book.name}'s story", captured[-1][1])
                     self.assertNotIn(f"Only {'Two' if book == first else 'One'}'s story", captured[-1][1])
                 await handler('/newbook "Three"')
                 self.assertTrue(ProjectStore(self.shelf.root / "Three").initialized)
-                await handler("continue")
+                await handler("Discuss the current story context.")
                 self.assertEqual(captured[-1][0], self.shelf.root / 'Three')
                 self.assertEqual(captured[-1][1], '')
                 await session.shutdown_handler()

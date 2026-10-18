@@ -112,14 +112,18 @@ class WritingToolsTests(unittest.TestCase):
                     from lg_cli.book_overview import read_overview
                     self.assertEqual(read_overview(root), "林舟追寻旧信的主人，揭开一段被隐藏的往事。")
                     revision_id = json.loads(response.content[0].text)["id"]
-                    from lg_cli.story_index import build_index
-                    self.assertEqual(build_index(ProjectStore(root))['characters'][0]['name'], '林舟')
+                    saved = ProjectStore(root)
+                    self.assertEqual(saved.get_document("chapter-1").active_version_id, original.active_version_id)
+                    self.assertEqual(saved.get_document("chapter-1").content, "old")
+                    candidate = saved.get_version("chapter-1", 2)
+                    self.assertEqual(candidate.state, "candidate")
+                    self.assertEqual(candidate.metadata['story_index']['characters'][0]['name'], '林舟')
                     stale = await session.call_tool(
                         "edit_manuscript",
                         {
                             "slug": "chapter-1",
                             "content": "stale",
-                            "expected_version_id": original.active_version_id,
+                            "expected_version_id": revision_id,
                             "reason": "stale",
                             "book_overview": "不应保存的简介",
                         },
@@ -137,10 +141,12 @@ class WritingToolsTests(unittest.TestCase):
                         {
                             "slug": "chapter-1",
                             "version_number": 1,
-                            "expected_version_id": revision_id,
+                            "expected_version_id": original.active_version_id,
                         },
                     )
                     self.assertFalse(restored.isError)
+                    self.assertEqual(json.loads(restored.content[0].text)["state"], "candidate")
+                    self.assertEqual(saved.get_document("chapter-1").active_version_id, original.active_version_id)
                     proposal = await session.call_tool(
                         "propose_setting",
                         {

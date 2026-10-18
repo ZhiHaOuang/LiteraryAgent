@@ -75,7 +75,11 @@ def main() -> int:
         with candidate.open("rb") as stream:
             binary_digest = hashlib.file_digest(stream, "sha256").hexdigest()
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
+            "source_commit": commit,
+            "source_tree": subprocess.check_output(["git", "rev-parse", f"{commit}^{{tree}}"], cwd=root, text=True).strip(),
+            "build_profile": "upstream-release",
+            "protocol": "codex-app-server-v2",
             "tag": args.tag,
             "commit": commit,
             "platform": target,

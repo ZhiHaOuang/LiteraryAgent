@@ -1254,19 +1254,22 @@ class LiteraryInput:
         except ProcessLookupError:
             pass
 
-    async def run_command(self, argv, *, env=None, cwd=None, structured=False):
+    async def run_command(self, argv, *, env=None, cwd=None, structured=False,input_text=None,on_record=None):
+        from .workflow_io import WorkflowStream, feed_request
+        records = WorkflowStream(on_record) if on_record else None
         self._workflow_task_keys = set()
         self.process = await asyncio.create_subprocess_exec(
             *argv,
             env=env,
             cwd=cwd,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE if input_text is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
             limit=65536,
         )
         process = self.process
+        feed = asyncio.create_task(feed_request(process,input_text)) if input_text is not None else None
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         pending = ""
         received = False
@@ -1274,6 +1277,9 @@ class LiteraryInput:
         started = time.monotonic()
         try:
             while data := await process.stdout.read(4096):
+                if records:
+                    records.feed(data)
+                    continue  # The service owns validation and public presentation of these records.
                 chunk = decoder.decode(data)
                 if structured:
                     pending += chunk
@@ -1283,10 +1289,14 @@ class LiteraryInput:
                 else:
                     self.append(chunk)
             tail = decoder.decode(b"", final=True)
-            if structured:
+            if records:
+                records.end()
+            if feed:
+                await feed
+            if structured and not records:
                 if pending or tail:
                     received = self._workflow_line(pending + tail) or received
-            else:
+            elif not records:
                 self.append(tail)
             result = await process.wait()
             for key in self._workflow_task_keys:
@@ -1295,13 +1305,13 @@ class LiteraryInput:
                     task['status'] = 'cancelled' if result in {-2, -9, 130, 137} else 'failed' if result else 'completed'
                     task['step'] = {'cancelled': '已停止', 'failed': '执行失败', 'completed': '已完成'}[task['status']]
             self._view_cache = None
-            if result:
+            if result and not records:
                 self.append(f"Command exited with code {result}\n")
-            elif structured and not received:
+            elif structured and not received and not records:
                 self.append(
                     "No workflow result received. Use /run list to inspect the run.\n"
                 )
-            if structured:
+            if structured and not records:
                 label = (
                     "Failed"
                     if result or not received or self._workflow_error
@@ -1310,6 +1320,9 @@ class LiteraryInput:
                 self.append(f"\n{label} in {time.monotonic() - started:.1f}s\n")
             return result
         finally:
+            if feed:
+                feed.cancel()
+                await asyncio.gather(feed,return_exceptions=True)
             if process.returncode is None:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)

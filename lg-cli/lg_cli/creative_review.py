@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 import jsonschema
 
-from .live_agent import LiveAgent
+from .agent_runtime import runtime_factory
 
 SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['decision', 'reason'],
           'properties': {'decision': {'type': 'string', 'enum': ['accept', 'decline']},
@@ -32,14 +32,14 @@ def command_preview(config, argv):
     return preview
 
 
-async def review_creative(config, preview, *, on_event=lambda *_: None, agent_factory=LiveAgent):
+async def review_creative(config, preview, *, on_event=lambda *_: None, agent_factory=None):
     messages = {}
     def event(method, params):
         on_event(method, params)
-        if method == 'item/completed' and params.get('item', {}).get('type') == 'agentMessage':
+        if method == 'item.updated' and params.get('item', {}).get('kind') == 'assistant':
             item = params['item']
             messages[item['id']] = item.get('text', '')
-    reviewer = agent_factory(config, event, review_only=True)
+    reviewer = runtime_factory(config, event, agent_factory=agent_factory, review_only=True)
     try:
         await reviewer.start()
         turn = await reviewer.run(
@@ -48,9 +48,9 @@ async def review_creative(config, preview, *, on_event=lambda *_: None, agent_fa
             'Approve only when evidence supports the change and it introduces no unresolved contradiction. '
             'Decline when evidence or context is insufficient. Do not modify anything. Return decision and reason.\n'
             + json.dumps(preview, ensure_ascii=False), output_schema=SCHEMA)
-        if turn.get('status') != 'completed':
+        if turn.status != 'completed':
             raise ValueError('Creative review did not complete; no changes applied.')
-        value = json.loads(next(reversed(messages.values()), ''))
+        value = json.loads(turn.text or next(reversed(messages.values()), ''))
         jsonschema.validate(value, SCHEMA)
         return value
     finally:

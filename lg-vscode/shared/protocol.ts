@@ -4,7 +4,7 @@ export const CONTRACT_VERSION = 1;
 const id = z.string().min(1).max(512);
 export const LibraryTopicSchema = z.enum(['characters', 'relationships', 'chapters', 'outlines', 'events', 'timeline', 'world', 'storylines', 'analyses', 'bible', 'pending', 'personal', 'usage']);
 export type LibraryTopic = z.infer<typeof LibraryTopicSchema>;
-export const WritingActionSchema = z.enum(['generate', 'review', 'adopt']);
+export const WritingActionSchema = z.enum(['generate', 'review', 'adopt', 'select', 'withdraw', 'confirm-knowledge', 'withdraw-knowledge']);
 export type WritingAction = z.infer<typeof WritingActionSchema>;
 export const LibraryQuerySchema = z.object({topic: LibraryTopicSchema, query: z.string().max(120), offset: z.number().int().nonnegative()}).strict();
 export type LibraryQuery = z.infer<typeof LibraryQuerySchema>;
@@ -82,6 +82,8 @@ export const SnapshotSchema = z.object({
   configuration:z.object({workspace:z.string(),environment:z.string(),profile:z.string(),model:z.string(),provider:z.string()}).optional(),
 });
 export type Snapshot = z.infer<typeof SnapshotSchema>;
+export const ActiveRunSchema = z.object({id,state:z.enum(['running','waiting','cancelling'])});
+export type ActiveRun = z.infer<typeof ActiveRunSchema>;
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ready') }).strict(),
   z.object({type:z.literal('manage'),action:z.enum(['selectBook','models','reconnect','setup'])}).strict(),
@@ -106,8 +108,8 @@ export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export type Session = { id: string; title: string };
 export type BackendEvent =
   | { type: 'backend.status'; status: Snapshot['connection']; error?: string }
-  | { type: 'session.snapshot'; sessionId: string; items: Item[] }
-  | { type: 'run.started'; sessionId: string; runId: string; text: string }
+  | { type: 'session.snapshot'; sessionId: string; items: Item[]; activeRuns?: ActiveRun[] }
+  | { type: 'run.started'; sessionId: string; runId: string; text: string; source?:'retry' }
   | { type: 'assistant.delta'; sessionId: string; runId: string; itemId: string; delta: string }
   | { type: 'item.updated'; sessionId: string; item: Item }
   | { type: 'approval.requested'; sessionId: string; approval: Approval }
@@ -118,3 +120,19 @@ export type BackendEvent =
   | { type: 'run.finished'; sessionId: string; runId: string; status: 'completed' | 'failed' | 'cancelled' | 'interrupted'; error?: string }
   | { type: 'book.updated'; book: Book }
   | { type: 'error'; message: string };
+
+export const BackendEventSchema: z.ZodType<BackendEvent> = z.discriminatedUnion('type', [
+  z.object({type:z.literal('backend.status'),status:z.enum(['connecting','ready','disconnected']),error:z.string().optional()}),
+  z.object({type:z.literal('session.snapshot'),sessionId:id,items:z.array(ItemSchema),activeRuns:z.array(ActiveRunSchema).optional()}),
+  z.object({type:z.literal('run.started'),sessionId:id,runId:id,text:z.string(),source:z.literal('retry').optional()}),
+  z.object({type:z.literal('assistant.delta'),sessionId:id,runId:id,itemId:id,delta:z.string()}),
+  z.object({type:z.literal('item.updated'),sessionId:id,item:ItemSchema}),
+  z.object({type:z.literal('approval.requested'),sessionId:id,approval:ApprovalSchema}),
+  z.object({type:z.literal('approval.resolved'),sessionId:id,requestId:id}),
+  z.object({type:z.literal('approval.expired'),sessionId:id,requestId:id}),
+  z.object({type:z.literal('userInput.requested'),sessionId:id,request:InputRequestSchema}),
+  z.object({type:z.literal('userInput.resolved'),sessionId:id,requestId:id}),
+  z.object({type:z.literal('run.finished'),sessionId:id,runId:id,status:z.enum(['completed','failed','cancelled','interrupted']),error:z.string().optional()}),
+  z.object({type:z.literal('book.updated'),book:BookSchema}),
+  z.object({type:z.literal('error'),message:z.string()}),
+]);

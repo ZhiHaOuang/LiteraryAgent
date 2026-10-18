@@ -13,6 +13,28 @@ from lg_cli.main import main
 
 
 class CLITests(unittest.TestCase):
+    def test_story_stdin_request_is_bounded_and_cannot_mix_with_command_line_text(self):
+        from lg_cli.project_store import ProjectStore
+        from lg_cli.run_store import RunStore
+        with tempfile.TemporaryDirectory() as raw:
+            store=ProjectStore(Path(raw))
+            store.initialize(name='Private story request')
+            store.create_document(kind='chapter',slug='one',title='Chapter',content='Before SELECTED After')
+            argv=['-C',raw,'--runtime-engine','native','edit','one','--mode','grammar','--dry-run','--json','--request-stdin']
+            stdout=io.StringIO()
+            with patch('sys.stdin',io.StringIO(json.dumps({'request':'只改选中段落','passage':'SELECTED'}))),redirect_stdout(stdout):
+                self.assertEqual(main(argv),0)
+            result=json.loads(stdout.getvalue().splitlines()[-1])
+            self.assertEqual((result['type'],result['status']),('story.result','planned'))
+            self.assertEqual(store.get_document('one').content,'Before SELECTED After')
+            before=len(RunStore(Path(raw)).list_runs())
+            for text,extra in (('PRIVATE_SENTINEL',[]),('{"request":"x","argv":[]}',[]),('{"request":"x"}',['mixed-request'])):
+                stdout=io.StringIO()
+                with self.subTest(text=text),patch('sys.stdin',io.StringIO(text)),redirect_stdout(stdout):
+                    self.assertEqual(main([*argv,*extra]),1)
+                self.assertNotIn('PRIVATE_SENTINEL',stdout.getvalue())
+                self.assertEqual(len(RunStore(Path(raw)).list_runs()),before)
+
     def test_story_ledger_review_and_export_commands(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             registry = str(Path(raw) / "registry")

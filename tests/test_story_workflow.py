@@ -19,7 +19,7 @@ class StoryAdapter:
         self.revision_text = revision_text
         self.card_updates = card_updates if card_updates is not None else {"location": "North Gate"}
 
-    def run(self, *, prompt, config, mode, model_profile=None, output_schema=None, on_event=None):
+    def run(self, *, prompt, config, mode, instructions=None, model_profile=None, output_schema=None, on_event=None):
         schema = Path(output_schema).name
         self.calls.append(schema)
         self.prompts.append(prompt)

@@ -94,12 +94,8 @@ def render_dashboard(
     welcome = "What shall we create today?"
     model = model_name(config)
     auth = (
-        (
-            "ChatGPT subscription configured"
-            if config.auth_mode == "chatgpt"
-            else "API profile configured"
-        )
-        if config.credentials_configured
+        "API profile configured" if config.credentials_configured
+        else "Legacy subscription unsupported | /auth" if config.auth_mode == "chatgpt"
         else "No model configured | /auth"
     )
     mark = (

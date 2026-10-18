@@ -60,9 +60,12 @@ def add_story_commands(subparsers: argparse._SubParsersAction[Any]) -> None:
     analysis_chapter = analysis_commands.add_parser("chapter")
     analysis_chapter.add_argument("reference")
     analysis_chapter.add_argument("--category", action="append", choices=sorted(CATEGORIES))
+    analysis_chapter.add_argument('--expected-source-fingerprint',help=argparse.SUPPRESS)
     _json_option(analysis_chapter)
     analysis_volume = analysis_commands.add_parser("volume", help="Review all five dimensions across a volume or book.")
     analysis_volume.add_argument("reference", nargs="?", default="__book__")
+    analysis_volume.add_argument('--category',action='append',choices=sorted(CATEGORIES))
+    analysis_volume.add_argument('--expected-source-fingerprint',help=argparse.SUPPRESS)
     _json_option(analysis_volume)
     adjudicate = analysis_commands.add_parser("adjudicate", help="Record an explicit, source-bound human dismissal of one false-positive finding.")
     adjudicate.add_argument("reference")
@@ -102,6 +105,16 @@ def add_story_commands(subparsers: argparse._SubParsersAction[Any]) -> None:
 def dispatch_story_command(args: argparse.Namespace, config: LGConfig) -> int | None:
     if args.command not in STORY_COMMANDS:
         return None
+    if getattr(args,'request_stdin',False):
+        from .workflow_io import read_story_request
+        if args.request or getattr(args,'passage',None) is not None:
+            raise ValueError('Use stdin request or command-line text, not both')
+        request = read_story_request(sys.stdin)
+        if 'passage' in request and args.command!='edit':
+            raise ValueError('Selected passage applies only to edit')
+        args.request = [request['request']]
+        if 'passage' in request:
+            args.passage = request['passage']
     if args.command == "project":
         return _dispatch_project(args, config)
     store = ProjectStore(config.workspace)
@@ -121,9 +134,11 @@ def dispatch_story_command(args: argparse.Namespace, config: LGConfig) -> int | 
             return _emit_many(BookAnalysisStore(store).list(args.reference, volume=args.volume), args, heading="Book analyses",
                 formatter=lambda item: f"{item['chapter']} | {item['library']} | {item['status']}\n{item['report']['summary']}")
         result = ChapterAnalysisService(config).analyze(args.reference, categories=getattr(args, "category", None),
-            on_event=_renderer(args), volume=args.analysis_command == "volume")
-        _emit(result, args, text=f"Analysis run {result['run_id']}: {result['status']}")
-        return 1 if result["status"] == "blocked" else 0
+            on_event=_renderer(args), volume=args.analysis_command == "volume",
+            expected_fingerprint=getattr(args,'expected_source_fingerprint',None))
+        if getattr(args,'backend_worker',False):print(json.dumps({'type':'analysis.result',**result},ensure_ascii=False))
+        else:_emit(result, args, text=f"Analysis run {result['run_id']}: {result['status']}")
+        return 1 if result["status"] == "blocked" and not getattr(args,'backend_worker',False) else 0
     if args.command in {"browse", "characters", "events", "storylines"}:
         topic = args.topic if args.command == "browse" else args.command
         entries = project_entries(store, topic)
@@ -486,6 +501,7 @@ def _generation_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     parser.add_argument("--quiet", action="store_true", default=argparse.SUPPRESS)
     parser.add_argument("--model", default=argparse.SUPPRESS)
+    parser.add_argument('--request-stdin',action='store_true',help='Read a bounded JSON request and optional selected passage from stdin.')
 
 
 def _json_option(parser: argparse.ArgumentParser) -> None:

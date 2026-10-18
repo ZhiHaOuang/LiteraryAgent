@@ -1,6 +1,8 @@
 # LiteraryGiant Agent
 
-LiteraryGiant (`LG`) is an LG-owned literary agent runtime that uses Codex as an updateable inference engine. Product behavior lives outside `core/codex`; the vendored core remains byte-for-byte verifiable against `CODEX_CORE_COMMIT`.
+LiteraryGiant (`LG`) is a literary agent system with product-owned task scope, orchestration, story state, and author control. Its shared Literary Backend supports Codex and Native execution adapters; their capability coverage is still being aligned. Product behavior lives outside `core/codex`, which remains an updateable vendored runtime.
+
+The next development priority is the Literary Agent Execution Model: narrative context, semantic tool contracts, creative decision authorization, and task-dependent execution strategies. Skills and subagents support these mechanisms. See the [current architecture](docs/architecture.md) and [verified progress and roadmap](docs/roadmap.md).
 
 ## Repository Boundary
 
@@ -29,14 +31,14 @@ PYTHONPATH=lg-cli python -m lg_cli init
 PYTHONPATH=lg-cli python -m lg_cli outline --dry-run "写一个都市重生大纲"
 ```
 
-LG never opens a Codex login flow. Configure one of these environment variables for real model runs:
+LG does not automatically open a Codex login flow during writing. Official login requires an explicit author action; see [authentication profiles](docs/key-profiles.md). API-based runs can use a configured provider profile or these environment variables:
 
 ```bash
 export LITERARYGIANT_API_KEY="..."
 # LG_API_KEY, CODEX_API_KEY, and OPENAI_API_KEY are also accepted.
 ```
 
-Prompt text is sent to `codex exec` over stdin. The child receives the key as `CODEX_API_KEY` inside an isolated `.literarygiant/codex-home`.
+The selected Runtime adapter handles model transport. Codex stages use `codex exec`, while interactive sessions use the session adapter; Native has its own HTTP and MCP loop. Real provider credentials stay out of Codex child environments, which use the product's process-local bridge token. Subscription access and explicitly configured API access remain separate.
 
 ## Story Project Workflow
 
@@ -61,7 +63,7 @@ literary version diff north-gate 1 2
 literary version accept north-gate 2
 ```
 
-Potential facts from model output enter the proposal queue. Only the author promotes them:
+Potential facts from model output enter the proposal queue. Promotion follows the author's creative authorization policy and source-version checks:
 
 ```bash
 literary bible proposal list
@@ -79,7 +81,7 @@ literary outline     literary world       literary character
 literary plot        literary write       literary check       literary ref
 ```
 
-Each stage resolves an independent subagent, skill, model profile, tool declaration, prompt, and strict output schema. `WorkflowRunner` emits `RunEvent` records while persisting prompts, stage outputs, metadata, and events under `.literarygiant/runs/<run-id>/`.
+The staged path resolves subagents, skills, model profiles, tool declarations, prompts, and output schemas. `WorkflowRunner` persists stage results and `RunEvent` records under `.literarygiant/runs/<run-id>/`. Interactive tool execution and scene operations are separate existing paths. Task-dependent selection across these strategies is an architecture milestone, not a completed guarantee.
 
 Useful commands:
 

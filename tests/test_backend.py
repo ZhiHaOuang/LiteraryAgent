@@ -5,6 +5,7 @@ import unittest
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from lg_cli.backend import Backend, ProcessHost
@@ -28,7 +29,7 @@ class FakeAgent:
 
     async def run(self, text, output_schema=None):
         self.turn_id = 'turn-1'
-        if text == 'wait':
+        if text == 'wait' or text.endswith('\n\nAuthor message:\nwait'):
             await asyncio.Future()
         if text == 'approve':
             reply = await self.on_request('item/commandExecution/requestApproval', {'command':'test'})
@@ -44,9 +45,21 @@ class FakeAgent:
     async def interrupt(self):
         pass
 
-    async def close(self):
+    async def stop_execution(self):
         self.closed = True
+
+    async def close(self):
+        await self.stop_execution()
         self.runtime.release()
+
+
+async def start_waiting_run(backend, key):
+    response = await backend.run(key, 'wait')
+    for _ in range(100):
+        if backend.session(key).get('agent_run_id') == response['runId']:
+            return response
+        await asyncio.sleep(.01)
+    raise AssertionError('Agent approval fixture did not start')
 
 
 class BackendTests(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +94,42 @@ class BackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(events['events'])
         cursor = events['events'][-1]['cursor']
         self.assertEqual(self.service.journal.read(self.key,cursor), [])
+
+    async def test_analysis_worker_preserves_profile_runtime_and_refusal(self):
+        ProjectStore(self.root).create_document(kind='chapter',slug='one',title='One',content='原稿')
+        self.service.config = replace(self.service.config,environment='isolated-book',runtime_engine='native',
+            runtime_manifest=self.root/'runtime.json')
+        control = self.service.session(self.key)['control']
+        commands = []
+        async def run(argv,**kwargs):
+            from lg_cli.book_analysis import BookAnalysisStore
+            from lg_cli.run_store import RunStore
+            commands.append(argv)
+            project=ProjectStore(self.root)
+            records=BookAnalysisStore(project);snapshot=records.snapshot('one')
+            runs=RunStore(self.root)
+            handle=runs.create(workflow='chapter-analysis',command='analysis',request='one',provider='synthetic',model='synthetic')
+            report={'summary':'Checked source','entries':[],'findings':[]}
+            records.save(snapshot,'Worldview',report,handle.run_id)
+            runs.write_stage(handle,stage_id='Worldview',content=json.dumps(report),metadata={})
+            runs.finalize(handle,status='completed')
+            kwargs['on_record']({'type':'analysis.result','run_id':handle.run_id,'status':'completed','categories':['Worldview'],'blockers':[]})
+            return 0
+        control.run = run
+        for decision in ('decline','accept'):
+            result = await self.service.dispatch('workflow/start',{'sessionId':self.key,'chapter':'one','category':'Worldview'})
+            for _ in range(100):
+                if self.service.approvals.pending:
+                    break
+                await asyncio.sleep(.01)
+            self.service.approvals.resolve(next(iter(self.service.approvals.pending)),{'decision':decision})
+            finished = await self.finish(result)
+            self.assertEqual(finished['status'],'cancelled' if decision=='decline' else 'completed')
+            self.assertEqual(len(commands),0 if decision=='decline' else 1)
+        argv = commands[0]
+        self.assertEqual(argv[argv.index('--environment')+1],'isolated-book')
+        self.assertEqual(argv[argv.index('--runtime-engine')+1],'native')
+        self.assertEqual(argv[argv.index('--runtime-manifest')+1],str(self.root/'runtime.json'))
 
     async def test_structured_output_validated_and_external_refs_rejected(self):
         schema={'type':'object','properties':{'answer':{'type':'integer'}},'required':['answer'],'additionalProperties':False}
@@ -176,6 +225,19 @@ class BackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(records[0]['result']['protocolVersion'],'lg.backend.v1')
         self.assertEqual(len(records[2]['result']['categories']),5)
 
+    async def test_transport_runtime_override_wins_over_project_config(self):
+        config=self.root/'.literarygiant/config.toml'
+        config.write_text('[runtime]\nengine = "native"\n')
+        env=dict(os.environ,PYTHONPATH=str(Path(__file__).resolve().parents[1]/'lg-cli'))
+        for engine in (None,'codex','native'):
+            args=[sys.executable,'-m','lg_cli.backend_stdio','--workspace',str(self.root)]
+            if engine:args+=['--runtime-engine',engine]
+            result=await asyncio.to_thread(subprocess.run,args,
+                input=json.dumps({'jsonrpc':'2.0','id':1,'method':'initialize'})+'\n',
+                text=True,capture_output=True,env=env,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(json.loads(result.stdout)['result']['runtime'],engine or 'native')
+
     async def test_auto_creative_review_decline_and_failure_never_write(self):
         from unittest.mock import AsyncMock, patch
         store=ProjectStore(self.root)
@@ -199,6 +261,7 @@ class BackendTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 stopped.set()
         await self.service.dispatch('permissions/set', {'sessionId':self.key,'mode':'auto_review'})
+        await start_waiting_run(self.service,self.key)
         endpoint=await self.service.session(self.key)['control'].endpoint()
         with patch('lg_cli.creative_review.review_creative', review):
             request=asyncio.create_task(asyncio.to_thread(control_request,endpoint,'approval',details={'tool':'edit_manuscript'}))
@@ -207,3 +270,48 @@ class BackendTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stopped.is_set())
             with self.assertRaises(ValueError):
                 await request
+
+    async def test_mcp_adoption_does_not_inherit_full_operation_permission(self):
+        from lg_cli.workflow_control import control_request
+        await self.service.dispatch('permissions/set', {
+            'sessionId': self.key, 'mode': 'full_access', 'creativeMode': 'ask'})
+        await start_waiting_run(self.service,self.key)
+        endpoint = await self.service.session(self.key)['control'].endpoint()
+        pending = asyncio.create_task(asyncio.to_thread(control_request, endpoint, 'approval',
+            details={'tool': 'studio_accept', 'arguments': {'slug': 'one', 'version_number': 2}}))
+        try:
+            for _ in range(200):
+                if self.service.approvals.pending:
+                    break
+                await asyncio.sleep(.01)
+            self.assertTrue(self.service.approvals.pending)
+            event = [e for e in self.events if e['method'] == 'approval/requested'][-1]
+            self.assertEqual(event['params']['kind'], 'creative')
+            self.service.approvals.resolve(event['params']['approvalId'], {'decision': 'decline'})
+            self.assertEqual(await pending, {'decision': 'decline'})
+            result = await asyncio.to_thread(control_request, endpoint, 'approval',
+                details={'tool': 'studio_draft'})
+            self.assertEqual(result['decision'], 'accept')
+            self.assertEqual(result['generation_sources']['run_id'], self.service.session(self.key)['run_id'])
+            self.assertEqual(result['generation_sources']['coverage'], 'unknown')
+            self.assertEqual(result['generation_sources']['observations'], [])
+        finally:
+            await self.service.session(self.key)['control'].cancel_requests()
+            await asyncio.gather(pending, return_exceptions=True)
+
+    async def test_mcp_creative_auto_review_failure_never_grants_approval(self):
+        from lg_cli.workflow_control import control_request
+        from unittest.mock import AsyncMock, patch
+        await self.service.dispatch('permissions/set', {
+            'sessionId': self.key, 'mode': 'full_access', 'creativeMode': 'auto_review'})
+        await start_waiting_run(self.service,self.key)
+        endpoint = await self.service.session(self.key)['control'].endpoint()
+        with patch('lg_cli.creative_review.review_creative', AsyncMock(return_value={
+            'decision': 'decline', 'reason': '未授权设定变更'})):
+            result = await asyncio.to_thread(control_request, endpoint, 'approval',
+                details={'tool': 'studio_accept_proposal'})
+            self.assertEqual(result['decision'], 'decline')
+        with patch('lg_cli.creative_review.review_creative', AsyncMock(side_effect=ValueError('审查不可用'))):
+            with self.assertRaisesRegex(ValueError, '审查不可用'):
+                await asyncio.to_thread(control_request, endpoint, 'approval',
+                    details={'tool': 'studio_adopt_reference'})

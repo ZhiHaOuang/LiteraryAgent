@@ -71,6 +71,16 @@ test('real pinned app-server: LG MCP approval, denial, overview, cancel, history
   await turn('CASE:adoptref','accept');
   assert.equal((await backend.readLibrary({topic:'pending',query:'林砚',offset:0})).total,0);
   await assert.rejects(backend.prepareWriting('characters',person.key,'generate',person.fingerprint),/已变化/);
+  await turn('CASE:edit', 'accept');
+  assert.ok(store.state.items.some(i => i.diff?.before === '作者已采纳的原稿。'
+    && i.diff.after === 'Agent 提出的改稿候选。' && !i.diff.applied));
+  const chapters = await backend.readLibrary({topic:'chapters',query:'原稿',offset:0});
+  const manuscript = await backend.readEntry('chapters',chapters.entries[0].key);
+  assert.match(manuscript.body,/作者已采纳的原稿。/);
+  assert.ok((await backend.readLibrary({topic:'pending',query:'原稿',offset:0})).total > 0);
+  await turn('CASE:restore', 'accept');
+  const preserved = await backend.readEntry('chapters',chapters.entries[0].key);
+  assert.match(preserved.body,/作者已采纳的原稿。/);
   await turn('CASE:text');
   assert.ok(events.some(e=>e.type==='assistant.delta'));
   await backend.run(session.id,'CASE:slow'); await backend.cancel(session.id);

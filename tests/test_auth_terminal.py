@@ -104,14 +104,15 @@ class AuthTerminalTests(unittest.TestCase):
                 stdin=slave,
                 stdout=slave,
                 stderr=slave,
-                env={**os.environ, "HOME": home, "TERM": "xterm-256color"},
+                env={**os.environ, "HOME": home, "TERM": "xterm-256color",
+                     "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "lg-cli")},
                 cwd=home,
             )
             os.close(slave)
             secret = b"fake-terminal-only-secret"
             steps = [
                 (b"Add provider", b"\r"),
-                (b"Connection type", b"\x1b[B\r"),
+                (b"Connection type", b"\r"),
                 (b"Profile name", b"\r"),
                 (b"account", b"\r"),
                 (b"/anthropic", b"\r"),
@@ -174,7 +175,8 @@ class AuthTerminalTests(unittest.TestCase):
                     stdin=slave,
                     stdout=slave,
                     stderr=slave,
-                    env={**os.environ, "HOME": home, "TERM": "xterm-256color"},
+                    env={**os.environ, "HOME": home, "TERM": "xterm-256color",
+                     "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "lg-cli")},
                     cwd=home,
                 )
                 os.close(slave)

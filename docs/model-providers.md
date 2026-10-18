@@ -1,8 +1,8 @@
 # Model Providers and Authentication
 
-In an interactive terminal, `literary auth add gpt` asks you to choose subscription,
-paid OpenAI API, or an existing proxy. Cancelling does not start login or change the
-active profile. Non-interactive calls must use an explicit provider/login command.
+LG is API-only. ChatGPT OAuth, browser/device login and subscription profile
+activation are disabled. `literary auth add gpt` requires an explicit
+`--provider`; it never guesses an authentication method or billing channel.
 
 ## Company APIs
 
@@ -50,37 +50,20 @@ selected: `DEEPSEEK_API_KEY`, `GLM_API_KEY` / `ZHIPU_API_KEY`,
 `STEPFUN_API_KEY` / `STEP_API_KEY`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY`.
 Explicit `--environment NAME` does not inherit these production keys.
 
-## ChatGPT Subscription
+## Migrating Legacy ChatGPT Profiles
 
-```bash
-literary --environment sandbox auth login gpt
-literary --environment sandbox auth status
-literary --environment sandbox auth use gpt
-```
-
-This runs the already installed, verified Codex binary's `login --device-auth`.
-Complete the displayed official login in your own browser. Device-code login may
-need to be enabled in account/workspace security settings. `--browser` selects
-the alternative browser callback flow. LG does not install a proxy or launch
-login merely because a writing request lacks credentials.
-
-The environment must contain `[runtime].manifest` pointing to the pinned runtime.
-Login uses an LG-owned `CODEX_HOME`, with file-based credentials and the ChatGPT
-login method explicitly enforced. It does not reuse `~/.codex`, browser cookies,
-or production API keys. Codex handles subscription token refresh. Successful
-cached-login verification is not a guarantee of live entitlement or quota.
-
-Without `--model`, the subscription profile uses Codex's account default. Specify
-only a model that the account supports; API-only models are not automatically
-available on a subscription. Each account can have a separate profile name.
-Changing accounts may separate native Codex session histories because each profile
-has its own auth home; the novel database remains shared by project workspace.
-
-For paid OpenAI API access instead, make that choice explicit:
+Existing subscription profiles remain readable, but cannot be reactivated or used
+for generation. Their auth caches are not read, copied, refreshed or deleted by
+these migration commands. `auth login` returns an API-only migration error.
+Create a separate API profile, explicitly selecting the provider and model:
 
 ```bash
 literary auth add gpt-api --provider openai --model YOUR_API_MODEL_ID
 ```
+
+This requires an API key with access to the selected model. Subscription access
+is not converted into API access. Existing works, versions and conversations are
+not changed; legacy history readers remain a separate compatibility concern.
 
 ## Existing CPA or Other Proxies
 
@@ -114,7 +97,7 @@ foreground/background, with no color codes, borders, full-screen display or arro
 key controls. Enter an item number to select it; zero or an empty menu selection
 returns. Text prompts display defaults; Ctrl-C cancels. Key prompts disable echo.
 It supports profile selection, adding providers, changing the model, replacing API
-keys, and explicit ChatGPT login.
+keys. Legacy subscription entries display migration guidance.
 The existing Python writing terminal exposes `/auth` and `/model`; `/auth use NAME`
 or `/model MODEL_ID` applies to the next turn while preserving `--environment`.
 
@@ -122,8 +105,7 @@ The separately built native LG TUI reuses Codex's model picker for its active
 provider. API model catalogs contain configured models, not a fetched inventory.
 Switching providers requires restarting that native session. This patch changes
 the native runtime fingerprint, so an older prepared/build directory must not be
-treated as a current verified build. Native UI compilation and live subscription
-testing remain separate acceptance steps.
+treated as a current verified build. Native UI compilation remains a separate acceptance step; it is also API-only at the LG launch boundary.
 
 ## Verification and Limits
 
@@ -134,7 +116,7 @@ literary --environment sandbox -C /path/to/test-book doctor --probe
 
 Only `--probe` sends a model request. Automated tests use simulated upstreams and a
 real pinned Codex process for protocol/MCP roundtrips. They do not prove that your
-key, subscription, quota, or private proxy is usable; test each desired profile
+key, quota, or private proxy is usable; test each desired profile
 explicitly. Messages currently supports text, tools and validated JSON output;
 images and opaque reasoning blocks are not supported. StepFun requests omit the
 undocumented `thinking` and `tool_choice` fields and reject forced tool selection.

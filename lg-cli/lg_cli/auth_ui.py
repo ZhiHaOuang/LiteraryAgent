@@ -235,14 +235,6 @@ def manage_auth(environment: str, workspace: Path | None = None) -> int:
     )
 
 
-def _login_subscription(*args, **kwargs):
-    from .subscription_auth import login_subscription
-
-    if _backend.get():
-        kwargs["run_process"] = _backend.get()[1]
-    return login_subscription(*args, **kwargs)
-
-
 def _manage_auth(environment: str, workspace: Path | None = None) -> int:
     if not _backend.get() and (not sys.stdin.isatty() or not sys.stdout.isatty()):
         raise ValueError(
@@ -272,15 +264,16 @@ def _manage_auth(environment: str, workspace: Path | None = None) -> int:
                 _add(environment, workspace)
                 continue
             profile = data["profiles"][selected]
+            if profile["auth_mode"] == "chatgpt":
+                from .config import API_ONLY_MESSAGE
+                raise ValueError(API_ONLY_MESSAGE)
             action = radiolist_dialog(
                 title=selected,
                 text=f"{profile['provider']} | {profile['protocol']}\n{profile['base_url']}",
                 values=[
                     ("use", "Activate"),
                     ("model", "Change model"),
-                    ("login", "Sign in with ChatGPT")
-                    if profile["auth_mode"] == "chatgpt"
-                    else ("key", "Replace API key"),
+                    ("key", "Replace API key"),
                 ],
             ).run()
             if action == "use":
@@ -298,15 +291,6 @@ def _manage_auth(environment: str, workspace: Path | None = None) -> int:
                 ).run()
                 if key is not None:
                     save_profile(environment, selected, key, replace=True)
-            if action == "login":
-                code = _login_subscription(
-                    environment,
-                    selected,
-                    workspace or Path.cwd(),
-                    model=profile["model"],
-                )
-                if code:
-                    return code
         except ValueError as exc:
             message_dialog(title="Configuration error", text=str(exc)).run()
 
@@ -315,6 +299,8 @@ def profile_label(name: str, profile: dict, data: dict) -> str:
     provider = profile['provider']
     preset = PROVIDERS.get(provider)
     label = f"{preset.name if preset else provider} | {profile['model']}"
+    if profile.get("auth_mode") == "chatgpt":
+        label += " [unsupported; add API profile]"
     duplicates = sum(
         item['provider'] == provider and item['model'] == profile['model']
         for item in data['profiles'].values()
@@ -328,24 +314,9 @@ def _add(environment: str, workspace: Path | None = None) -> None:
     provider = radiolist_dialog(
         title="Provider",
         text="Connection type",
-        values=[
-            ("codex", "ChatGPT subscription (official Codex login)"),
-            *[(name, preset.name) for name, preset in PROVIDERS.items()],
-        ],
+        values=[(name, preset.name) for name, preset in PROVIDERS.items()],
     ).run()
     if provider is None:
-        return
-    if provider == "codex":
-        name = input_dialog(
-            title="ChatGPT subscription", text="Profile name", default="gpt"
-        ).run()
-        if name is not None:
-            code = _login_subscription(environment, name, workspace or Path.cwd())
-            if code:
-                message_dialog(
-                    title="Login not completed",
-                    text=f"Codex exited with status {code}; the previous active profile is unchanged.",
-                ).run()
         return
     preset = PROVIDERS[provider]
     name = input_dialog(title=preset.name, text="Profile name", default=provider).run()

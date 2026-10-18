@@ -61,7 +61,11 @@ class AdapterTests(unittest.TestCase):
 
     def test_headless_stage_has_no_implicit_collaboration(self):
         with tempfile.TemporaryDirectory() as raw:
-            args = _exec_args(config=make_config(Path(raw)), mode="write", model_profile="writer", final_path=Path(raw) / "final", output_schema=None)
+            from lg_cli.stage_input import prepare_stage_input
+            prepared = prepare_stage_input('Assigned task', guidance='')
+            path = Path(raw) / 'prepared-instructions.txt'
+            path.write_text(prepared.instructions)
+            args = _exec_args(config=make_config(Path(raw)), mode="write", model_profile="writer", final_path=Path(raw) / "final", output_schema=None, instructions_path=path)
             self.assertIn("features.multi_agent=false", args)
             self.assertIn("features.multi_agent_v2=false", args)
             self.assertIn("features.collaboration_modes=false", args)
@@ -70,8 +74,26 @@ class AdapterTests(unittest.TestCase):
             self.assertIn("include_collaboration_mode_instructions=false", args)
             setting = next(arg for arg in args if arg.startswith("model_instructions_file="))
             instructions = Path(json.loads(setting.split("=", 1)[1])).read_text()
+            self.assertEqual(instructions, prepared.instructions)
             self.assertIn("non-interactive workflow", instructions)
             self.assertIn("Do not ask for approval", instructions)
+
+    def test_literary_stage_cannot_use_generic_file_or_execution_tools(self):
+        with tempfile.TemporaryDirectory() as raw:
+            options = dict(config=make_config(Path(raw)),model_profile='writer',
+                final_path=Path(raw)/'final',output_schema=None)
+            for mode in ('chat','outline','world','character','plot','ref','check','write'):
+                with self.subTest(mode=mode):
+                    args = _exec_args(mode=mode,**options)
+                    for feature in ('shell_tool','unified_exec','apply_patch_freeform','view_image','apps','plugins','recommended_plugins','sleep_tool'):
+                        self.assertIn('features.'+feature+'=false',args)
+                    self.assertIn('web_search="disabled"',args)
+                    self.assertIn('tools.experimental_request_user_input.enabled=false',args)
+                    self.assertIn('tools.update_plan.enabled=false',args)
+                    self.assertEqual(args[args.index('--sandbox')+1],'read-only')
+            code = _exec_args(mode='code',**options)
+            self.assertEqual(code[code.index('--sandbox')+1],'workspace-write')
+            self.assertNotIn('features.shell_tool=false',code)
 
     def test_locked_runtime_fails_closed_on_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -131,7 +153,7 @@ class AdapterTests(unittest.TestCase):
                     on_event=events.append,
                 )
             self.assertTrue(result.ok, result.error)
-            self.assertEqual(prompt_path.read_text(encoding="utf-8"), "private prompt via stdin\n")
+            self.assertEqual(prompt_path.read_text(encoding="utf-8"), "private prompt via stdin")
             argv = json.loads(argv_path.read_text(encoding="utf-8"))
             self.assertNotIn("private prompt via stdin", argv)
             self.assertEqual(argv[-1], "-")

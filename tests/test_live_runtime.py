@@ -1,3 +1,4 @@
+from lg_cli.codex_events import CodexEvents
 """Opt-in integration against the pinned binary and an in-process fake provider."""
 import asyncio
 import json
@@ -144,15 +145,15 @@ class LiveRuntimeTests(unittest.TestCase):
                     yield from message_events(delta={'type':'text_delta','text':'Both reviews have been summarized.'})
             session=LiteraryInput(root/'history',input=pipe,output=DummyOutput(),usage_path=root/'usage.json')
             view=LiveView(session)
+            presentation=CodexEvents(lambda m,p:view("lg.event", {"type":m,"runId":"runtime",**p}), lambda:agent.thread_id)
             events=[]
             def event(method,params):
                 events.append((method,params))
-                view(method,params)
+                presentation(method,params)
             with patch('lg_cli.live_agent.provider_bridge', side_effect=lambda _: AnthropicBridge(config,stream_factory=factory)):
                 agent=LiveAgent(config,event)
                 try:
                     await agent.start()
-                    view.thread_id=agent.thread_id
                     await agent.run('Connectivity test: coordinate two independent reviews, then summarize them.')
                     await asyncio.sleep(.3)
                     self.assertGreaterEqual(len(session.tasks),2,[(m,p.get('item',{}).get('type')) for m,p in events])
@@ -215,10 +216,10 @@ class LiveRuntimeTests(unittest.TestCase):
                     yield from message_events(delta={'type':'text_delta','text':'已停止旧任务，并带新指令启动重试。'})
             view=LiveView(session)
             with patch('lg_cli.live_agent.provider_bridge',side_effect=lambda _:AnthropicBridge(config,stream_factory=factory)):
-                agent=LiveAgent(config,view,control_socket=await control.endpoint())
+                presentation=CodexEvents(lambda m,p:view("lg.event", {"type":m,"runId":"runtime",**p}), lambda:agent.thread_id)
+                agent=LiveAgent(config,presentation,control_socket=await control.endpoint())
                 try:
                     await agent.start()
-                    view.thread_id=agent.thread_id
                     await agent.run('Stop the active explicit command and retry it with the new direction.')
                     self.assertNotEqual(await worker,0)
                     for _ in range(200):

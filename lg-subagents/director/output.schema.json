@@ -58,12 +58,18 @@
       "items": {
         "type": "string"
       }
+    },
+    "book_overview": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "One concise Chinese sentence about the whole book, updated with generated prose; not a chapter recap. Empty only for non-prose stages."
     }
   },
   "required": [
     "summary",
     "artifact_markdown",
     "handoff",
-    "risks"
+    "risks",
+    "book_overview"
   ]
 }

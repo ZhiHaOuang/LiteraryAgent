@@ -75,11 +75,12 @@
         "literarygiant.backend": {
           "type": "string",
           "enum": [
+            "literary",
             "codex"
           ],
-          "default": "codex",
+          "default": "literary",
           "scope": "machine-overridable",
-          "description": "正式版本使用与 CLI 共用的 LG 内核。"
+          "description": "两种选择均使用统一 LG 会话服务。literary 沿用 LG 执行器配置；codex 指定 Codex 执行器。旧 Extension 对话导入后在 LG 会话中接续，原始历史保留。"
         },
         "literarygiant.pythonPath": {
           "type": "string",
@@ -91,7 +92,7 @@
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
-          "description": "LG 指定的 runtime.json 绝对路径，不从 PATH 查找。"
+          "description": "Codex runtime.json 绝对路径；可留空沿用 LG 配置，Native 执行器不使用此项。"
         },
         "literarygiant.bookPath": {
           "type": "string",

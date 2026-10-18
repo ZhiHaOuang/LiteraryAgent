@@ -1,0 +1,169 @@
+{
+  "repository": "https://github.com/zenstory-ai/oh-story-claudecode",
+  "commit": "2cf7be61b139f3852c82f981a7ff4eed2aaf5926",
+  "commit_date": "2026-10-10T11:43:04Z",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "52c71355258924a967927780245f70677b38ff7d073c03f9096df33888f34653",
+      "bytes": 1081
+    },
+    {
+      "path": "skills/story/SKILL.md",
+      "sha256": "e12c2c6dd896f1981767f9e52b0ed244db736d819e9dddde3f5fcc110c8f41f6",
+      "bytes": 12423
+    },
+    {
+      "path": "skills/story-long-write/SKILL.md",
+      "sha256": "de63533d8150367b2fce4bb1209158fde64b4e1739e0e9082160f81716b8dcdc",
+      "bytes": 14551
+    },
+    {
+      "path": "skills/story-long-write/references/workflow-chapter.md",
+      "sha256": "3dc19a1f5f77d80ce3a353f9bc91af0ae054d90ad6b01ecc8a45b019a9f3e866",
+      "bytes": 14839
+    },
+    {
+      "path": "skills/story-long-write/references/workflow-revision.md",
+      "sha256": "384a4fb400acd6a97bf57ab2ac964d72643a4c722494c909053a6b42a1b763f3",
+      "bytes": 6803
+    },
+    {
+      "path": "skills/story-long-write/references/workflow-outline.md",
+      "sha256": "661b8ad4204aebbd58d756b58fbb1b441c7c00debbc69db929a06d2124a13d94",
+      "bytes": 21219
+    },
+    {
+      "path": "skills/story-long-write/references/tracking-transaction.md",
+      "sha256": "51577c811e75e3e3f4a4f60595e5a56440bc3ee361510a860ee473d45cf4ff7b",
+      "bytes": 15296
+    },
+    {
+      "path": "skills/story-import/scripts/tracking_commit.py",
+      "sha256": "a20f1bd8d4bd560b8fcc5b85530f62684edb434630c39ba9ebebc13d560bfda0",
+      "bytes": 83785
+    },
+    {
+      "path": "skills/story-import/SKILL.md",
+      "sha256": "a264414d64efd30152cb8222d90ecf46172d6ad48244c1c559d0163b09ce2c8b",
+      "bytes": 12303
+    },
+    {
+      "path": "skills/story-setup/SKILL.md",
+      "sha256": "99fe0545686d5c96b472539a9392e78d8443249ec215ab61d7049a010e32651b",
+      "bytes": 18727
+    },
+    {
+      "path": "skills/story-setup/references/templates/agents/chapter-extractor.md",
+      "sha256": "9686b011e9a5b71ee44f876751be2ac46a7e36992721570d6701fca7b4b4b106",
+      "bytes": 16811
+    },
+    {
+      "path": "skills/story-setup/references/templates/agents/character-designer.md",
+      "sha256": "82360facd2b3db2cfa3009faf97be1bb94a0d4ff3f581b1e109d2245aace2742",
+      "bytes": 9327
+    },
+    {
+      "path": "skills/story-setup/references/templates/agents/consistency-checker.md",
+      "sha256": "d5061d734b8febfd5c394222c4d8ec5a7166dfd4fb19f42a07d02dba5f7e4f7f",
+      "bytes": 12010
+    },
+    {
+      "path": "skills/story-setup/references/templates/agents/narrative-writer.md",
+      "sha256": "cb130dc6bba15229c2fb4e0148de5854d060a48241c31354cd4c9e10e432eaaf",
+      "bytes": 15330
+    },
+    {
+      "path": "skills/story-setup/references/templates/agents/story-architect.md",
+      "sha256": "5fdfdfcca9da63468221516ca9331d7b72fc4dd207220a2786cb62873ec9e628",
+      "bytes": 10772
+    },
+    {
+      "path": "skills/story-setup/references/templates/agents/story-explorer.md",
+      "sha256": "490612eb8d3bb9c58a3c3375282ced4d3f09306aff0710e0234ff87ad950aa70",
+      "bytes": 11508
+    },
+    {
+      "path": "skills/story-setup/references/templates/agents/story-researcher.md",
+      "sha256": "2240f7b500fdba007282c9fdbb1f2d677efd73a006154ecb410037ae954eb5fe",
+      "bytes": 12365
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/check-prose-after-write.sh",
+      "sha256": "770289b7cd14d202ad321ef121f5761e0a21dbd15b3f721e798a28ff2ee7a0bb",
+      "bytes": 6126
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/detect-story-gaps.sh",
+      "sha256": "03a3201f28782382e533c4b66591adf062a4091e2d2f3908c8efc4f981548b38",
+      "bytes": 7199
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/guard-outline-before-prose.sh",
+      "sha256": "77ad66f0bbaf071bd6f5c9a705d7af79efb8f97b66380c52ada16afdbe970675",
+      "bytes": 14729
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/lib/common.sh",
+      "sha256": "b407b779916070f26ee985694708922efd6aff2128bf8569ff1e788b617eade7",
+      "bytes": 7878
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/lib/sentinel.sh",
+      "sha256": "5d81db6290d9e507387a6e5035a722bc07ff7ff74549670f2f3307b953a19013",
+      "bytes": 1510
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/post-compact.sh",
+      "sha256": "18cfe9ce9cd6035078b885bf124ddb5a24f0108fa5ade3d25c1405ff4a0217cc",
+      "bytes": 698
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/pre-compact.sh",
+      "sha256": "9d93b2dac8e2108c24a7f5fa1af6acdf726dca3faf8ffd60a9b6dd8faa8f5fba",
+      "bytes": 1040
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/session-end.sh",
+      "sha256": "ca22ebe24c915ee9bb8fecf78fc3f259f4d16c0310538a115b33083c5d1aec95",
+      "bytes": 946
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/session-start.sh",
+      "sha256": "51e0b289918bd4d22a1aac26a7ec482bd02e228ff7e267ac07296d7ea613365e",
+      "bytes": 11001
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/story_hook_cli.js",
+      "sha256": "7fc19aed246c3dcb345d106faf75277e3709a9486f7ae2144a443156ced2dc37",
+      "bytes": 10893
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/story_hook_core.js",
+      "sha256": "19514794fbf0c69f88972177c1572c1f0955f7870b44f0b6b2e4d7ccbf0da26d",
+      "bytes": 58636
+    },
+    {
+      "path": "skills/story-setup/references/templates/hooks/validate-story-commit.sh",
+      "sha256": "1180335114239b8eaf0df3bcdc1c28514c5881a055eb06e48de1d962aaa0d8a1",
+      "bytes": 6509
+    },
+    {
+      "path": "skills/story-long-write/references/agent-calls.md",
+      "sha256": "31e54e0b5f1cff9ccea509a3acb9b1f1429e766b18704e7783e49c5eec4831b0",
+      "bytes": 7524
+    },
+    {
+      "path": "skills/story-long-write/scripts/build_writer_prompt.py",
+      "sha256": "2bbe62ea381ec87c740e6870565cf0bd2ccfabac4e1b5b9850eca30533e543dc",
+      "bytes": 37169
+    },
+    {
+      "path": "skills/story/references/author-memory.md",
+      "sha256": "832171fac5265e613ea55eac028c1ba90da2e907eb60bb8cc6c7c70a7e2a7ba1",
+      "bytes": 11655
+    }
+  ],
+  "literarygiant_base_commit": "3a8b6d8d8d12f5dda5e9662521f37970f8b0a262",
+  "integration": "mechanism adaptation; no upstream runtime or authority store installed"
+}

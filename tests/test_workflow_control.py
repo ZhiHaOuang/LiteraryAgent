@@ -14,34 +14,29 @@ from lg_cli.core_adapter import CodexExecAdapter, CoreCommandCandidate
 from tests.helpers import make_config
 from lg_cli.config import load_config
 from lg_cli.main import interactive_loop
+from lg_cli.intent_router import proposal
+from tests.test_backend import FakeAgent
 
 
 class WorkflowControlTests(unittest.TestCase):
-    def test_busy_command_accepts_main_agent_direction_until_reply_finishes(self):
+    def test_busy_command_routes_author_stop_and_holds_ui_until_reply_finishes(self):
         with tempfile.TemporaryDirectory() as raw, create_pipe_input() as pipe:
             root = Path(raw)
             session = LiteraryInput(root / 'history', input=pipe, output=DummyOutput(),
                 usage_path=root / 'usage.json')
             received = []
 
-            class Agent:
+            class Agent(FakeAgent):
                 thread_id = 'main'
 
                 def __init__(self, config, on_event, **kwargs):
-                    self.endpoint = kwargs['control_socket']
+                    super().__init__(config, on_event, **kwargs)
 
-                async def start(self, **kwargs):
-                    pass
-
-                async def run(self, text):
-                    received.append(text)
-                    status = await asyncio.to_thread(control_request, self.endpoint, 'status')
-                    await asyncio.to_thread(control_request, self.endpoint, 'stop', job_id=status['id'])
-                    main_stopped.set()
-                    await finish_reply.wait()
+                async def run(self, text, output_schema=None):
+                    raise AssertionError('An explicit author control must not start a writer')
 
                 async def close(self):
-                    pass
+                    await super().close()
 
             def run(handler, *args, **kwargs):
                 async def exercise():
@@ -66,8 +61,8 @@ class WorkflowControlTests(unittest.TestCase):
                         await asyncio.wait_for(main_stopped.wait(), 10)
                         await command
                         self.assertTrue(session.busy)
-                        self.assertIn('停止这个任务', received[0])
-                        self.assertIn('/outline original', received[0])
+                        self.assertEqual(received[0][0],'停止这个任务')
+                        self.assertIn('/outline original',received[0][1]['workflow']['command'])
                         finish_reply.set()
                         await steering
                         self.assertFalse(session.busy)
@@ -79,8 +74,18 @@ class WorkflowControlTests(unittest.TestCase):
                 return asyncio.run(exercise())
 
             main_stopped = finish_reply = None
+            async def route(config,text,context):
+                received.append((text,context))
+                return proposal(kind='control',action='stop',target='workflow:'+context['workflow']['id'])
+            original_stop=WorkflowControl.stop
+            async def stopped(control,job):
+                result=await original_stop(control,job)
+                main_stopped.set()
+                await finish_reply.wait()
+                return result
             with patch('lg_cli.main.LiteraryInput', return_value=session), \
-                 patch('lg_cli.live_agent.LiveAgent', Agent), patch.object(session, 'run', run):
+                 patch('lg_cli.live_agent.LiveAgent', Agent), patch.object(session, 'run', run), \
+                 patch('lg_cli.intent_router.interpret',side_effect=route),patch.object(WorkflowControl,'stop',stopped):
                 self.assertEqual(interactive_loop(load_config(root / 'book', environment='ui-test')), 0)
 
     def test_real_process_stop_retry_and_stale_control(self):
