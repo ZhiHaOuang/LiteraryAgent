@@ -48,7 +48,9 @@ class DecisionToolTests(unittest.IsolatedAsyncioTestCase):
         await self.backend.close();self.tmp.cleanup()
 
     async def pending(self):
-        for _ in range(100):
+        # Native starts a real MCP subprocess; cold startup can exceed one second.
+        deadline = asyncio.get_running_loop().time() + 10
+        while asyncio.get_running_loop().time() < deadline:
             if self.backend.approvals.pending:
                 return next(e['params'] for e in reversed(self.events) if e['method']=='approval/requested')
             await asyncio.sleep(.01)

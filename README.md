@@ -31,14 +31,14 @@ PYTHONPATH=lg-cli python -m lg_cli init
 PYTHONPATH=lg-cli python -m lg_cli outline --dry-run "写一个都市重生大纲"
 ```
 
-LG does not automatically open a Codex login flow during writing. Official login requires an explicit author action; see [authentication profiles](docs/key-profiles.md). API-based runs can use a configured provider profile or these environment variables:
+LG does not automatically open a Codex login flow during writing. Product authentication is API-only; legacy subscription login returns migration guidance; see [authentication profiles](docs/key-profiles.md). API-based runs can use a configured provider profile or these environment variables:
 
 ```bash
 export LITERARYGIANT_API_KEY="..."
 # LG_API_KEY, CODEX_API_KEY, and OPENAI_API_KEY are also accepted.
 ```
 
-The selected Runtime adapter handles model transport. Codex stages use `codex exec`, while interactive sessions use the session adapter; Native has its own HTTP and MCP loop. Real provider credentials stay out of Codex child environments, which use the product's process-local bridge token. Subscription access and explicitly configured API access remain separate.
+The selected Runtime adapter handles model transport. Codex stages use `codex exec`, while interactive sessions use the session adapter; Native has its own HTTP and MCP loop. Real provider credentials stay out of Codex child environments, which use the product's process-local bridge token. Legacy subscription caches are preserved in place but are not used by product entry points.
 
 ## Story Project Workflow
 
@@ -114,8 +114,16 @@ The parent `LiteraryGiant` repository tracks `LiteraryAgent` as a Git submodule.
 
 ```bash
 scripts/update_codex_core.sh --verify  # local pin/tree verification
-scripts/update_codex_core.sh --check   # fetch and compare upstream/main
-scripts/update_codex_core.sh --apply   # stage an update from a clean worktree
+scripts/update_codex_core.sh --check   # verify the frozen local baseline without fetching
+LG_CODEX_REF='REPLACE_WITH_EXPLICIT_REF' scripts/update_codex_core.sh --apply  # clean worktree required
 ```
 
 See [docs/cli-workflows.md](docs/cli-workflows.md), [docs/architecture.md](docs/architecture.md), and [docs/codex-core-updates.md](docs/codex-core-updates.md).
+
+## Development handoff (2026-10-18)
+
+This repository is pinned as the LiteraryGiant submodule. Clone the parent recursively for both Python projects, requirements, data placeholders and the complete handoff. In that checkout, read `../docs/handoff.md` and `../docs/local-development.md`; online, see the [parent handoff](https://github.com/ZhiHaOuang/LiteraryGiant/blob/main/docs/handoff.md) and [Mac/server workflow](https://github.com/ZhiHaOuang/LiteraryGiant/blob/main/docs/local-development.md).
+
+Use Python 3.12 and the existing Extension lockfile. The pinned runtime installer currently supports Linux x86_64 only; Apple Silicon development does not imply ARM64 Codex runtime integration has been verified. Story workspaces, databases, credentials and conversation exports remain outside public Git.
+
+Historical `/opt/conda/envs/LitIsLand/audits/` evidence was migrated to `/root/private_data/image-layer-migration-20261016/LitIsLand-audits.tar`; it is not a product dependency. The roadmap separates completed work from remaining runtime, context and literary-quality milestones.

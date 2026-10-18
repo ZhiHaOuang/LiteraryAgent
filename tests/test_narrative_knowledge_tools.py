@@ -59,7 +59,9 @@ class NarrativeKnowledgeToolTests(unittest.IsolatedAsyncioTestCase):
         return self.store.get_document('one'),self.store.list_versions('one'),self.store.list_facts(limit=None)
 
     async def pending(self):
-        for _ in range(100):
+        # Native starts a real MCP subprocess; cold startup can exceed one second.
+        deadline = asyncio.get_running_loop().time() + 10
+        while asyncio.get_running_loop().time() < deadline:
             if self.backend.approvals.pending:
                 return next(event['params'] for event in reversed(self.events) if event['method']=='approval/requested')
             await asyncio.sleep(.01)

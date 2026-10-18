@@ -13,3 +13,13 @@ build/
 !.env.example
 credentials.json
 .credentials-*/
+
+# Private story workspaces and local environment artifacts.
+/Projects/
+.venv/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm

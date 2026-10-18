@@ -264,5 +264,3 @@ class CodexEvents:
             event.pop('runId', None)
             kind = event.pop('type')
             self.emit(kind, event)
-
-
