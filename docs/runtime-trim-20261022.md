@@ -51,3 +51,13 @@ Extension 使用 Node 20.18.1、现有 lockfile 的依赖安装，运行 `npm ru
 本轮三个前端生产文件再次与此前构建逐字节相同。收益是参数规则维护点由两处收敛为一处，以及另行测量的润色请求开销下降；不宣称本轮代码总行数、生产包或 Rust 二进制体积下降。实际项目复用同 lockfile 的已有依赖，测试用本地链接仅加入本机 Git exclude，不随提交传递。
 
 回退这项合并可独立 revert `1e3bd9b7b3`，保留作品和运行数据。Rust 原样构建的既有锁文件问题仍是后续 Rust 删除的门槛，本轮没有重新编译或变更该基线。
+
+## 新三批次分支的第三批：退役发现分支
+
+在 `codex/polish-compliance-20261022` 中，仅从 `lg-cli/lg_cli/core_adapter.py` 移除两个不再由任何仓内调用者传入的标签分支 `vendored-wrapper`／`vendored-source`，以及私有 `_evaluate_candidate` 不再使用的root参数和两处实参。新增回归位于 `tests/test_runtime_manifest.py`。整文件删除清单为 `[]`，没有变更依赖清单或vendored Core。
+
+`discover_core_commands` 仍只选择固定manifest或显式开发命令。manifest的文件摘要、pin、来源和版本探测继续执行；显式命令继续探测版本，`probe=False` 保持原义。旧 `LG_CODEX_BUILD_ON_DEMAND=1` 不能启动PATH／wrapper／Cargo回退。无仓内调用的 `run_model_turn_stub` 保留，因为缺少外部兼容证据。
+
+隔离与实际项目相关51项各44通过、7项缺固定Core产物跳过；不是51项全通过。实际CLI在独立合成用户目录检查identity、设置旧变量时的doctor、显式版本命令的doctor三条入口，均符合预期。显式命令是仅返回版本的合成可执行文件，不是已验收Core；没有发模型请求。验证和文件hash见 [新批JSON](validation-20261022-compliance.json)。
+
+收益是消除与当前入口不一致的两条退役实现、一个私有参数维护点；没有模型token、依赖包、wheel或Rust二进制体积下降证据。回退可单独revert本批，不恢复自动发现；保留作者作品、凭据及运行状态。Rust构建门槛仍按前文处理。

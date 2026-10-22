@@ -24,6 +24,8 @@ Story 候选保存实际生成基础版本；旧候选修订不自动重绑最�
 
 `runtime_identity.py` 报告实际包路径、解释器和磁盘包摘要，可显式核验 manifest 的文件 hash／pin；不证明旧进程已加载相同代码或可复现构建。`lg code` 不经 Backend，CLI 与适配器均对解析后的当前目录及祖先检查完整作品标记；此门禁不是全盘 OS 隔离。Mac RunStore 以进程启动时间和 boot UUID 校验恢复所有权，Linux 分支保留。Core 源码、Rust TUI 与独立 app_server 未改变。
 
+`core_adapter.discover_core_commands` 仅接受固定manifest或显式 `LG_CODEX_COMMAND`；私有候选探测已移除无调用者的 `vendored-wrapper`／`vendored-source` 分支及不用的root参数。旧 `LG_CODEX_BUILD_ON_DEMAND=1` 不恢复自动发现或构建。显式命令的版本探测、manifest的hash／pin／版本校验保留；`run_model_turn_stub` 因外部兼容用途未知而保留。这是产品Python维护面收敛，不是Rust Runtime裁剪或体积收益。
+
 ## 本阶段验收结论（2026-10-16）
 
 作者已明确选择：**保留 Rust TUI 与独立 app_server 为独立兼容入口，本次验收主 CLI／Extension。**

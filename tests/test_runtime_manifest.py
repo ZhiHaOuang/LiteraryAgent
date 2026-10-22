@@ -86,6 +86,25 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertFalse(candidates[0].available)
 
+    def test_retired_build_opt_in_cannot_enable_automatic_discovery(self):
+        with patch.dict(os.environ, {'LG_CODEX_BUILD_ON_DEMAND':'1'}, clear=True), \
+                patch('shutil.which') as which, patch('subprocess.run') as run:
+            candidates = discover_core_commands(self.core)
+        self.assertEqual(len(candidates),1)
+        self.assertFalse(candidates[0].available)
+        self.assertEqual(candidates[0].source,'pinned-runtime')
+        which.assert_not_called()
+        run.assert_not_called()
+
+    def test_explicit_command_is_still_probed_when_retired_build_variable_is_set(self):
+        with patch.dict(os.environ, {'LG_CODEX_COMMAND':str(self.binary),
+                'LG_CODEX_BUILD_ON_DEMAND':'1'}, clear=True):
+            candidates = discover_core_commands(self.core)
+        self.assertEqual(len(candidates),1)
+        self.assertTrue(candidates[0].available,candidates[0].reason)
+        self.assertEqual(candidates[0].source,'environment')
+        self.assertEqual(candidates[0].version,'lg-runtime 0.1')
+
     def test_invalid_manifest_does_not_echo_its_contents(self):
         self.manifest.write_text('{secret-broken-json')
         with self.assertRaises(ValueError) as error:

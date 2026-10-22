@@ -43,11 +43,13 @@
     {
       "id": "A",
       "paths": [
-        "lg-cli/lg_cli/core_adapter.py:566"
+        "lg-cli/lg_cli/core_adapter.py:556"
       ],
-      "classification": "candidate internal dead branch; unchanged this batch",
-      "reason": "Only source labels environment and pinned-runtime are supplied by discover_core_commands; old vendored-wrapper/vendored-source branches have no current caller. No Core changes or direct deletion performed.",
-      "nextEvidence": "Exact code-range review plus runtime-discovery regressions before any later change."
+      "classification": "completed in later product-only batch",
+      "reason": "Only environment and pinned-runtime are supplied. Later batch removes unreachable vendored-wrapper/vendored-source handling and its private root parameter; manifest validation and explicit-command probes remain.",
+      "nextEvidence": "Current related tests: 44 passed, 7 conditional Core skips in isolation and actual source; 3 CLI checks use synthetic user state.",
+      "validation": "validation-20261022-compliance.json",
+      "historicalStatus": "Retained during the original inventory batch; removed only in codex/polish-compliance-20261022 batch 3."
     },
     {
       "id": "B",

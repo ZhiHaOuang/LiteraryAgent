@@ -491,7 +491,7 @@ def discover_core_commands(root: Path | None = None, *, probe: bool = True, runt
         if not command:
             return [CoreCommandCandidate("explicit development command", (), False, "Empty LG_CODEX_COMMAND", "environment")]
         return [_evaluate_candidate(name="env:LG_CODEX_COMMAND", command=command,
-            source="environment", root=root, probe=probe)]
+            source="environment", probe=probe)]
     return [CoreCommandCandidate("pinned Codex runtime", (), False,
         "Configure runtime.manifest or LG_CODEX_RUNTIME_MANIFEST; automatic runtime discovery is disabled",
         "pinned-runtime")]
@@ -506,7 +506,7 @@ def _locked_runtime(path: Path, root: Path, *, probe: bool) -> CoreCommandCandid
         identity = read_runtime_identity(path, pin=pin)
         command = (str(identity.binary),)
         candidate = _evaluate_candidate(name=name, command=list(command),
-            source="pinned-runtime", root=root, probe=probe)
+            source="pinned-runtime", probe=probe)
         if candidate.available and probe and candidate.version != identity.version:
             raise ValueError("runtime version probe does not match manifest")
         return candidate
@@ -558,24 +558,10 @@ def _evaluate_candidate(
     name: str,
     command: list[str],
     source: str,
-    root: Path,
     probe: bool,
 ) -> CoreCommandCandidate:
     if not command or not _command_exists(command[0]):
         return CoreCommandCandidate(name, tuple(command), False, "executable missing", source)
-    if source == "vendored-wrapper" and not (root / "codex-cli" / "bin" / "codex.js").exists():
-        return CoreCommandCandidate(name, tuple(command), False, "wrapper source missing", source)
-    if source == "vendored-source":
-        manifest = root / "codex-rs" / "Cargo.toml"
-        opted_in = os.environ.get("LG_CODEX_BUILD_ON_DEMAND", "").strip() == "1"
-        available = opted_in and manifest.exists() and _command_exists(command[0])
-        if available:
-            reason = "explicit build-on-demand fallback enabled"
-        elif not opted_in:
-            reason = "disabled; set LG_CODEX_BUILD_ON_DEMAND=1 to opt in"
-        else:
-            reason = "cargo or manifest missing"
-        return CoreCommandCandidate(name, tuple(command), available, reason, source)
     if not probe:
         return CoreCommandCandidate(name, tuple(command), True, "probe skipped", source)
 

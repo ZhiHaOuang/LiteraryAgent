@@ -185,7 +185,7 @@
     {
       "id": 3,
       "scope": "retired product Runtime discovery branches",
-      "status": "isolation_prepared_not_applied",
+      "status": "engineering_passed",
       "candidatePaths": [
         "lg-cli/lg_cli/core_adapter.py",
         "tests/test_runtime_manifest.py"
@@ -196,7 +196,66 @@
         "general tools",
         "stub compatibility",
         "all Rust Core files"
-      ]
+      ],
+      "engineeringAcceptance": "passed",
+      "fileDeletions": [],
+      "activeCallers": [
+        "discover_core_commands: environment",
+        "_locked_runtime: pinned-runtime"
+      ],
+      "removals": [
+        "vendored-wrapper branch",
+        "vendored-source branch",
+        "private root parameter and two callsite arguments"
+      ],
+      "evidenceFiles": [
+        {
+          "path": "lg-cli/lg_cli/core_adapter.py",
+          "before": "def052d8c3e00eab6539b40d953493c067059bcaacbd3e0e5ad47ea946d0d0fa",
+          "after": "dd0c2382029af950a28df5d15fa54417e97b2ce76ecc08baf63bf101a38b5224"
+        },
+        {
+          "path": "tests/test_runtime_manifest.py",
+          "before": "710d3e4c3064331e0c5e4a827ff0580d08e2f733326195a835e37c54419bfa4f",
+          "after": "74e8fc5e721758aeff23f6db106e6401d449e6f52f5a282d0e2841c9429fca78"
+        }
+      ],
+      "modules": [
+        "tests.test_runtime_manifest",
+        "tests.test_adapter",
+        "tests.test_execution_adapter",
+        "tests.test_runtime_policy",
+        "tests.test_runtime_identity",
+        "tests.test_code_workspace_boundary"
+      ],
+      "actual": {
+        "testsRun": 51,
+        "passed": 44,
+        "skipped": 7,
+        "returncode": 0,
+        "seconds": 12.336
+      },
+      "isolation": {
+        "testsRun": 51,
+        "passed": 44,
+        "skipped": 7,
+        "returncode": 0,
+        "seconds": 11.244
+      },
+      "cliEntry": {
+        "checks": 3,
+        "passed": 3,
+        "syntheticUser": true,
+        "inheritedCredentials": false,
+        "paidCalls": 0,
+        "versionCommand": "synthetic version-only fixture; not a real Core runtime"
+      },
+      "benefit": {
+        "retiredBranchesRemoved": 2,
+        "privateParameterRemoved": 1,
+        "runtimeBinarySizeReduction": null,
+        "modelCostReduction": null
+      }
     }
   ],
   "prospectiveExperiment": {
@@ -285,5 +344,251 @@
     ]
   },
   "rollback": "Review differences, stop tasks and revert the batch commit only; preserve works, DB, receipts, decisions, credentials and immutable experiment artifacts.",
-  "counting": "Broad and focused tests overlap and are not additive."
+  "counting": "Broad and focused tests overlap and are not additive.",
+  "combinedEngineering": {
+    "phase": "after both independent code batches; author review still pending",
+    "suite": "full",
+    "modules": 133,
+    "testsRun": 1124,
+    "passed": 1081,
+    "skipped": 43,
+    "groupExitCodes": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "seconds": 79.506,
+    "credentialsInherited": false,
+    "paidCalls": 0,
+    "sourceInputsCount": 278,
+    "inputsMatchCurrentSource": true,
+    "validationSha256": "fb27b51a97864549d82c9fbf143d69a65c89b114fef35af0c6cc5f0b09a67751",
+    "sourceInputsSha256": "9db7725a84adda0d6274f9ee5d061c23211415a5ee1e7548ff0ec4a5e1a36522",
+    "groups": [
+      {
+        "group": 0,
+        "modules": [
+          "tests.test_adapter",
+          "tests.test_auth_session",
+          "tests.test_backend_adoption",
+          "tests.test_backend_library",
+          "tests.test_book_assets",
+          "tests.test_candidate_bases",
+          "tests.test_cli_domain",
+          "tests.test_codex_lifecycle",
+          "tests.test_command_palette",
+          "tests.test_creative_decision_tools",
+          "tests.test_decision_projections",
+          "tests.test_desktop",
+          "tests.test_exporter",
+          "tests.test_knowledge",
+          "tests.test_literary_tasks",
+          "tests.test_live_source_transport",
+          "tests.test_narrative_knowledge_runtime",
+          "tests.test_native_delegation",
+          "tests.test_operation_receipts",
+          "tests.test_polish_source_comparison",
+          "tests.test_project_context",
+          "tests.test_provider_profiles",
+          "tests.test_review_delivery",
+          "tests.test_runtime_build",
+          "tests.test_slash_commands",
+          "tests.test_source_impact_tools",
+          "tests.test_stage_tool_gate",
+          "tests.test_story_index",
+          "tests.test_story_workflow",
+          "tests.test_supervision",
+          "tests.test_terminal_input",
+          "tests.test_ui_redesign",
+          "tests.test_workflow_runner",
+          "tests.test_zhipu_setup"
+        ],
+        "tests": 284,
+        "skipped": 5,
+        "exitCode": 0,
+        "seconds": 57.282
+      },
+      {
+        "group": 1,
+        "modules": [
+          "tests.test_analysis_contract_snapshot",
+          "tests.test_auth_terminal",
+          "tests.test_backend_domain",
+          "tests.test_backend_runs",
+          "tests.test_book_home",
+          "tests.test_chapter_sync",
+          "tests.test_cli_story_arguments",
+          "tests.test_codex_review_integration",
+          "tests.test_config",
+          "tests.test_creative_decisions",
+          "tests.test_decision_review_context",
+          "tests.test_direction_candidate_guard",
+          "tests.test_generation_sources",
+          "tests.test_launch_policy",
+          "tests.test_live_agent",
+          "tests.test_narrative_execution",
+          "tests.test_narrative_knowledge_tools",
+          "tests.test_native_model",
+          "tests.test_output_routing",
+          "tests.test_presentation_events",
+          "tests.test_project_fingerprint",
+          "tests.test_provider_transport",
+          "tests.test_review_policy",
+          "tests.test_runtime_identity",
+          "tests.test_slime_animation",
+          "tests.test_source_revalidation",
+          "tests.test_standalone_runtime",
+          "tests.test_story_request_arguments",
+          "tests.test_studio",
+          "tests.test_supervision_contract",
+          "tests.test_terminal_runtime",
+          "tests.test_usage_ledger",
+          "tests.test_workflow_schema"
+        ],
+        "tests": 240,
+        "skipped": 12,
+        "exitCode": 0,
+        "seconds": 32.489
+      },
+      {
+        "group": 2,
+        "modules": [
+          "tests.test_anthropic_bridge",
+          "tests.test_authorization",
+          "tests.test_backend_events",
+          "tests.test_backend_workflows",
+          "tests.test_bookshelf",
+          "tests.test_cli",
+          "tests.test_code_workspace_boundary",
+          "tests.test_codex_reviews",
+          "tests.test_context_provenance",
+          "tests.test_credentials",
+          "tests.test_decision_review_runtime",
+          "tests.test_doctor",
+          "tests.test_home_polish",
+          "tests.test_legacy_sessions",
+          "tests.test_live_generation_sources",
+          "tests.test_narrative_knowledge",
+          "tests.test_narrative_view",
+          "tests.test_native_runtime",
+          "tests.test_output_schema",
+          "tests.test_process_identity",
+          "tests.test_project_store",
+          "tests.test_reference_contracts",
+          "tests.test_review_source_projection",
+          "tests.test_runtime_manifest",
+          "tests.test_source_impact",
+          "tests.test_source_review",
+          "tests.test_story_failure_state",
+          "tests.test_story_review",
+          "tests.test_studio_cli",
+          "tests.test_task_scope",
+          "tests.test_terminal_view",
+          "tests.test_workflow_builtin_contract",
+          "tests.test_workspace_library"
+        ],
+        "tests": 325,
+        "skipped": 9,
+        "exitCode": 0,
+        "seconds": 79.506
+      },
+      {
+        "group": 3,
+        "modules": [
+          "tests.test_anthropic_proxy",
+          "tests.test_backend",
+          "tests.test_backend_history",
+          "tests.test_book_analysis",
+          "tests.test_bounded_reviews",
+          "tests.test_cli_backend",
+          "tests.test_codex_dynamic_tools",
+          "tests.test_codex_runtime_reviews",
+          "tests.test_conversations",
+          "tests.test_dashboard",
+          "tests.test_decision_review_sources",
+          "tests.test_execution_adapter",
+          "tests.test_intent_router",
+          "tests.test_literary_comparison",
+          "tests.test_live_runtime",
+          "tests.test_narrative_knowledge_library",
+          "tests.test_native",
+          "tests.test_novel_editor",
+          "tests.test_polish_profile",
+          "tests.test_project_browser",
+          "tests.test_proposal_sources",
+          "tests.test_resume_entry",
+          "tests.test_runtime_boundary",
+          "tests.test_runtime_policy",
+          "tests.test_source_impact_runtime",
+          "tests.test_stage_input",
+          "tests.test_story_generation_sources",
+          "tests.test_story_schema",
+          "tests.test_subscription_auth",
+          "tests.test_terminal_backend",
+          "tests.test_ui_details",
+          "tests.test_workflow_control",
+          "tests.test_writing_mcp"
+        ],
+        "tests": 275,
+        "skipped": 17,
+        "exitCode": 0,
+        "seconds": 57.609
+      }
+    ],
+    "limitations": [
+      "43 tests require fixed Core/standalone app_server artifacts",
+      "not model task-compliance or author-utility acceptance"
+    ],
+    "frontend": [
+      {
+        "name": "combined-extension-unit",
+        "exitCode": 0,
+        "seconds": 2.944,
+        "command": [
+          "/private/tmp/LitIsLand-review-implementation-mn8tof_u/tools/node-v20.18.1-darwin-arm64/bin/node",
+          "--import",
+          "tsx",
+          "--test",
+          "--test-concurrency=1",
+          "tests/backend-lifecycle.test.ts",
+          "tests/boundary.test.ts",
+          "tests/decision-ui.test.ts",
+          "tests/history.test.ts",
+          "tests/knowledge-ui.test.ts",
+          "tests/library-reader.test.ts",
+          "tests/literary-concurrency.test.ts",
+          "tests/literary-history.test.ts",
+          "tests/literary-launch.test.ts",
+          "tests/literary-tasks.test.ts",
+          "tests/mock.test.ts",
+          "tests/rpc.test.ts",
+          "tests/snapshot-sender.test.ts",
+          "tests/state.test.ts",
+          "tests/workspace-paths.test.ts"
+        ],
+        "tests": 57,
+        "pass": 57,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "name": "combined-extension-task-integration",
+        "exitCode": 0,
+        "seconds": 0.814,
+        "command": [
+          "/private/tmp/LitIsLand-review-implementation-mn8tof_u/tools/node-v20.18.1-darwin-arm64/bin/node",
+          "--import",
+          "tsx",
+          "--test",
+          "--test-concurrency=1",
+          "tests/literary-task-backend.integration.ts"
+        ],
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "skipped": 0
+      }
+    ]
+  }
 }
