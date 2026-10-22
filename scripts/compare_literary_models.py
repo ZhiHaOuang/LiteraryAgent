@@ -35,7 +35,22 @@ RATES = {'glm-4.5-air': (Decimal('1.2'), Decimal('8')),
 MAX_INPUT = 131072  # Published 128K context, conservatively counted as input only.
 MAX_OUTPUT = 4096
 MAX_WIRE_BYTES = 64000
+MAX_REQUESTS = 16
 PRICE_SOURCE = 'https://docs.bigmodel.cn/cn/guide/start/pricing'
+AUTHOR_INPUT_CONTRACT = 'lg.author-request.v1'
+
+
+def author_request(case):
+    """Share R5's outer-whitespace normalization; preserve the actual requirements."""
+    request, constraints = case['request'], case.get('constraints', [])
+    if not isinstance(request, str) or not request.strip():
+        raise ValueError('A nonempty author request is required.')
+    if not isinstance(constraints, list) or any(not isinstance(c, str) or not c.strip() for c in constraints):
+        raise ValueError('Author constraints must be a list of nonempty strings.')
+    request = request.strip()
+    if not constraints:
+        return request
+    return request + '\n\n作者补充约束：\n' + '\n'.join('- ' + c.strip() for c in constraints)
 
 
 def write_json(path: Path, value):
@@ -95,8 +110,8 @@ class Budget:
     def begin(self, label, model, wire):
         if self.pending:
             raise ValueError('A prior request has uncertain cost or incomplete transport; no replay.')
-        if len(self.records) >= 16:
-            raise ValueError('The first round permits at most 16 comparison requests.')
+        if len(self.records) >= MAX_REQUESTS:
+            raise ValueError('This experiment permits at most 16 comparison requests.')
         if len(json.dumps(wire, ensure_ascii=False).encode()) > MAX_WIRE_BYTES:
             raise ValueError('Prepared wire payload exceeds this experiment input limit.')
         reserve = worst_cost(model)
@@ -223,6 +238,7 @@ def selected_config(workspace, environment, profile_name):
 
 
 def execute_case(case, arm, folder, config, budget):
+    request = author_request(case)
     folder.mkdir(mode=0o700, parents=True, exist_ok=False)
     workspace = config.workspace
     workspace.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -231,10 +247,17 @@ def execute_case(case, arm, folder, config, budget):
     original = store.create_document(kind='chapter', slug='sample', title=case['title'],
                                      content=case['source'], state='accepted', sequence=1)
     label = config.default_model + '/' + case['id'] + '/' + arm
-    adapter = NativeStageExecutor(model_factory=lambda cfg: ObservedModel(cfg, budget, folder, label))
+    first_record = len(budget.records)
+    stage_results = []
+    class RecordedStage(NativeStageExecutor):
+        def run(self, **kwargs):
+            result = super().run(**kwargs)
+            stage_results.append(result.ok)
+            return result
+    adapter = RecordedStage(model_factory=lambda cfg: ObservedModel(cfg, budget, folder, label))
     started = time.monotonic()
     if arm == 'lg':
-        options = {'strategy': case['kind'], 'document': 'sample', 'request': case['request'],
+        options = {'strategy': case['kind'], 'document': 'sample', 'request': request,
                    'maxModelCalls': 1, 'maxInputChars': 24000}
         if case['kind'] == 'polish':
             options['passage'] = case['passage']
@@ -243,7 +266,7 @@ def execute_case(case, arm, folder, config, budget):
         text = store.get_version('sample', result['candidate']['versionNumber']).content if ok else ''
         task = result
     else:
-        packet = {'source': case['source'], 'request': case['request'], 'constraints': case['constraints']}
+        packet = {'source': case['source'], 'request': request}
         if case['kind'] == 'polish':
             packet['selected_passage'] = case['passage']
             instruction = '你是一位小说编辑。按作者要求只润色指定片段，其余文字逐字保持。返回修改后的完整正文，不解释、不使用代码围栏。'
@@ -256,9 +279,15 @@ def execute_case(case, arm, folder, config, budget):
     active_unchanged = store.get_document('sample').active_version_id == original.active_version_id
     if not active_unchanged:
         raise ValueError('Experiment must never adopt or replace the initial manuscript.')
+    contract_passed = True if stage_results and stage_results[-1] else None
+    if any(r['label'] == label and r['state'] == 'host_schema_rejected' for r in budget.records[first_record:]):
+        contract_passed = False
     (folder / 'candidate.txt').write_text(text)
     value = {'case': case['id'], 'arm': arm, 'model': config.default_model, 'protocol': config.protocol,
              'ok': ok, 'seconds': round(time.monotonic() - started, 3), 'activeManuscriptUnchanged': active_unchanged,
+             'contractPassed': contract_passed, 'candidateAvailable': ok,
+             'taskCompliance': 'pending_review' if ok else 'unavailable', 'authorUtility': 'pending',
+             'authorInput': {'schema': AUTHOR_INPUT_CONTRACT, 'sha256': hashlib.sha256(request.encode()).hexdigest()},
              'task': task, 'metrics': metrics(case, text) if ok else None,
              'interventionsDuringGeneration': {'authorChoices': 0, 'clarifications': 0, 'adoptions': 0,
                                                'manualEdits': None, 'humanReviewMinutes': None, 'reviewStatus': 'pending'}}
@@ -276,7 +305,7 @@ def write_review(output, results, cases):
             for case in cases:
                 pair = f'M{list(MODELS).index(profile) + 1}-{case["id"]}'
                 arms = ['lg', 'baseline'];rng.shuffle(arms)
-                parts.extend([f'## {pair}：{case["title"]}', '', case['request'], ''])
+                parts.extend([f'## {pair}：{case["title"]}', '', author_request(case), ''])
                 for side, arm in zip(('A', 'B'), arms):
                     record = next((r for r in results if r['model'] == model and r['case'] == case['id'] and r['arm'] == arm), None)
                     folder = output / model / case['id'] / arm
@@ -311,6 +340,8 @@ def main(argv=None):
         jobs, reserve, continuation = reviewed_pending_jobs(args.reviewed_pending_jobs, cases)
     budget = Budget(output, Decimal(args.budget_cny), reserve)
     plan = {'schema': 'lg.same-model-quality.v1', 'models': MODELS, 'cases': cases, 'comparisonCalls': 16,
+            'authorInputContract': AUTHOR_INPUT_CONTRACT,
+            'authorRequestSha256': {c['id']: hashlib.sha256(author_request(c).encode()).hexdigest() for c in cases},
             'maxOutputTokens': MAX_OUTPUT, 'maxWireBytes': MAX_WIRE_BYTES,
             'temperature': 'omitted in both arms; provider default effective value unknown',
             'reasoning': 'provider/protocol default identical within each model; not a cross-model controlled comparison',

@@ -33,7 +33,7 @@ REVISION_MODES = {
     "rewrite",
 }
 
-POLISH_PROFILE = 'r5-polish.v1'
+POLISH_PROFILE = 'r5-polish.v2'
 
 
 def polish_profile_fingerprint() -> str:

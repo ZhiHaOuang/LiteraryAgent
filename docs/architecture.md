@@ -8,9 +8,13 @@ LiteraryGiant 拥有文学任务的执行语义、故事状态与作者控制。
 
 `backend_tasks.py` 把有限 `task/*`、`narrative/*`、`sources/check` 接到共享 Backend。`task_cli.py` 和现有 `LiteraryBackend.ts` 消费同一契约，React 增加任务及结果动作，不另建 UI 框架。`literary_tasks.py` 在 RunStore 中保存两种有界任务的进度，复用 Story 修订、创作方向和候选；方向选择与正式采用仍走既有独立创作批准。chapter 生成候选携带 `required_decision`，ProjectStore 在采用事务中核对精确选择及来源，不能用任务完成事件替代正式提交。
 
-R5 局部润色由宿主固定选择 `r5-polish.v1`，只适用于活动章节的精确选区和 light 模式。`StoryWorkflowService` 继续复用有界事实／参考、项目指令、最新 guidance、来源收据、冻结 Schema、替换拼接和候选保存；本次不要求角色／Skill 通用包装、全书分析、概览、图谱或记忆提案。专用 `resources/polish.schema.json` 严格要求 summary、revision_markdown、change_log、risks 四字段并拒绝额外字段。通用 revise、scene 和 chapter 契约保留；这不是给通用工具增加权限。
+R5 局部润色由宿主固定选择 `r5-polish.v2`，只适用于活动章节的精确选区和 light 模式。`StoryWorkflowService` 继续复用有界事实／参考、项目指令、最新 guidance、来源收据、冻结 Schema、替换拼接和候选保存；本次不要求角色／Skill 通用包装、全书分析、概览、图谱或记忆提案。专用 `resources/polish.schema.json` 严格要求 summary、revision_markdown、change_log、risks 四字段并拒绝额外字段。通用 revise、scene 和 chapter 契约保留；这不是给通用工具增加权限。
+
+v2 在现有局部指令中明确事实、数量、身份、先后顺序、不确定性和允许补写的边界，要求遵守作者的文风禁令；允许比喻的任务仍允许比喻。这些是模型输入指令，不是宿主已经实现文学语义判定。宿主仍只强制 Schema、精确选区拼接、版本／来源、预算与独立作者采用等可确定规则；是否遵守选区内的全部要求需要单独评阅。没有增加强制审读模型调用或字符黑名单。
 
 `literary_tasks.prepare` 把专用指令和 Schema 的指纹纳入 inputProfile；启动及模型前后检查变化。旧候选仍可读取，资源不可读也只标记策略变化；继续操作不会自动重放旧策略，已经采用的版本仍准确显示 adopted。`workflow_io.apply_story_request` 共用 stdin 参数组合规则，CLI 与受控 worker 分别调用它，保留两个执行边界。实际调用链和保留／待补证候选见 [路径盘点](path-inventory-20261022.json)，工程验证见 [有限精简验收](validation-20261022-simplify.json)。
+
+实验入口 `scripts/compare_literary_models.py` 现在用 `author_request` 为所有条件编译相同的完整作者请求，并记录其摘要；`compare_polish_sources.py` 冻结产品源码、实验工具、题目与请求摘要。真实 localhost 请求回归核验每项约束进入最终输入。实验分别记录契约通过、候选可用、任务合规待评和作者收益待评，不把结构化成功等同于文学成功。新题计划与工程证据见 [本批验证](validation-20261022-compliance.json)；尚无本批真实模型或作者效果结论。
 
 Story 候选保存实际生成基础版本；旧候选修订不自动重绑最新 active head。`chapter_sync.py` 在导入前保存精确意图，提交后索引／基线失败明确为 `committed-needs-sync`，重试只在数据库内容、版本和 origin 相符时修复派生状态。原始导入只解析同一次文件快照。
 

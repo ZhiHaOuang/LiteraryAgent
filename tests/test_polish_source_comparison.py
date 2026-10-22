@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts.compare_literary_models import Budget, worst_cost, write_json
-from scripts.compare_polish_sources import execute_source, main, run_worker, source_identity
+from scripts.compare_polish_sources import execute_source, load_cases, main, run_worker, source_identity, tool_identity
 from tests import test_execution_adapter as fixtures
 
 
@@ -56,6 +56,48 @@ class SourceComparisonTests(unittest.TestCase):
         write_json(job, {'source': source_identity(self.before)})
         with self.assertRaisesRegex(ValueError, 'different application source'):
             run_worker(job, config_factory=lambda *_: self.fail('read config before source check'))
+
+    def test_prospective_plan_selects_only_air_and_bounds_repetitions_without_credentials(self):
+        cases = Path(__file__).resolve().parents[1] / 'scripts/literary_compliance_cases.json'
+        output = self.root / 'prospective'
+        args = ['--before-source', str(self.before), '--after-source', str(self.after),
+                '--output', str(output), '--cases', str(cases), '--profile', 'zhipu-air', '--repeats', '2']
+        with patch('scripts.compare_polish_sources.selected_config', side_effect=AssertionError('credentials read')):
+            self.assertEqual(main(args), 0)
+        plan = json.loads((output / 'plan.json').read_text())
+        self.assertEqual(plan['models'], {'zhipu-air':'glm-4.5-air'})
+        self.assertEqual(plan['requests'], 16)
+        self.assertEqual(len(plan['cases']), 8)
+        self.assertEqual(len(plan['authorRequestSha256']), 8)
+        self.assertEqual(plan['toolIdentity'], tool_identity())
+        self.assertEqual({c['repeat'] for c in plan['cases']}, {1, 2})
+        self.assertTrue(Decimal(plan['worstCatalogueReserveCNY']) < Decimal('5'))
+        with self.assertRaises(ValueError):
+            main([*args[:args.index('--output')], '--output', str(self.root/'too-many'),
+                  '--cases', str(cases), '--repeats', '2'])
+        self.assertFalse((self.root/'too-many').exists())
+
+    def test_case_validation_rejects_paths_duplicates_and_nonunique_selections(self):
+        path = self.root / 'cases.json'
+        base = {'id':'SAFE','kind':'polish','title':'Case','source':'前。选。后。','passage':'选。',
+                'request':'润色。','constraints':[],'forbiddenExact':[]}
+        for cases in ([{**base,'id':'../../outside'}], [base,base], [{**base,'source':'选。选。'}]):
+            path.write_text(json.dumps(cases))
+            with self.subTest(cases=cases), self.assertRaises(ValueError):
+                load_cases(path, 1)
+
+    def test_tool_change_stops_before_worker_or_credentials_and_keeps_budget_unused(self):
+        changed = {**tool_identity(), 'sha256':'changed'}
+        budget = Budget(self.root / 'tool-budget', Decimal('5'), Decimal(0))
+        with patch('scripts.compare_polish_sources.subprocess.run', side_effect=AssertionError('launched')):
+            with self.assertRaisesRegex(ValueError, 'tools changed after planning'):
+                execute_source(self.case, 'before', 'zhipu-air', source_identity(self.before),
+                    self.root / 'tool-output', 'sandbox', budget, expected_tools=changed)
+        self.assertEqual(budget.records, [])
+        job = self.root / 'tool-job.json'
+        write_json(job, {'source':source_identity(Path(__file__).resolve().parents[1]), 'toolIdentity':changed})
+        with self.assertRaisesRegex(ValueError, 'tools changed before execution'):
+            run_worker(job, config_factory=lambda *_:self.fail('credentials read'))
 
     def test_uncertain_child_keeps_reservation_and_blocks_next_request(self):
         budget = Budget(self.root / 'budget', Decimal('5'), Decimal(0))

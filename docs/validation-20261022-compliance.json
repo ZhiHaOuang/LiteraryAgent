@@ -1,0 +1,289 @@
+{
+  "schema": "lg.polish-compliance-validation.v1",
+  "date": "2026-10-22",
+  "branch": "codex/polish-compliance-20261022",
+  "baseline": {
+    "product": "5344030c4249e3a0f310fd72aa1d55bc61c9fe91",
+    "parent": "fb32875e396871cfb01bae60d5409e84cfcfb5fd"
+  },
+  "mergeTargets": {
+    "product": "literary-agent",
+    "parent": "main"
+  },
+  "batches": [
+    {
+      "id": 1,
+      "scope": "polish instructions and comparable complete author input",
+      "engineeringAcceptance": "passed",
+      "effectAcceptance": "pending_real_model_and_author_review",
+      "summary": [
+        "r5-polish.v2 narrows facts, counts, uncertainty and allowed additions",
+        "lg.author-request.v1 compiles identical request and constraints for all experiment conditions",
+        "no extra mandatory model call, relaxed schema or character blacklist",
+        "schema outcome, candidate availability, task compliance and author utility remain separate"
+      ],
+      "isolation": {
+        "modules": [
+          "test_literary_tasks",
+          "test_polish_profile",
+          "test_story_workflow",
+          "test_story_schema",
+          "test_story_generation_sources",
+          "test_stage_input",
+          "test_review_delivery",
+          "test_candidate_bases",
+          "test_direction_candidate_guard",
+          "test_execution_adapter",
+          "test_output_schema",
+          "test_code_workspace_boundary",
+          "test_cli_backend",
+          "test_backend_workflows",
+          "test_story_request_arguments",
+          "test_polish_source_comparison",
+          "test_literary_comparison"
+        ],
+        "testsRun": 186,
+        "passed": 183,
+        "failures": 0,
+        "errors": 0,
+        "skipped": [
+          {
+            "test": "test_real_core_receives_custom_instructions_from_private_file (tests.test_stage_input.CodexStageInputTests.test_real_core_receives_custom_instructions_from_private_file)",
+            "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+          },
+          {
+            "test": "test_real_core_uses_private_snapshot_after_source_changes (tests.test_output_schema.RealCoreSchemaTests.test_real_core_uses_private_snapshot_after_source_changes)",
+            "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+          },
+          {
+            "test": "test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption (tests.test_cli_backend.CLIBackendTests.test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption)",
+            "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+          }
+        ],
+        "seconds": 56.241
+      },
+      "actual": {
+        "modules": [
+          "test_literary_tasks",
+          "test_polish_profile",
+          "test_story_workflow",
+          "test_story_schema",
+          "test_story_generation_sources",
+          "test_stage_input",
+          "test_review_delivery",
+          "test_candidate_bases",
+          "test_direction_candidate_guard",
+          "test_execution_adapter",
+          "test_output_schema",
+          "test_code_workspace_boundary",
+          "test_cli_backend",
+          "test_backend_workflows",
+          "test_story_request_arguments",
+          "test_polish_source_comparison",
+          "test_literary_comparison"
+        ],
+        "testsRun": 186,
+        "passed": 183,
+        "failures": 0,
+        "errors": 0,
+        "skipped": [
+          {
+            "test": "test_real_core_receives_custom_instructions_from_private_file (tests.test_stage_input.CodexStageInputTests.test_real_core_receives_custom_instructions_from_private_file)",
+            "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+          },
+          {
+            "test": "test_real_core_uses_private_snapshot_after_source_changes (tests.test_output_schema.RealCoreSchemaTests.test_real_core_uses_private_snapshot_after_source_changes)",
+            "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+          },
+          {
+            "test": "test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption (tests.test_cli_backend.CLIBackendTests.test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption)",
+            "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+          }
+        ],
+        "seconds": 55.955
+      },
+      "finalOutcomeStatisticsRegression": {
+        "testsRun": 21,
+        "passed": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "locations": [
+          "LitIsLand candidate",
+          "actual product"
+        ],
+        "modules": [
+          "tests.test_literary_comparison",
+          "tests.test_polish_source_comparison"
+        ],
+        "order": "after broad run; only experiment helper and its test changed",
+        "actualSeconds": 2.271
+      },
+      "frontend": {
+        "typecheck": "passed",
+        "backendNativeTaskIntegration": {
+          "testsRun": 1,
+          "passed": 1
+        },
+        "fullUnitSuiteRerun": false,
+        "productionBuildRerun": false,
+        "productionSourcesChanged": false
+      },
+      "evidenceFiles": [
+        {
+          "path": "lg-cli/lg_cli/story_workflow.py",
+          "before": "ece2971fc7bed7b9899228a22a33ce5c007a5f67450ffd081ccea4fa215f4f54",
+          "after": "aa9bc29f3b5fce5793870d0f2aebcbc1ca815f634506a106727ad039bd4dde75"
+        },
+        {
+          "path": "lg-cli/lg_cli/resources/polish-stage.txt",
+          "before": "21c18c60a24852959f5ac20b1143ef80a7fc99db9f51749a4605a146351a5cc0",
+          "after": "a0b11e1b5625aefb6872abea0e80de75a62bf07f6c2cec6800cf07cebba21d5a"
+        },
+        {
+          "path": "scripts/compare_literary_models.py",
+          "before": "eb44724fca129dcb4512b951075fe058e376c9adc34ed40939e2a768bed9d6e0",
+          "after": "9ad8ff8c9a392bd7790bf8de091a7513be3191e1aeaca33b60caf4724bffadc1"
+        },
+        {
+          "path": "scripts/compare_polish_sources.py",
+          "before": "211fd04fe4e85ce6341daa3579ac999d3029dfaf4918d78396aeb30de7a41f7e",
+          "after": "c829d41047320e0fdb5a6df221c47b1161bfb7aae4766d3337518cdca67668e3"
+        },
+        {
+          "path": "scripts/literary_compliance_cases.json",
+          "before": null,
+          "after": "353005dd3184a469589ac66a4cd20a79da969410bb6338e18e2a9fe050b63548"
+        },
+        {
+          "path": "tests/test_literary_comparison.py",
+          "before": "07426203aa6962a784aefd61120802303343389edad3032192bef0de8bca28c1",
+          "after": "a066ee91d6cf66f71b64510292d8393402b299c7349e2583fca6c60705bc8497"
+        },
+        {
+          "path": "tests/test_polish_source_comparison.py",
+          "before": "403d4feeaa475e1452663737a0d1d39e494dc1254abda72bf45e331970e3681d",
+          "after": "05450a0b7e7acf0d44586ba8f83113c93c54c821c2355c968bf26e5a4eebb9bc"
+        },
+        {
+          "path": "tests/test_polish_profile.py",
+          "before": "574b585b8eeb1de91002f7d417311c4692a44a1e1359a2faf6ee13edcf4e7e03",
+          "after": "58a3e7524f9f4bf3b2240b88756891cb610eaf0774d9ce9e169e2e2eb1cdbf78"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "scope": "limited actual author review",
+      "status": "pending_candidates_and_author_input",
+      "authorAcceptability": null,
+      "authorRevisions": null,
+      "authorRevisionRounds": null,
+      "authorMinutes": null,
+      "oldPackets": "conditions already exposed; preserve raw files and label subsequent review nonblind"
+    },
+    {
+      "id": 3,
+      "scope": "retired product Runtime discovery branches",
+      "status": "isolation_prepared_not_applied",
+      "candidatePaths": [
+        "lg-cli/lg_cli/core_adapter.py",
+        "tests/test_runtime_manifest.py"
+      ],
+      "preserve": [
+        "manifest validation",
+        "explicit development command",
+        "general tools",
+        "stub compatibility",
+        "all Rust Core files"
+      ]
+    }
+  ],
+  "prospectiveExperiment": {
+    "status": "plan_only",
+    "callsSent": 0,
+    "budgetApproval": "pending_new_round_answer",
+    "proposedMaxCNY": "5",
+    "catalogueWorstReserveCNY": "3.0408704",
+    "profiles": {
+      "zhipu-air": "glm-4.5-air"
+    },
+    "casePath": "scripts/literary_compliance_cases.json",
+    "caseFileSha256": "353005dd3184a469589ac66a4cd20a79da969410bb6338e18e2a9fe050b63548",
+    "cases": 4,
+    "repetitions": 2,
+    "plannedCalls": 16,
+    "authorInputContract": "lg.author-request.v1",
+    "authorRequestSha256": {
+      "H1-r1": "60912f88af8aa901420e0e87ab661ac47f13506c668ffccb192500d3ff959f05",
+      "H1-r2": "60912f88af8aa901420e0e87ab661ac47f13506c668ffccb192500d3ff959f05",
+      "H2-r1": "ae4ef492f850e7b8f9f29f02ce2429099ae0e29683a45f21ab9af33082c35e20",
+      "H2-r2": "ae4ef492f850e7b8f9f29f02ce2429099ae0e29683a45f21ab9af33082c35e20",
+      "H3-r1": "ad14a395d5e0ffdf0e2b9af3e9df07f280fb92e6d8913ae252e31d0b999c92dc",
+      "H3-r2": "ad14a395d5e0ffdf0e2b9af3e9df07f280fb92e6d8913ae252e31d0b999c92dc",
+      "H4-r1": "7a4100705971dfd6142c0eed3ab84cb77a9fef473f788afe9030020cbf6d8286",
+      "H4-r2": "7a4100705971dfd6142c0eed3ab84cb77a9fef473f788afe9030020cbf6d8286"
+    },
+    "sourceIdentities": {
+      "before": {
+        "sha256": "fc545cd9cffbc459c8bbecd43c6690ec129941e727077224e6f3ad21aa4de1a9"
+      },
+      "after": {
+        "sha256": "9792185a83927e9e5224149fceb0b79e75ee937eacf92ecff28a341e2e816e3c"
+      }
+    },
+    "toolIdentity": {
+      "sha256": "87fd9772e649d374f1d0f2f4010422a05bc567aef4d2172f032ba975efb5a180",
+      "files": {
+        "compare_polish_sources.py": "c829d41047320e0fdb5a6df221c47b1161bfb7aae4766d3337518cdca67668e3",
+        "compare_literary_models.py": "9ad8ff8c9a392bd7790bf8de091a7513be3191e1aeaca33b60caf4724bffadc1"
+      }
+    },
+    "policyFrozenBeforeCases": true,
+    "policyTunedAfterNewModelOutcomes": false,
+    "independentLiteraryDatasetClaim": false,
+    "cashChargeCNY": null,
+    "resourcePackDeduction": null,
+    "results": null
+  },
+  "verificationLevel": [
+    "source inspection",
+    "offline regression",
+    "real localhost HTTP and Backend/Native integration"
+  ],
+  "notVerified": [
+    "real paid model on new cases",
+    "actual author usefulness",
+    "current pinned Core runtime",
+    "literary quality nonregression",
+    "long-term consistency",
+    "server or installed Extension deployment"
+  ],
+  "fileDeletionList": [],
+  "preserved": [
+    "version and source protection",
+    "candidate/adoption separation",
+    "author direction choice",
+    "general tools",
+    "Rust TUI",
+    "standalone app_server",
+    "formal works and credentials"
+  ],
+  "reproduce": {
+    "python": "PYTHONPATH=lg-cli:. TMPDIR=/private/tmp python -B -m unittest tests.test_literary_tasks tests.test_polish_profile tests.test_story_workflow tests.test_story_schema tests.test_story_generation_sources tests.test_stage_input tests.test_review_delivery tests.test_candidate_bases tests.test_direction_candidate_guard tests.test_execution_adapter tests.test_output_schema tests.test_code_workspace_boundary tests.test_cli_backend tests.test_backend_workflows tests.test_story_request_arguments tests.test_polish_source_comparison tests.test_literary_comparison",
+    "finalStatistics": "PYTHONPATH=lg-cli:. python -B -m unittest tests.test_literary_comparison tests.test_polish_source_comparison",
+    "planOnly": "PYTHONPATH=lg-cli:. python -B scripts/compare_polish_sources.py --before-source /path/to/fixed-before --after-source /path/to/fixed-after --output /path/to/new-plan --cases scripts/literary_compliance_cases.json --profile zhipu-air --repeats 2 --budget-cny 5",
+    "paidRun": "Only after round budget is confirmed; use a separate new output and explicit --run. Never replay an existing output."
+  },
+  "mergeGate": {
+    "status": "not_ready",
+    "require": [
+      "three independently accepted batch commits",
+      "combined verification",
+      "no regression in state and author control",
+      "explicit task compliance and actual author usefulness support improvement"
+    ]
+  },
+  "rollback": "Review differences, stop tasks and revert the batch commit only; preserve works, DB, receipts, decisions, credentials and immutable experiment artifacts.",
+  "counting": "Broad and focused tests overlap and are not additive."
+}

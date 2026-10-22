@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 
-from scripts.compare_literary_models import Budget, MODELS, execute_case, known_cost, main, metrics, reviewed_pending_jobs, safe_response, worst_cost
+from scripts.compare_literary_models import Budget, MODELS, author_request, execute_case, known_cost, main, metrics, reviewed_pending_jobs, safe_response, worst_cost
 from tests.helpers import make_config
 
 
@@ -16,6 +16,19 @@ class ComparisonTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+
+    def test_author_input_preserves_the_request_and_includes_only_declared_requirements(self):
+        case = {'request': '  作者原话\n保持换行。', 'constraints': ['保留两声敲门。', '允许保留比喻。'],
+                'rubric': {'private_evaluation_note': 'NOT_AN_AUTHOR_INSTRUCTION'}}
+        value = author_request(case)
+        self.assertTrue(value.startswith(case['request'].strip()))
+        for constraint in case['constraints']:
+            self.assertEqual(value.count(constraint), 1)
+        self.assertNotIn('NOT_AN_AUTHOR_INSTRUCTION', value)
+        self.assertEqual(author_request({'request': case['request'], 'constraints': []}), case['request'].strip())
+        for invalid in (None, 'one constraint', [''], [False]):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                author_request({'request': 'Edit.', 'constraints': invalid})
 
     def test_budget_reserves_full_request_before_send_and_blocks_uncertainty(self):
         budget = Budget(self.root, Decimal('1'), Decimal(0))
@@ -99,6 +112,7 @@ class ComparisonTests(unittest.TestCase):
         seen = []
         owner = self
         self.invalid_schema = False
+        self.revision = '修改。'
         class Provider(BaseHTTPRequestHandler):
             def log_message(self, *_): pass
             def do_POST(self):
@@ -106,7 +120,7 @@ class ComparisonTests(unittest.TestCase):
                 seen.append(request)
                 schema = ((request.get('text') or {}).get('format') or {}).get('schema', {})
                 if 'revision_markdown' in schema.get('properties', {}):
-                    payload = {'summary': 'synthetic revision', 'revision_markdown': '修改。',
+                    payload = {'summary': 'synthetic revision', 'revision_markdown': owner.revision,
                         'change_log': ['synthetic change'], 'risks': []}
                     if 'memory_proposals' in schema['properties']:
                         payload['memory_proposals'] = []
@@ -130,7 +144,7 @@ class ComparisonTests(unittest.TestCase):
         worker = threading.Thread(target=server.serve_forever, daemon=True);worker.start()
         self.addCleanup(lambda: (server.shutdown(), server.server_close(), worker.join(timeout=2)))
         case = {'id': 'SYNTHETIC', 'title': 'Test', 'kind': 'polish', 'source': '前文。选中。后文。',
-                'passage': '选中。', 'request': '润色指定选段，其他文字逐字保持。', 'constraints': ['只改指定段'], 'forbiddenExact': []}
+                'passage': '选中。', 'request': '  润色指定选段，其他文字逐字保持。\n只处理本选区。  ', 'constraints': ['只改指定段'], 'forbiddenExact': []}
         budget = Budget(self.root / 'budget', Decimal('5'), Decimal(0))
         for arm in ('lg', 'baseline'):
             folder = self.root / 'outputs' / arm
@@ -141,6 +155,13 @@ class ComparisonTests(unittest.TestCase):
             self.assertTrue(result['ok'], result)
             self.assertTrue(result['activeManuscriptUnchanged'])
             self.assertTrue(result['metrics']['outsideSelectionPreserved'])
+            prompt = seen[-1]['input'][0]['content']
+            self.assertEqual(prompt.count('只改指定段'), 1, 'Every declared author constraint must reach both model paths.')
+            sent = (prompt.split('## Author Request\n', 1)[1].split('\n\n## Output Requirements', 1)[0]
+                    if arm == 'lg' else json.loads(prompt)['request'])
+            self.assertEqual(sent, author_request(case))
+            self.assertEqual(result['taskCompliance'], 'pending_review')
+            self.assertTrue(result['contractPassed'])
             output = (folder / 'model-output.json').read_text()
             self.assertNotIn('PRIVATE_CHAIN', output)
             self.assertNotIn(config.api_key, (folder / 'model-input.json').read_text())
@@ -155,8 +176,20 @@ class ComparisonTests(unittest.TestCase):
                          output_path=rejected_workspace/'.literarygiant/output', reference_path=rejected_workspace/'ReferenceLibrary')
         rejected = execute_case(case, 'lg', rejected_folder, config, budget)
         self.assertFalse(rejected['ok'])
+        self.assertFalse(rejected['contractPassed'])
         self.assertTrue(rejected['activeManuscriptUnchanged'])
         self.assertEqual(budget.records[-1]['state'], 'host_schema_rejected')
         self.assertTrue(budget.records[-1]['fullReservationRetained'])
         self.assertFalse(budget.pending)
         self.assertEqual(len(seen), 3)
+        self.invalid_schema, self.revision = False, '选中。'
+        config = replace(config, workspace=self.root/'books/no-progress',
+                         memory_path=self.root/'books/no-progress/.literarygiant/memory',
+                         output_path=self.root/'books/no-progress/.literarygiant/output',
+                         reference_path=self.root/'books/no-progress/ReferenceLibrary')
+        unchanged = execute_case(case, 'lg', self.root/'outputs/no-progress', config, budget)
+        self.assertFalse(unchanged['candidateAvailable'])
+        self.assertTrue(unchanged['contractPassed'], 'A valid stage stopped for no progress is not a schema failure.')
+        self.assertEqual(unchanged['task']['reason'], 'no_textual_progress')
+        self.assertEqual(unchanged['taskCompliance'], 'unavailable')
+        self.assertEqual(len(seen), 4)

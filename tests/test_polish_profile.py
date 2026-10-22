@@ -45,6 +45,17 @@ class PolishProfileTests(unittest.TestCase):
         self.assertEqual(candidate.metadata['base_version_id'],self.source.id)
         self.assertIn('generation_sources',candidate.metadata)
 
+    def test_author_permitted_simile_is_not_rejected_by_a_character_blacklist(self):
+        value={'summary':'按作者允许的表达润色。','revision_markdown':'小门像一本合拢的书。',
+               'change_log':['保留作者允许的明喻。'],'risks':[]}
+        with patch('tests.test_execution_adapter.specimen',return_value=value):
+            result=start(self.config,{**self.options,'request':'允许用“像”构成一个明喻，只改选区。'})
+        self.assertEqual(result['status'],'awaiting_review',result)
+        candidate=self.store.get_version('one',result['candidate']['versionNumber'])
+        self.assertEqual(candidate.content,'Before. 小门像一本合拢的书。 After.')
+        self.assertEqual(self.store.get_document('one').active_version_id,self.source.id)
+        self.assertEqual(len(self.fixture.requests),1)
+
     def test_polish_keeps_project_guidance_facts_and_saved_input_receipt_without_side_writes(self):
         fact=self.store.set_fact(category='world',key='gate',value='KNOWN_GATE_FACT')
         config=replace(self.config,project_instructions='PROJECT_RULES')
