@@ -14,7 +14,7 @@ v2 在现有局部指令中明确事实、数量、身份、先后顺序、不�
 
 `literary_tasks.prepare` 把专用指令和 Schema 的指纹纳入 inputProfile；启动及模型前后检查变化。旧候选仍可读取，资源不可读也只标记策略变化；继续操作不会自动重放旧策略，已经采用的版本仍准确显示 adopted。`workflow_io.apply_story_request` 共用 stdin 参数组合规则，CLI 与受控 worker 分别调用它，保留两个执行边界。实际调用链和保留／待补证候选见 [路径盘点](path-inventory-20261022.json)，工程验证见 [有限精简验收](validation-20261022-simplify.json)。
 
-实验入口 `scripts/compare_literary_models.py` 现在用 `author_request` 为所有条件编译相同的完整作者请求，并记录其摘要；`compare_polish_sources.py` 冻结产品源码、实验工具、题目与请求摘要。真实 localhost 请求回归核验每项约束进入最终输入。实验分别记录契约通过、候选可用、任务合规待评和作者收益待评，不把结构化成功等同于文学成功。新题计划与工程证据见 [本批验证](validation-20261022-compliance.json)；尚无本批真实模型或作者效果结论。
+实验入口 `scripts/compare_literary_models.py` 现在用 `author_request` 为所有条件编译相同的完整作者请求，并记录其摘要；`compare_polish_sources.py` 冻结产品源码、实验工具、题目与请求摘要。真实 localhost 请求回归核验每项约束进入最终输入。实验分别记录契约通过、候选可用、任务合规待评和作者收益待评，不把结构化成功等同于文学成功。新题Air请求已完成16次：实际wire中完整作者请求均只出现一次，16次Schema通过，11份候选保持选区外文字，5次因返回原选区而按无文本进展停止，所有原稿未改变。作者效果尚待评阅；证据见 [本批验证](validation-20261022-compliance.json)。
 
 Story 候选保存实际生成基础版本；旧候选修订不自动重绑最新 active head。`chapter_sync.py` 在导入前保存精确意图，提交后索引／基线失败明确为 `committed-needs-sync`，重试只在数据库内容、版本和 origin 相符时修复派生状态。原始导入只解析同一次文件快照。
 

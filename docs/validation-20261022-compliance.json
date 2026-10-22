@@ -15,7 +15,7 @@
       "id": 1,
       "scope": "polish instructions and comparable complete author input",
       "engineeringAcceptance": "passed",
-      "effectAcceptance": "pending_real_model_and_author_review",
+      "effectAcceptance": "pending_actual_author_review",
       "summary": [
         "r5-polish.v2 narrows facts, counts, uncertainty and allowed additions",
         "lg.author-request.v1 compiles identical request and constraints for all experiment conditions",
@@ -175,12 +175,43 @@
     {
       "id": 2,
       "scope": "limited actual author review",
-      "status": "pending_candidates_and_author_input",
+      "status": "awaiting_actual_author_review",
       "authorAcceptability": null,
       "authorRevisions": null,
       "authorRevisionRounds": null,
       "authorMinutes": null,
-      "oldPackets": "conditions already exposed; preserve raw files and label subsequent review nonblind"
+      "oldPackets": "conditions already exposed; preserve raw files and label subsequent review nonblind",
+      "newModelCallsCompleted": 16,
+      "anonymousPairs": 8,
+      "packetId": "1a5eeee6ff71f9a66a70bfaae4caca0f4e7d1f72e14ad8ced202e1c84f9a33fa",
+      "conditionExposureSelfReport": null,
+      "strictBlindnessVerified": false,
+      "conditionDisclosure": "Author packet excludes mapping; technical evidence may expose condition. Author must report prior exposure.",
+      "artifactSha256": {
+        "anonymous-review.md": "1a5eeee6ff71f9a66a70bfaae4caca0f4e7d1f72e14ad8ced202e1c84f9a33fa",
+        "review-form.html": "906edb1470ee733c904ae70bc5dd1726456f5dc66f86240e38412b02b14f7470",
+        "review-form.js": "619f07a406c418d964ed4aed60cb8751ed08bf90db986c2f41a02e2241578212",
+        "author-review.csv": "81fcce512be939b9d69689c1e21ce21a549bbe5f513d4bafe18fa6cc3053fca0",
+        "reply-template.txt": "ec457bb0ea08ead4113fbc849a25451f373e2b2ce909e498c4e46cea7051e4b1",
+        "packet-metadata.json": "10af3aafefaa130b94d108c7ca2510e879145f759fbae18abd401f6326a0bdf0",
+        "form-validation.json": "203e6d887b1345595b520b1a085a91634f7a4785039ba248327a8205cf691bf8"
+      },
+      "formValidation": {
+        "checks": [
+          "inline script matches tested script",
+          "empty values remain null",
+          "zero values remain zero",
+          "revision text preserved",
+          "unavailable candidates unscored",
+          "invalid numbers rejected",
+          "export binding and actual JSON generation",
+          "exposure question not silently prefilled"
+        ],
+        "passed": true,
+        "browserVisualChecked": false,
+        "networkCalls": 0
+      },
+      "acceptanceCommit": "pending actual author feedback; current evidence commit is not batch acceptance"
     },
     {
       "id": 3,
@@ -259,9 +290,9 @@
     }
   ],
   "prospectiveExperiment": {
-    "status": "plan_only",
-    "callsSent": 0,
-    "budgetApproval": "pending_new_round_answer",
+    "status": "completed_author_review_pending",
+    "callsSent": 16,
+    "budgetApproval": "confirmed_by_author",
     "proposedMaxCNY": "5",
     "catalogueWorstReserveCNY": "3.0408704",
     "profiles": {
@@ -303,15 +334,67 @@
     "independentLiteraryDatasetClaim": false,
     "cashChargeCNY": null,
     "resourcePackDeduction": null,
-    "results": null
+    "results": {
+      "schemaPassed": 16,
+      "candidateAvailable": 11,
+      "noTextualProgress": 5,
+      "noProgressReturnsEqualOriginal": true,
+      "activeManuscriptUnchanged": 16,
+      "outsideSelectionPreservedForAvailableCandidates": 11,
+      "completeAuthorRequestInActualWireExactlyOnce": 16,
+      "perConditionBreakdown": "withheld_until_author_review",
+      "literaryQualityVerdict": null,
+      "actualAuthorUtility": null
+    },
+    "approvedMaxCNY": "5",
+    "failedRequestsIncluded": true,
+    "catalogueEstimateCNY": "0.0556976",
+    "budgetHeldCNY": "0.0784304",
+    "inputTokens": 31252,
+    "outputTokens": 5116,
+    "modelSeconds": 59.728,
+    "noAutomaticRetries": true,
+    "noAdditionalProbes": true,
+    "noPaidJudge": true,
+    "noAdoption": true,
+    "sourceSnapshotGitProof": {
+      "before": {
+        "commit": "5344030c4249e3a0f310fd72aa1d55bc61c9fe91",
+        "verifiedFiles": 226,
+        "sourceSha256": "fc545cd9cffbc459c8bbecd43c6690ec129941e727077224e6f3ad21aa4de1a9",
+        "matchesGitArchive": true
+      },
+      "after": {
+        "commit": "6f4a22f68f00388d14e5e789912f9495455c4148",
+        "verifiedFiles": 226,
+        "sourceSha256": "9792185a83927e9e5224149fceb0b79e75ee937eacf92ecff28a341e2e816e3c",
+        "matchesGitArchive": true
+      }
+    },
+    "rawRunManifestSha256": "435f6d422d70ab93116c957c73825589ee8ef5518469adcc2d1c674da7b4d22d",
+    "modelIdentityEvidence": {
+      "requested": "glm-4.5-air",
+      "profile": "zhipu-air",
+      "endpoint": "https://open.bigmodel.cn/api/anthropic",
+      "protocol": "anthropic",
+      "returnedModelExposed": 0,
+      "requestsBoundToSelectedProfile": 16,
+      "noFallback": true
+    },
+    "priceRechecked": {
+      "url": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+      "date": "2026-10-22",
+      "ratesMatchBudgetTool": true,
+      "cacheDiscountAssumed": false
+    }
   },
   "verificationLevel": [
     "source inspection",
     "offline regression",
-    "real localhost HTTP and Backend/Native integration"
+    "real localhost HTTP and Backend/Native integration",
+    "real configured GLM-4.5-Air API requests on synthetic polish tasks"
   ],
   "notVerified": [
-    "real paid model on new cases",
     "actual author usefulness",
     "current pinned Core runtime",
     "literary quality nonregression",
@@ -335,7 +418,7 @@
     "paidRun": "Only after round budget is confirmed; use a separate new output and explicit --run. Never replay an existing output."
   },
   "mergeGate": {
-    "status": "not_ready",
+    "status": "not_ready_actual_author_review_and_quality_evidence_pending",
     "require": [
       "three independently accepted batch commits",
       "combined verification",
