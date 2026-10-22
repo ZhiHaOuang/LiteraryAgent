@@ -1,0 +1,165 @@
+{
+  "schema": "lg.zhipu-first-round-results.v1",
+  "date": "2026-10-22",
+  "comparisonAttempts": 16,
+  "probeCalls": 3,
+  "totalModelCalls": 19,
+  "usableCandidates": 12,
+  "hostRejectedCandidates": 4,
+  "retryCount": 0,
+  "profilesConfigured": true,
+  "oneSecretEntry": true,
+  "defaultModel": "glm-4.5-air",
+  "runtime": "native",
+  "totals": {
+    "inputTokens": 19300,
+    "outputTokens": 21405,
+    "catalogueReportedTokenEstimateCNY": "0.0972110",
+    "comparisonEstimateCNY": "0.0964172",
+    "probeEstimateCNY": "0.0007938",
+    "budgetApprovedCNY": "5",
+    "finalConservativeHeldCNY": "1.9966408",
+    "actualCashDebitCNY": null,
+    "resourceRedemptionVerified": false,
+    "discountAssumed": false
+  },
+  "aggregates": [
+    {
+      "model": "glm-4.5-air",
+      "arm": "lg",
+      "attempts": 4,
+      "usableCandidates": 4,
+      "rejected": 0,
+      "inputTokens": 10525,
+      "outputTokens": 3354,
+      "reportedReasoningTokens": null,
+      "reasoningBreakdownComplete": false,
+      "catalogueReportedTokenEstimateCNY": "0.0285440",
+      "secondsSum": 27.147,
+      "exactPolishOutsidePreserved": 2,
+      "usablePolishCandidates": 2,
+      "allInitialManuscriptsUnchanged": true,
+      "reasoningSetting": "disabled in Anthropic request; separate token breakdown not returned"
+    },
+    {
+      "model": "glm-4.5-air",
+      "arm": "baseline",
+      "attempts": 4,
+      "usableCandidates": 4,
+      "rejected": 0,
+      "inputTokens": 2264,
+      "outputTokens": 2091,
+      "reportedReasoningTokens": null,
+      "reasoningBreakdownComplete": false,
+      "catalogueReportedTokenEstimateCNY": "0.0143572",
+      "secondsSum": 16.981,
+      "exactPolishOutsidePreserved": 1,
+      "usablePolishCandidates": 2,
+      "allInitialManuscriptsUnchanged": true,
+      "reasoningSetting": "disabled in Anthropic request; separate token breakdown not returned"
+    },
+    {
+      "model": "glm-4.6v",
+      "arm": "lg",
+      "attempts": 4,
+      "usableCandidates": 0,
+      "rejected": 4,
+      "inputTokens": 4566,
+      "outputTokens": 7841,
+      "reportedReasoningTokens": 0,
+      "reasoningBreakdownComplete": false,
+      "catalogueReportedTokenEstimateCNY": "0.028089",
+      "secondsSum": 232.877,
+      "exactPolishOutsidePreserved": 0,
+      "usablePolishCandidates": 0,
+      "allInitialManuscriptsUnchanged": true
+    },
+    {
+      "model": "glm-4.6v",
+      "arm": "baseline",
+      "attempts": 4,
+      "usableCandidates": 4,
+      "rejected": 0,
+      "inputTokens": 1433,
+      "outputTokens": 7998,
+      "reportedReasoningTokens": 6116,
+      "reasoningBreakdownComplete": true,
+      "catalogueReportedTokenEstimateCNY": "0.025427",
+      "secondsSum": 179.778,
+      "exactPolishOutsidePreserved": 0,
+      "usablePolishCandidates": 2,
+      "allInitialManuscriptsUnchanged": true
+    }
+  ],
+  "probes": [
+    {
+      "model": "glm-4.5-air",
+      "protocol": "anthropic",
+      "ok": true,
+      "inputTokens": 276,
+      "outputTokens": 26
+    },
+    {
+      "model": "glm-4.6v",
+      "protocol": "anthropic",
+      "ok": false,
+      "inputTokens": 210,
+      "outputTokens": 32
+    },
+    {
+      "model": "glm-4.6v",
+      "protocol": "responses",
+      "ok": true,
+      "inputTokens": 26,
+      "outputTokens": 63
+    }
+  ],
+  "authorIntervention": {
+    "modelNameClarification": 1,
+    "secretEntry": 1,
+    "extraGenerationClarifications": 0,
+    "creativeChoicesDuringGeneration": 0,
+    "adoptions": 0,
+    "reviewStatus": "pending",
+    "manualEditChars": null,
+    "authorReviewMinutes": null
+  },
+  "humanLiteraryEvidence": false,
+  "longTermWritingEvidence": false,
+  "formalBooksChanged": false,
+  "limitations": [
+    "Four independent tasks per model, one output per arm; no statistical superiority claim.",
+    "All GLM-4.6V LG outputs rejected: no paired literary-quality comparison is available for that model.",
+    "Catalogue estimates use reported counts; cache discounts, resource deduction and actual cash debit are not established.",
+    "Failed Responses validation marked the original Native ledger partial; full reservation retained.",
+    "Air normalized Anthropic results do not expose returned model identity; requested identity is recorded.",
+    "Agent preliminary reading is non-blind and is not author approval."
+  ],
+  "entryCoverage": {
+    "realModel": "Direct R5 domain services and Native stages",
+    "cli": "Actual auth status and configuration loading",
+    "notCovered": [
+      "real-model Extension UI",
+      "Backend author interactions",
+      "full ordinary tool loop",
+      "adoption",
+      "long-term writing"
+    ]
+  },
+  "validation": {
+    "initial": {
+      "commit": "8a636d004b4704fafea18a5add70c28c3babfade",
+      "isolatedTestsPassed": 29,
+      "actualProjectTestsPassed": 29
+    },
+    "accountingCorrection": {
+      "commit": "9643fa10e25df82c0ce7c084a5efd169b70d62e2",
+      "isolatedTestsPassed": 9,
+      "actualProjectTestsPassed": 9,
+      "overlapsInitial": true,
+      "realLocalhostHTTP": true,
+      "caseRuntimeSchemasPromptsUnchanged": true
+    }
+  },
+  "evidenceLocation": "Private local experiment artifacts; code and aggregate results only are published."
+}

@@ -50,7 +50,7 @@ flowchart TB
     W --> RS[RunStore 与阶段制品]
 ```
 
-Extension 的 `literary` 与 `codex` 设置均通过 `createBackend → LiteraryBackend` 进入共享 Backend；后者显式指定 Codex Runtime。旧 CodexBackend 源码只保留兼容测试，不再是 Extension 生产入口。CLI 持续对话、主要单次文学命令、场景操作、分析和 Studio 已合流；作者直接维护数据、显式开发入口、Rust TUI 与独立 app_server 仍有各自行为。统一主要入口不等于全部 Runtime 能力已对齐。
+Extension 的 `literary` 与 `codex` 设置均通过 `createBackend → LiteraryBackend` 进入共享 Backend；后者显式指定 Codex Runtime。旧 CodexBackend 及专属生成协议已于2026-10-22经作者批准删除，兼容Core stdio测试直接复用RpcTransport。CLI 持续对话、主要单次文学命令、场景操作、分析和 Studio 已合流；作者直接维护数据、显式开发入口、Rust TUI 与独立 app_server 仍有各自行为。统一主要入口不等于全部 Runtime 能力已对齐。
 
 | 当前职责 | 实现入口 | 已有边界 |
 | --- | --- | --- |
