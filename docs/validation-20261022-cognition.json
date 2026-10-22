@@ -1,0 +1,91 @@
+{
+  "schema": "lg.incremental-validation.v1",
+  "date": "2026-10-22",
+  "baselineCommit": "8b1db9e64dc962ad21fd57018d2bc74d79fd113c",
+  "versionTag": "lg-narrative-evidence-20261022",
+  "change": "bounded narrative output attribution; no semantic entailment guarantee",
+  "resultSchema": "lg.narrative-execution.v2",
+  "contract": "visible_record_exact_quote.v1",
+  "inputs": {
+    "lg-cli/lg_cli/narrative_execution.py": "fdd2f6d14506c63167f910efff34b2810a3586fb6f9c95fbf1f467ae4acf0559",
+    "lg-cli/lg_cli/resources/narrative-evidence.schema.json": "455132c2d763baf1325e17dc9fbbfdd8ed149290b884848fa55e222137d10153",
+    "tests/test_narrative_execution.py": "1f8a63d458e4cd9842e35e1bb535bc454cce5ea28f808c3d0e62c8ff0fe0f714",
+    "tests/test_review_delivery.py": "60a0765beeb9baef22c4dbbb869e4463bf0e8dade0cfa581b0712c11d35de753",
+    "lg-vscode/webview/LiteraryTasksPanel.tsx": "2b8ce82e354d8048867be3e01a8f9f93e8312bbe9ad3c9c826d543a354186691",
+    "lg-vscode/tests/literary-tasks.test.ts": "06cf84adb44fb21730ee961f7cb20020a9899a7e35f3e4d17a02f50afe87fa1c"
+  },
+  "python": {
+    "modules": 128,
+    "total": 1076,
+    "passed": 1033,
+    "skipped": 43,
+    "failed": 0,
+    "groups": [
+      {
+        "group": 0,
+        "tests": 246,
+        "skipped": 12,
+        "seconds": 47.836
+      },
+      {
+        "group": 1,
+        "tests": 269,
+        "skipped": 13,
+        "seconds": 34.12
+      },
+      {
+        "group": 2,
+        "tests": 252,
+        "skipped": 15,
+        "seconds": 65.062
+      },
+      {
+        "group": 3,
+        "tests": 309,
+        "skipped": 3,
+        "seconds": 62.22
+      }
+    ]
+  },
+  "frontend": {
+    "unit": 63,
+    "failed": 0,
+    "skipped": 0,
+    "typecheck": true,
+    "build": true,
+    "nativeBackendIntegration": 1
+  },
+  "faultEvidence": {
+    "unknownId": "real localhost HTTP red test reproduced release of invalid attribution",
+    "hostCheck": [
+      "visible integer ID",
+      "exact nonempty excerpt",
+      "fixed bounded JSON"
+    ],
+    "publication": [
+      "no raw invalid text",
+      "no retry",
+      "cancel/stale still suppress release"
+    ]
+  },
+  "paidModelCalls": 0,
+  "formalStoryChanges": false,
+  "coreChanged": false,
+  "limitations": [
+    "Registered visible input only; Native Responses only.",
+    "Valid attribution does not establish entailment, truth or literary quality.",
+    "43 Core tests remain conditional; no current Mac Core Runtime acceptance.",
+    "Host prompt/instructions character budget excludes output schema and wire envelope."
+  ],
+  "actualProject": {
+    "pythonSmoke": 87,
+    "pythonSkipped": 0,
+    "frontendUnit": 63,
+    "nativeBackendIntegration": 1,
+    "typecheck": true,
+    "build": true,
+    "wheelInputsByteCompared": 139,
+    "wheelSha256": "1ca399bab91a9b93a733fdaf37cfe8f679467e36717fa9854449026c7b106579",
+    "wheelSchemaImport": true
+  }
+}

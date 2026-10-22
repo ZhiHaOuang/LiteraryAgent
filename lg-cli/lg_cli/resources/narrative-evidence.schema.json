@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "inference": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "evidence": {
+      "type": "array", "minItems": 1, "maxItems": 20,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "record_id": {"type": "integer", "minimum": 1},
+          "quote": {"type": "string", "minLength": 1, "maxLength": 2000}
+        },
+        "required": ["record_id", "quote"]
+      }
+    },
+    "uncertainty": {"type": "string", "minLength": 1, "maxLength": 2000}
+  },
+  "required": ["inference", "evidence", "uncertainty"]
+}

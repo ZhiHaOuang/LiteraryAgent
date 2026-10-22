@@ -34,6 +34,7 @@ class ReviewDeliveryTests(unittest.IsolatedAsyncioTestCase):
             content='Prefix. SELECTED. Suffix.', state='accepted', sequence=1)
         self.requests, self.events = [], []
         self.quiet = False
+        self.narrative_output = None
         self.request_arrived = threading.Event()
         self.release_response = threading.Event()
         owner = self
@@ -62,6 +63,11 @@ class ReviewDeliveryTests(unittest.IsolatedAsyncioTestCase):
                         risks=[], book_overview='维修师在浮城寻找失灵闸门背后的真相。')
                 elif 'findings' in properties or 'entries' in properties:
                     value = {'summary': 'Checked exact candidate source.', 'entries': [], 'findings': []}
+                elif 'evidence' in properties:
+                    statement=json.loads(request['input'][0]['content'])['visible_statements'][0]
+                    value=owner.narrative_output or {'inference':'Provisional inference from '+statement['content'],
+                        'evidence':[{'record_id':statement['record_id'],'quote':statement['content']}],
+                        'uncertainty':'Only registered observations are available.'}
                 else:
                     value = None
                 text = json.dumps(value) if value is not None else 'Provisional inference from NEEDED_EARLY_CLUE.'
@@ -259,6 +265,8 @@ with patch('lg_cli.acceptance_review.load_config', return_value=config):
         finished, _ = await self.approved('narrative/run', {'options': options,
             'expectedFingerprint': preview['fingerprint']})
         self.assertEqual(finished['result']['status'], 'completed', finished)
+        self.assertEqual(finished['result']['evidenceValidation']['status'],'validated')
+        self.assertEqual(finished['result']['analysis']['evidence'][0]['quote'],'NEEDED_EARLY_CLUE')
         self.assertEqual(len(self.requests), 1)
         wire = json.dumps(self.requests[0])
         self.assertIn('NEEDED_EARLY_CLUE', wire)
@@ -267,6 +275,21 @@ with patch('lg_cli.acceptance_review.load_config', return_value=config):
             self.assertNotIn(secret, wire)
         self.assertEqual(self.requests[0]['tools'], [])
         self.assertEqual(len(self.requests[0]['input']), 1)
+
+    async def test_backend_invalid_narrative_evidence_never_publishes_model_text(self):
+        options=self.registered_knowledge()
+        self.narrative_output={'inference':'UNVERIFIED_OUTPUT_SECRET',
+            'evidence':[{'record_id':999999,'quote':'NEEDED_EARLY_CLUE'}],
+            'uncertainty':'UNVERIFIED_OUTPUT_SECRET'}
+        finished,_=await self.approved('narrative/run',{'options':options})
+        result=finished['result']
+        self.assertEqual(result['status'],'failed')
+        self.assertEqual(result['reasons'],['invalid_evidence'])
+        self.assertFalse(result['resultReleased'])
+        self.assertNotIn('text',result)
+        self.assertNotIn('analysis',result)
+        self.assertNotIn('UNVERIFIED_OUTPUT_SECRET',json.dumps(self.events))
+        self.assertEqual(len(self.requests),1)
 
     async def test_cancel_quiet_worker_retains_ownership_until_http_settles(self):
         options = self.registered_knowledge()

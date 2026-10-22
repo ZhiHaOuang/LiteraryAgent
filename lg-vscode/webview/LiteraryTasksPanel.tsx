@@ -9,6 +9,13 @@ const taskState=z.object({runId:z.string().optional(),status:z.string(),reason:z
   decision:z.object({options:z.array(z.object({id:z.string(),title:z.string(),summary:z.string()}))}).optional()});
 const receipt=z.object({operationId:z.string(),status:z.enum(['committed','not_committed','unknown']),
   toolOutcome:z.string(),derivedFiles:z.string()});
+const validatedNarrative=z.object({schema:z.literal('lg.narrative-execution.v2'),
+  status:z.literal('completed'),resultReleased:z.literal(true),
+  evidenceValidation:z.object({contract:z.literal('visible_record_exact_quote.v1'),status:z.literal('validated')}),
+  analysis:z.object({inference:z.string().trim().min(1).max(4000),
+    evidence:z.array(z.object({record_id:z.number().int().positive(),quote:z.string().min(1).max(2000)
+      .refine(value=>Boolean(value.trim()))}).strict()).min(1).max(20),
+    uncertainty:z.string().trim().min(1).max(2000)}).strict()});
 const statuses:Record<string,string>={waiting_author:'等待你选择方向',awaiting_review:'候选已保存，等待审读与采用',
   adopted:'此候选已采用',stopped:'任务已停止',failed:'执行失败，请核对保存结果',interrupted:'执行中断，请先检查产物',
   unsupported:'当前执行器不支持这项保证',insufficient_context:'有效认知资料不足',stale:'来源已变化，需要重新预览',
@@ -19,6 +26,8 @@ const reasons:Record<string,string>={source_changed:'基础版本已变化',auth
   strict_mode_requires_native_responses:'此有限推演需要 Native Responses 执行器',
   no_visible_confirmed_records:'当前位置没有可用的已确认认知记录',registered_view_truncated:'当前认知记录超出读取上限',
   source_needs_review:'认知记录的来源需要复核',preview_changed:'预览已经变化'};
+reasons.invalid_evidence='输出引用未通过校验，模型原文未发布。';
+reasons.model_execution_failed='模型请求或输出结构未通过检查，结果未发布。';
 const describe=(reason:string)=>reasons[reason]??reason;
 
 export function TaskResult({structured,send,disabled}:{structured:unknown;send:Send;disabled:boolean}){
@@ -53,10 +62,20 @@ export function TaskResult({structured,send,disabled}:{structured:unknown;send:S
       <button disabled={disabled} onClick={()=>call({action:'receipt',operationId:r.operationId})}>查询最新提交状态</button></section>;
   }
   if(data.narrativeResult&&typeof data.narrativeResult==='object'){
-    const n=data.narrativeResult as {status?:string;text?:string;reasons?:string[]};
+    const n=data.narrativeResult as {schema?:string;status?:string;text?:string;reasons?:string[]};
+    const verified=validatedNarrative.safeParse(n);
+    const legacy=n.schema===undefined||n.schema==='lg.narrative-execution.v1';
     return <section aria-label="有限认知推演结果"><strong>{statuses[n.status??'']??n.status}</strong>
       <p>仅使用已登记认知进行候选分析，不修改正文、正式事实或剧情。覆盖不完整。</p>
-      {n.reasons?.map((reason,i)=><p key={i}>{describe(reason)}</p>)}{n.text&&<p>{n.text}</p>}</section>;
+      {n.reasons?.map((reason,i)=><p key={i}>{describe(reason)}</p>)}
+      {verified.success?<>
+        <p>已核对引用的记录与原文。引用有效不代表推理正确，请由作者判断。</p>
+        <h4>推断</h4><p>{verified.data.analysis.inference}</p>
+        <h4>登记证据</h4>{verified.data.analysis.evidence.map((item,i)=><blockquote key={i}>
+          <p>记录 {item.record_id}</p><p>{item.quote}</p></blockquote>)}
+        <h4>不确定性</h4><p>{verified.data.analysis.uncertainty}</p>
+      </>:legacy&&n.text?<><p>旧版输出：未校验证据引用，请人工核对。</p><p>{n.text}</p></>:
+        n.status==='completed'?<p>结果结构未通过检查，未展示推断；请检查运行记录。</p>:null}</section>;
   }
   if(data.sourceRevalidation&&typeof data.sourceRevalidation==='object'){
     const s=data.sourceRevalidation as {reviewCandidates?:{document:string;version:number;title:string}[]};

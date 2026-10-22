@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from lg_cli.narrative_execution import prepare, run
+from lg_cli.narrative_execution import OUTPUT_SCHEMA_PATH, prepare, run
 from lg_cli.project_store import ProjectStore
 from tests.helpers import make_config
 
@@ -36,6 +36,7 @@ class NarrativeExecutionTests(unittest.TestCase):
         history.mkdir(parents=True, exist_ok=True)
         (history/'old.jsonl').write_text('HISTORY_SECRET')
         self.seen, self.during, self.tool_output = [], None, False
+        self.response_text = None
         owner = self
         class Provider(BaseHTTPRequestHandler):
             def log_message(self, *_): pass
@@ -45,7 +46,11 @@ class NarrativeExecutionTests(unittest.TestCase):
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/event-stream')
                 self.end_headers()
-                text = 'Provisional action based on NEEDED_EARLY_CLUE.'
+                statement = json.loads(owner.seen[-1]['input'][0]['content'])['visible_statements'][0]
+                value = {'inference':'Provisional action based on '+statement['content'],
+                    'evidence':[{'record_id':statement['record_id'],'quote':statement['content']}],
+                    'uncertainty':'Goals and situation are not fully registered.'}
+                text = owner.response_text if owner.response_text is not None else json.dumps(value)
                 output = [{'type':'function_call','name':'read_document','call_id':'forbidden',
                     'arguments':'{}'}] if owner.tool_output else [
                     {'type':'message','role':'assistant','content':[{'type':'output_text','text':text}]}]
@@ -87,6 +92,10 @@ class NarrativeExecutionTests(unittest.TestCase):
         self.assertTrue(result['provisional'])
         self.assertTrue(result['requestSent'])
         self.assertTrue(result['resultReleased'])
+        self.assertEqual(result['evidenceValidation'],
+            {'contract':'visible_record_exact_quote.v1','status':'validated'})
+        self.assertEqual(result['analysis']['evidence'],[{'record_id':self.store.get_document('known').id,
+            'quote':'NEEDED_EARLY_CLUE'}])
         self.assertEqual(result['budget']['unit'],'host_prompt_and_instructions_characters')
         self.assertEqual(len(self.seen), 1)
         payload = json.dumps(self.seen[0])
@@ -96,6 +105,8 @@ class NarrativeExecutionTests(unittest.TestCase):
                        'RATIONALE_SECRET','TITLE_SECRET','GUIDANCE_SECRET'):
             self.assertNotIn(secret, payload)
         self.assertEqual(self.seen[0]['tools'], [])
+        self.assertEqual(self.seen[0]['text']['format']['schema'],json.loads(OUTPUT_SCHEMA_PATH.read_text()))
+        self.assertTrue(self.seen[0]['text']['format']['strict'])
         self.assertEqual(len(self.seen[0]['input']), 1)
         self.assertEqual(self.store.get_document(self.source.id), before)
 
@@ -179,3 +190,79 @@ class NarrativeExecutionTests(unittest.TestCase):
         self.assertEqual(len(self.seen), 1)
         self.assertTrue(result['requestSent'])
         self.assertFalse(result['resultReleased'])
+
+    def test_http_unknown_evidence_id_is_rejected_without_publication_or_retry(self):
+        self.response_text = json.dumps({'inference':'根据登记线索，人物可能先等待。',
+            'evidence':[{'record_id':999999,'quote':'NEEDED_EARLY_CLUE'}],
+            'uncertainty':'没有登记人物目标，不能确定行动。'})
+        result = run(self.config, self.arguments)
+        self.assertEqual(result['status'], 'failed', result)
+        self.assertEqual(result['reasons'], ['invalid_evidence'])
+        self.assertTrue(result['requestSent'])
+        self.assertFalse(result['resultReleased'])
+        self.assertNotIn('text', result)
+        self.assertNotIn('analysis', result)
+        self.assertEqual(len(self.seen), 1)
+
+    def test_http_future_other_observer_and_forged_quotes_are_rejected(self):
+        known = self.store.get_document('known').id
+        cases = [
+            {'record_id':self.store.get_document('future').id,'quote':'FUTURE_SECRET'},
+            {'record_id':self.store.get_document('other-known').id,'quote':'OTHER_SECRET'},
+            {'record_id':known,'quote':'FABRICATED_OUTPUT_SECRET'},
+            {'record_id':known,'quote':'needed_early_clue'},
+            {'record_id':float(known),'quote':'NEEDED_EARLY_CLUE'},
+        ]
+        for evidence in cases:
+            with self.subTest(evidence=evidence):
+                self.response_text = json.dumps({'inference':'UNVERIFIED_OUTPUT_SECRET',
+                    'evidence':[evidence],'uncertainty':'Still provisional.'})
+                result = run(self.config,self.arguments)
+                self.assertEqual(result['status'],'failed')
+                self.assertEqual(result['reasons'],['invalid_evidence'])
+                self.assertFalse(result['resultReleased'])
+                self.assertNotIn('text',result)
+                self.assertNotIn('analysis',result)
+                self.assertNotIn('UNVERIFIED_OUTPUT_SECRET',json.dumps(result))
+        self.assertEqual(len(self.seen),len(cases), 'Invalid evidence must not trigger retries')
+
+    def test_http_empty_invalid_and_unbounded_structure_never_publishes(self):
+        valid = {'inference':'A provisional inference.','evidence':[{
+            'record_id':self.store.get_document('known').id,'quote':'NEEDED_EARLY_CLUE'}],
+            'uncertainty':'Missing situation.'}
+        cases = ['', 'not JSON', json.dumps({**valid,'evidence':[]}),
+            json.dumps({**valid,'evidence':[{'record_id':True,'quote':'NEEDED_EARLY_CLUE'}]}),
+            json.dumps({**valid,'evidence':[{'record_id':valid['evidence'][0]['record_id'],'quote':'  '}]}),
+            json.dumps({**valid,'inference':'  '}),json.dumps({**valid,'uncertainty':'  '}),
+            json.dumps({**valid,'inference':'x'*4001}),json.dumps({**valid,'extra':'not allowed'})]
+        for text in cases:
+            with self.subTest(text=text[:60]):
+                self.response_text=text
+                result=run(self.config,self.arguments)
+                self.assertEqual(result['status'],'failed')
+                self.assertFalse(result['resultReleased'])
+                self.assertNotIn('text',result)
+                self.assertNotIn('analysis',result)
+        self.assertEqual(len(self.seen),len(cases))
+
+    def test_output_schema_and_contract_are_bound_to_preview(self):
+        preview=prepare(self.config,self.arguments)
+        changed=json.loads(OUTPUT_SCHEMA_PATH.read_text())
+        changed['properties']['inference']['maxLength']=3999
+        local=self.root/'changed-output-schema.json'
+        local.write_text(json.dumps(changed))
+        for changes in ({'OUTPUT_SCHEMA_PATH':local},{'EVIDENCE_CONTRACT':'new-contract'}):
+            with self.subTest(changes=changes),patch.multiple('lg_cli.narrative_execution',**changes):
+                result=run(self.config,self.arguments,expected_fingerprint=preview['fingerprint'])
+                self.assertEqual(result['status'],'stale')
+                self.assertEqual(result['reasons'],['preview_changed'])
+        self.assertEqual(self.seen,[])
+
+    def test_exact_partial_quote_is_accepted_without_claiming_inference_correctness(self):
+        self.response_text=json.dumps({'inference':'A deliberately unproven inference.',
+            'evidence':[{'record_id':self.store.get_document('known').id,'quote':'EARLY_CLUE'}],
+            'uncertainty':'A valid quote does not prove this inference.'})
+        result=run(self.config,self.arguments)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['analysis']['evidence'][0]['quote'],'EARLY_CLUE')
+        self.assertTrue(any('not inference correctness' in limit for limit in result['limitations']))

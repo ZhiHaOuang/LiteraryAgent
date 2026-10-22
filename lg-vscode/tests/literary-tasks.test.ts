@@ -76,6 +76,33 @@ test('unsupported inference explains narrow guarantee and never offers manuscrip
   assert.match(panel,/准确选区/);
 });
 
+test('validated inference separates evidence and uncertainty without claiming correctness',()=>{
+  const value={schema:'lg.narrative-execution.v2',status:'completed',resultReleased:true,
+    evidenceValidation:{contract:'visible_record_exact_quote.v1',status:'validated'},
+    analysis:{inference:'人物可能等待。',evidence:[{record_id:7,quote:'<门已关闭>'}],uncertainty:'目的尚不明确。'}};
+  const html=render({narrativeResult:value});
+  for(const text of ['推断','登记证据','不确定性','记录 7','引用有效不代表推理正确'])assert.ok(html.includes(text));
+  assert.match(html,/&lt;门已关闭&gt;/);
+  assert.doesNotMatch(html,/旧版输出|<button/);
+  const rejected=render({narrativeResult:{...value,status:'failed',resultReleased:false,
+    evidenceValidation:{contract:'visible_record_exact_quote.v1',status:'rejected'},
+    reasons:['invalid_evidence'],text:'UNVERIFIED_OUTPUT_SECRET'}});
+  assert.match(rejected,/输出引用未通过校验/);
+  assert.doesNotMatch(rejected,/人物可能等待|UNVERIFIED_OUTPUT_SECRET|门已关闭/);
+  const malformed=render({narrativeResult:{...value,analysis:{...value.analysis,evidence:[]},text:'UNVERIFIED_OUTPUT_SECRET'}});
+  assert.match(malformed,/结果结构未通过检查/);
+  assert.doesNotMatch(malformed,/UNVERIFIED_OUTPUT_SECRET|人物可能等待/);
+});
+
+test('legacy inference remains readable and explicitly lacks evidence validation',()=>{
+  for(const schema of [undefined,'lg.narrative-execution.v1']){
+    const html=render({narrativeResult:{schema,status:'completed',text:'此前的推演。'}});
+    assert.match(html,/旧版输出：未校验证据引用/);
+    assert.match(html,/此前的推演/);
+    assert.doesNotMatch(html,/已核对引用|<button/);
+  }
+});
+
 // This peer tests connector routing only. It is not a Python Backend or model fixture.
 const fixture=String.raw`
 const fs=require('node:fs');
