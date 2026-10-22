@@ -8,6 +8,10 @@ LiteraryGiant 拥有文学任务的执行语义、故事状态与作者控制。
 
 `backend_tasks.py` 把有限 `task/*`、`narrative/*`、`sources/check` 接到共享 Backend。`task_cli.py` 和现有 `LiteraryBackend.ts` 消费同一契约，React 增加任务及结果动作，不另建 UI 框架。`literary_tasks.py` 在 RunStore 中保存两种有界任务的进度，复用 Story 修订、创作方向和候选；方向选择与正式采用仍走既有独立创作批准。chapter 生成候选携带 `required_decision`，ProjectStore 在采用事务中核对精确选择及来源，不能用任务完成事件替代正式提交。
 
+R5 局部润色由宿主固定选择 `r5-polish.v1`，只适用于活动章节的精确选区和 light 模式。`StoryWorkflowService` 继续复用有界事实／参考、项目指令、最新 guidance、来源收据、冻结 Schema、替换拼接和候选保存；本次不要求角色／Skill 通用包装、全书分析、概览、图谱或记忆提案。专用 `resources/polish.schema.json` 严格要求 summary、revision_markdown、change_log、risks 四字段并拒绝额外字段。通用 revise、scene 和 chapter 契约保留；这不是给通用工具增加权限。
+
+`literary_tasks.prepare` 把专用指令和 Schema 的指纹纳入 inputProfile；启动及模型前后检查变化。旧候选仍可读取，资源不可读也只标记策略变化；继续操作不会自动重放旧策略，已经采用的版本仍准确显示 adopted。`workflow_io.apply_story_request` 共用 stdin 参数组合规则，CLI 与受控 worker 分别调用它，保留两个执行边界。实际调用链和保留／待补证候选见 [路径盘点](path-inventory-20261022.json)，工程验证见 [有限精简验收](validation-20261022-simplify.json)。
+
 Story 候选保存实际生成基础版本；旧候选修订不自动重绑最新 active head。`chapter_sync.py` 在导入前保存精确意图，提交后索引／基线失败明确为 `committed-needs-sync`，重试只在数据库内容、版本和 origin 相符时修复派生状态。原始导入只解析同一次文件快照。
 
 `operation_receipts.py` 为受支持正式转换保存操作 ID／请求绑定；DB 效果记录与领域事务一起提交，运行尝试与结果保存在独立的运行收据库。`operation/read` 区分 committed、not_committed、unknown，重复 ID 不自动重放。收据不证明全部派生文件或工具返回成功，也不是任意 JSON-RPC 的全局幂等实现。

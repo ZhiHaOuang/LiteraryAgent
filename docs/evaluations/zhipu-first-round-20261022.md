@@ -80,3 +80,30 @@ PYTHONPATH=lg-cli:. python -B scripts/compare_literary_models.py --output /path/
 真实模型请求直接进入R5领域服务与Native阶段，没有经过Extension UI或Backend的作者交互。本轮不能证明真实模型下的桌面体验、完整工具循环、分歧选择、审读采纳或长期恢复；此前合成Backend验收也不能替代这些真实模型体验证据。Air接口的归一化结果没有提供实际返回型号字段，记录的是明确请求型号；4.6V成功响应回显型号匹配。两者的现金扣费均不由此得到确认。
 
 本机证据位于 `/Users/zh/.codex/reports/LiteraryGiant-quality-20261022/`：`summary.json`、`requests.json`、两批原始运行、`review/blind-review.md`、`review/author-review.csv`、`agent-preliminary-reading.json`。原始材料和凭据不随代码发布。首轮规模不足以证明统计优势、长期一致性或最终文学质量；下一步先验证4.6V输出契约兼容与局部润色开销，连续创作另设样本和评价。
+
+## 后续：固定源码的润色优化对照
+
+作者另行批准本轮人民币5元，以产品 `627c5ffd2d` 为优化前基线；优化代码为 `d1e768cd1c`。两份 LitIsLand 源码先独立冻结，再对原P1／P2各生成一次，使用现有 Air／Vision profile，共8次请求。两组均运行实际 R5→StoryWorkflowService→NativeStageExecutor→NativeModel；这次的 before 是原LG，after 是轻量LG，不能与上文的纯文本基线混用。两组每题本来都只调用一次模型。
+
+输入追踪确认原graph提示仅出现一次，没有重复注入整章。旧prompt角色／Skill共2405字符，还要求全书overview、graph及记忆提案；局部graph在生成后并不保存到候选。轻量契约只应用于R5的精确活动章节选区，保留有界事实／参考、项目指令、最新guidance与来源；输出严格限四字段，额外字段和缺字段仍拒绝。没有按实验结果放宽Schema或补空字段救成功。
+
+| 型号 | 组别 | 有效候选／尝试 | 选区外保持 | 输入／输出token | 目录价估算／元 | 请求耗时合计／秒 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GLM-4.5-Air | before | 2／2 | 2／2 | 8534／1024 | 0.0129712 | 7.948 |
+| GLM-4.5-Air | after | 2／2 | 2／2 | 3956／807 | 0.0080068 | 6.211 |
+| GLM-4.6V | before | 0／2 | 无有效候选 | 3809／3102 | 0.013115 | 37.180 |
+| GLM-4.6V | after | 0／2 | 无有效候选 | 1909／1328 | 0.005893 | 31.124 |
+
+Air本轮输入减少约53.6%、目录价估算减少约38.3%；样本仅两题、每条件一次，缓存和模型随机性均需保留为限制。8次报用输入18208／输出6261 token，总目录价估算0.039986元。四次Vision Schema拒绝保留全额预算预留，最终合计占用1.176516元，低于5元；预留不是实际费用。官方目录价格于2026-10-22重新核对；现金实扣、缓存折扣及赠送包扣减仍未知，不据资源包假设免费。不追加探测、自动重试、付费裁判或正式采纳。
+
+可读候选不等于任务要求全部满足。非盲初读明确发现P1 after出现“像是远处传来的叹息”，违反“不写抒情比喻”，还加入锈合页和额外金属声，需作者核对事实边界。P2 before把木头声具体化为木楼梯，after不再明确一声咳嗽且形成较长逗号串。全体指定泄露词未命中也不能证明语义遵循。当前只确认请求开销和工程范围保护，文学质量、作者偏好及返修量／耗时均待评。
+
+实验过程额外作者选择、澄清和正式采用为零；人工评分、手工改动与分钟数为null。匿名材料与待填表位于本机证据目录 `/Users/zh/.codex/reports/LiteraryGiant-simplify-20261022/model-run/` 的 `blind-review.md`、`author-review.csv`；`blind-key.json`单独保存。逐请求脱敏结果见 [JSON](polish-simplification-20261022.json)，工程与故障回归见 [验证](../validation-20261022-simplify.json)。
+
+复现时准备优化前／后两个固定源码目录，在后者的产品根目录执行；以下默认零调用，显式添加`--run`才调用现有配置的付费端点。每次必须使用全新的源码／作品之外输出目录：
+
+```sh
+PYTHONPATH=lg-cli:. python -B scripts/compare_polish_sources.py --before-source /path/to/fixed-before --after-source /path/to/fixed-after --output /path/to/new-comparison --budget-cny 5
+```
+
+脚本在启动每个worker前保存保守预留，worker携带全部此前预算，先核对导入源码位置和hash再读取profile；主进程对唯一用量记录、型号及结转金额核验后结算。未知费用或异常停止并保留预留，不自动恢复或重放。真实双源码子进程＋本地HTTP正向集成已验证。付费请求仍直接进入领域阶段；真实模型Extension作者交互、完整工具循环、分歧恢复和长期文学质量没有由这8次证明。

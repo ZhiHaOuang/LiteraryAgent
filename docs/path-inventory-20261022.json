@@ -1,0 +1,90 @@
+{
+  "schema": "lg.path-inventory.v1",
+  "baselineCommit": "627c5ffd2db5c54fd5995cc7e58ddfdd110bc8ba",
+  "evidenceLevel": "source tracing plus separately linked executed regressions",
+  "fileDeletionList": [],
+  "preserved": [
+    {
+      "entry": "CLI lg/literary/literarygiant",
+      "chain": [
+        "lg-cli/pyproject.toml:22",
+        "lg-cli/lg_cli/main.py:341",
+        "lg-cli/lg_cli/cli_backend.py:112",
+        "lg-cli/lg_cli/terminal_backend.py:95",
+        "lg-cli/lg_cli/backend.py:765",
+        "lg-cli/lg_cli/main.py:363",
+        "lg-cli/lg_cli/workflow_runner.py"
+      ],
+      "reason": "Command aliases and controlled worker separation share implementation; keep to avoid backend recursion and preserve authorization."
+    },
+    {
+      "entry": "Extension literary/codex",
+      "chain": [
+        "lg-vscode/src/host/DesktopHost.ts:78",
+        "lg-vscode/src/backend/createBackend.ts:4",
+        "lg-vscode/src/backend/LiteraryBackend.ts:36",
+        "lg-cli/lg_cli/backend_stdio.py:36",
+        "lg-cli/lg_cli/backend.py:592"
+      ],
+      "reason": "One backend with runtime selection; not duplicate connectors."
+    },
+    {
+      "entry": "prepared stages and compatibility adapters",
+      "chain": [
+        "lg-cli/lg_cli/execution_adapter.py:15",
+        "lg-cli/lg_cli/execution_adapter.py:98",
+        "lg-cli/lg_cli/core_adapter.py:442",
+        "lg-cli/lg_cli/stage_input.py:14"
+      ],
+      "reason": "Explicit instructions bypass default preparation; no second product input injection."
+    }
+  ],
+  "candidates": [
+    {
+      "id": "A",
+      "paths": [
+        "lg-cli/lg_cli/core_adapter.py:566"
+      ],
+      "classification": "candidate internal dead branch; unchanged this batch",
+      "reason": "Only source labels environment and pinned-runtime are supplied by discover_core_commands; old vendored-wrapper/vendored-source branches have no current caller. No Core changes or direct deletion performed.",
+      "nextEvidence": "Exact code-range review plus runtime-discovery regressions before any later change."
+    },
+    {
+      "id": "B",
+      "paths": [
+        "lg-cli/lg_cli/core_adapter.py:546"
+      ],
+      "classification": "needs compatibility evidence; retained",
+      "reason": "run_model_turn_stub has no repository caller; external Python consumers remain unknown. run_model_turn is separately retained."
+    },
+    {
+      "id": "C",
+      "paths": [
+        "lg-cli/lg_cli/cli_backend.py:138",
+        "lg-cli/lg_cli/story_cli.py:108",
+        "lg-cli/lg_cli/workflow_io.py:52"
+      ],
+      "classification": "merge duplicated implementation; keep both enforcement points",
+      "reason": "Private stdin/inline exclusion and edit passage applicability duplicated. Consolidated in apply_story_request without removing entry checks.",
+      "validation": [
+        "arguments-red.log",
+        "arguments-green.log"
+      ]
+    }
+  ],
+  "protectedChecks": [
+    "Client preview before approval and source/version after author wait",
+    "After model response and before candidate persistence",
+    "Formal adoption transaction and exact decision selection",
+    "Frozen input/schema snapshot before execution and after response",
+    "Main CLI and lower adapter both call shared code-workspace guard"
+  ],
+  "excluded": [
+    "core/codex modifications/deletions",
+    "Rust TUI removal",
+    "standalone app_server removal",
+    "general tools, sessions, delegation, cancellation or recovery removal",
+    "formal books, Library, credentials, server deployment"
+  ],
+  "argumentRulesCommit": "1e3bd9b7b398eaa95a952676b75b3bcd20d30d7c"
+}

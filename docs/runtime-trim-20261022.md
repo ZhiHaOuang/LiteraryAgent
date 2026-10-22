@@ -39,3 +39,15 @@ cargo metadata --format-version 1 --locked --filter-platform aarch64-apple-darwi
 Extension 使用 Node 20.18.1、现有 lockfile 的依赖安装，运行 `npm run typecheck`、`npm test`、`npm run build`、`npm run package`。本轮实际验证复用仓库外锁定依赖，不在作者项目安装依赖或改机器配置；命令和产物哈希保存在本机证据目录。集成测试须显式提供测试 Python，合成模型仅监听 localhost；Core 集成还须提供已验证的 `LG_TEST_RUNTIME_MANIFEST`，否则明确跳过。
 
 回退应作为本批代码的独立 revert，恢复删除文件及配套测试／文档；不重置整个工作树，不删除会话、作品、数据库或机器配置。交付标签保留删除前版本；新旧版本的正式作品均不在本批迁移范围内。
+
+## 后续小批：路径盘点与重复规则合并
+
+从产品 `627c5ffd2db5c54fd5995cc7e58ddfdd110bc8ba` 出发，正式 CLI／Extension／阶段路径的盘点见 [结构化清单](path-inventory-20261022.json)。三个命令名共享同一个 main；Backend worker 分支避免递归并维持受控执行；两种 Extension 设置共用 LiteraryBackend；阶段兼容适配器仅在 instructions 缺省时准备输入。它们继续保留。
+
+本轮实际合并 `cli_backend.py` 与 `story_cli.py` 的相同 stdin／inline 互斥、passage 适用性及参数赋值规则，集中到 `workflow_io.apply_story_request`。两个入口仍分别调用，原 ValueError 类型、错误文本、顺序及拒绝前不消费 stdin 的行为保持。提交 `1e3bd9b7b3`，8项新回归与既有私有信封／Native worker相关回归共15项通过；组合与实际项目结果另见 [验证JSON](validation-20261022-simplify.json)，各批测试数量不累加。
+
+新增整文件删除清单为 `[]`。`core_adapter._evaluate_candidate` 的旧 vendored 标签分支列为后续小范围候选，`run_model_turn_stub` 需要外部兼容证据；本轮均未移除。多时点版本、来源、批准与 Schema 检查继续保留。没有删除依赖、Core、Rust TUI、独立 app_server 或通用工具。
+
+本轮三个前端生产文件再次与此前构建逐字节相同。收益是参数规则维护点由两处收敛为一处，以及另行测量的润色请求开销下降；不宣称本轮代码总行数、生产包或 Rust 二进制体积下降。实际项目复用同 lockfile 的已有依赖，测试用本地链接仅加入本机 Git exclude，不随提交传递。
+
+回退这项合并可独立 revert `1e3bd9b7b3`，保留作品和运行数据。Rust 原样构建的既有锁文件问题仍是后续 Rust 删除的门槛，本轮没有重新编译或变更该基线。

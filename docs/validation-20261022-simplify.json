@@ -1,0 +1,216 @@
+{
+  "schema": "lg.simplification-validation.v1",
+  "date": "2026-10-22",
+  "baselineProductCommit": "627c5ffd2db5c54fd5995cc7e58ddfdd110bc8ba",
+  "optimizedCodeCommit": "d1e768cd1c03dd2283db15333a2a58a2e5d4007c",
+  "argumentRulesCommit": "1e3bd9b7b398eaa95a952676b75b3bcd20d30d7c",
+  "branch": "codex/simplify-polish-20261022",
+  "fileDeletions": [],
+  "scope": [
+    "R5 bounded polish input/output policy",
+    "shared private story stdin argument rules",
+    "reproducible source-vs-source comparison tooling"
+  ],
+  "actualPython": {
+    "modules": [
+      "test_literary_tasks",
+      "test_polish_profile",
+      "test_story_workflow",
+      "test_story_schema",
+      "test_story_generation_sources",
+      "test_stage_input",
+      "test_review_delivery",
+      "test_candidate_bases",
+      "test_direction_candidate_guard",
+      "test_execution_adapter",
+      "test_output_schema",
+      "test_code_workspace_boundary",
+      "test_cli_backend",
+      "test_backend_workflows",
+      "test_story_request_arguments",
+      "test_polish_source_comparison",
+      "test_literary_comparison"
+    ],
+    "testsRun": 181,
+    "passed": 178,
+    "failures": 0,
+    "errors": 0,
+    "skipped": [
+      {
+        "test": "test_real_core_receives_custom_instructions_from_private_file (tests.test_stage_input.CodexStageInputTests.test_real_core_receives_custom_instructions_from_private_file)",
+        "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+      },
+      {
+        "test": "test_real_core_uses_private_snapshot_after_source_changes (tests.test_output_schema.RealCoreSchemaTests.test_real_core_uses_private_snapshot_after_source_changes)",
+        "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+      },
+      {
+        "test": "test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption (tests.test_cli_backend.CLIBackendTests.test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption)",
+        "reason": "set LG_TEST_RUNTIME_MANIFEST for pinned Core"
+      }
+    ],
+    "seconds": 54.065
+  },
+  "isolatedPython": {
+    "testsRun": 181,
+    "passed": 178,
+    "skipped": 3,
+    "returncode": 0,
+    "seconds": 58.91,
+    "sameModulesAsActual": true
+  },
+  "frontend": {
+    "node": "20.18.1",
+    "isolated": {
+      "unitPassed": 57,
+      "taskIntegrationPassed": 1,
+      "typecheck": true
+    },
+    "actual": {
+      "unitPassed": 57,
+      "taskIntegrationPassed": 1,
+      "typecheck": true,
+      "build": true
+    },
+    "productionArtifacts": [
+      {
+        "path": "lg-vscode/dist/extension.cjs",
+        "sha256": "c897aeae8a334e723e7ac8d5134cb998051e2500e10d671eec1ed95c24d8735b",
+        "unchangedFromPriorBuild": true
+      },
+      {
+        "path": "lg-vscode/dist/webview.js",
+        "sha256": "7d7eaab1e06c095dd308c08528fd7d505dd8c69521c3f5d78f49323c9db7c497",
+        "unchangedFromPriorBuild": true
+      },
+      {
+        "path": "lg-vscode/dist/webview.css",
+        "sha256": "97d66b13a84b93e9d8a7220cf75a8f5d489a15dcab3a543b9c5a27eb11959878",
+        "unchangedFromPriorBuild": true
+      }
+    ],
+    "dependencies": "Reused the existing lock-matched dependency installation; no third-party install. Local verification symlink is excluded only in local Git info/exclude."
+  },
+  "wheel": {
+    "filename": "literarygiant_cli-0.3.0-py3-none-any.whl",
+    "sha256": "db251f9cd02ecef8c6af7f1df3abfe680b5c85f4b3c9398adddf721532393e55",
+    "matchedFiles": 141,
+    "newResources": [
+      "lg_cli/resources/polish.schema.json",
+      "lg_cli/resources/polish-stage.txt"
+    ],
+    "installed": false
+  },
+  "files": [
+    {
+      "path": "lg-cli/lg_cli/workflow_io.py",
+      "before": "e545a0b96a9a71e45feeb6a1aa7ad94f97cc1706368aa33e56f0df9d401b3c27",
+      "after": "966bc72943785b412694e1ea5cb0608f4369e4f047eb5ae852794cafc8055344"
+    },
+    {
+      "path": "lg-cli/lg_cli/cli_backend.py",
+      "before": "705f75d2990e933c7c15dd273d9515fb5c58a1a311bf3bc286e03e97e95900d3",
+      "after": "11dace4a763c3a3e23a2201aacd373930a5bf5d45ab6bd811c31e625d0cae1bc"
+    },
+    {
+      "path": "lg-cli/lg_cli/story_cli.py",
+      "before": "d20d87671e83d27480c72252b816dc1d07da4a58c8b579b388a51cf075cb8dfe",
+      "after": "8ccf288fa9be274ac29b799bc83a3240a3119938edc16e8c631f36c1a608846d"
+    },
+    {
+      "path": "tests/test_story_request_arguments.py",
+      "before": null,
+      "after": "e8900db6c6b559c43aa6f681830aad3d4a9d1e16488367971b58c26cd7f792a7"
+    },
+    {
+      "path": "lg-cli/lg_cli/story_workflow.py",
+      "before": "d0848c5231c6340546b7fb66abea106d9938b3a1ee2fe32cb321b8a1255df799",
+      "after": "ece2971fc7bed7b9899228a22a33ce5c007a5f67450ffd081ccea4fa215f4f54"
+    },
+    {
+      "path": "lg-cli/lg_cli/literary_tasks.py",
+      "before": "7ba2d7197f8b1d539c99092aa7ef742513d2b6ccb24ec1768f0de8c62b35bee2",
+      "after": "79ae8a4f3118cd53e4c7dc1fb5e0e14d7e5bea481ffa761d5bf1298265a824a5"
+    },
+    {
+      "path": "lg-cli/lg_cli/resources/polish.schema.json",
+      "before": null,
+      "after": "8a9942df3c753e2304346bddbc22c0ce276b7fbd0a975bfd1cab5e843a65c136"
+    },
+    {
+      "path": "lg-cli/lg_cli/resources/polish-stage.txt",
+      "before": null,
+      "after": "21c18c60a24852959f5ac20b1143ef80a7fc99db9f51749a4605a146351a5cc0"
+    },
+    {
+      "path": "tests/test_polish_profile.py",
+      "before": null,
+      "after": "574b585b8eeb1de91002f7d417311c4692a44a1e1359a2faf6ee13edcf4e7e03"
+    },
+    {
+      "path": "tests/test_story_workflow.py",
+      "before": "6905a3bb6cb62753eb3d14d7d4057b640df93375ed4c3d9446e81cd7cb7362aa",
+      "after": "b321751c5398af1567c8c943bcfef8db9cd8a81c45f8a4117fe8783929355c33"
+    },
+    {
+      "path": "tests/test_literary_tasks.py",
+      "before": "a7e3472030cee593270005a98c443281f2a17397ed01c5247e985920fa149999",
+      "after": "21ff81c0e779330c796ad1df898afc17464c118d4520fd9b3ad0abdb2de10bbb"
+    },
+    {
+      "path": "tests/test_review_delivery.py",
+      "before": "60a0765beeb9baef22c4dbbb869e4463bf0e8dade0cfa581b0712c11d35de753",
+      "after": "306927fb072c4b332ee1d8c090478ef903b84499b0da7b599b2637c39faf57b8"
+    },
+    {
+      "path": "lg-vscode/tests/fixtures/literary_task_backend.py",
+      "before": "6e8f9976c6dc57fa372b18c0839f9da089e2ce160241da2241a2b5015fb60616",
+      "after": "57f035955197823b90938798a0213c6f92602d20c48b0b7cc6896a0091748be8"
+    },
+    {
+      "path": "tests/test_literary_comparison.py",
+      "before": "bfdc2a5fdb1aa61601b868e4d43db75d8c0daede0b2205ae45ae7e1b4725c44c",
+      "after": "07426203aa6962a784aefd61120802303343389edad3032192bef0de8bca28c1"
+    },
+    {
+      "path": "scripts/compare_polish_sources.py",
+      "before": null,
+      "after": "211fd04fe4e85ce6341daa3579ac999d3029dfaf4918d78396aeb30de7a41f7e"
+    },
+    {
+      "path": "tests/test_polish_source_comparison.py",
+      "before": null,
+      "after": "403d4feeaa475e1452663737a0d1d39e494dc1254abda72bf45e331970e3681d"
+    }
+  ],
+  "core": {
+    "pin": "6b9826e3aa83b1a5947db50f4332cb9c65f1b340",
+    "tree": "74ba48a4b6b086beb9226a79ffe0f3d9f6d40f52",
+    "modified": false,
+    "rustCompiled": false,
+    "tuiRetained": true,
+    "appServerRetained": true
+  },
+  "experiment": {
+    "path": "evaluations/polish-simplification-20261022.json",
+    "requests": 8,
+    "budgetCNY": "5",
+    "knownCatalogueEstimateCNY": "0.0399860",
+    "heldCNY": "1.1765160",
+    "cashDebitCNY": null,
+    "humanQuality": "pending"
+  },
+  "verificationBoundaries": [
+    "Real Native HTTP via CLI/Backend and Extension connector; synthetic books and independent author-approval gates.",
+    "Two real child processes loaded distinct declared application sources against a local HTTP fixture.",
+    "Real Zhipu model calls enter R5/Native stages directly, outside real-model Backend/Extension author interaction.",
+    "Three pinned-Core integration tests skipped; no new Mac Core build, Rust dependency proof, full Runtime parity or long-term literary quality claim."
+  ],
+  "rollback": {
+    "codeCommitsNewestFirst": [
+      "d1e768cd1c03dd2283db15333a2a58a2e5d4007c",
+      "1e3bd9b7b398eaa95a952676b75b3bcd20d30d7c"
+    ],
+    "method": "After stopping active writing tasks and checking worktree changes, revert selected code commits. Keep manuscript, SQLite, approvals, receipts and machine configuration; do not restore old databases or replay model jobs."
+  }
+}

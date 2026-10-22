@@ -1,0 +1,363 @@
+{
+  "schema": "lg.polish-optimization-results.v1",
+  "baselineProductCommit": "627c5ffd2db5c54fd5995cc7e58ddfdd110bc8ba",
+  "baselineParentCommit": "5c03827c00c123e91b09e24b71810a9c8247e99c",
+  "requestIntents": 8,
+  "knownCatalogueEstimateCNY": "0.0399860",
+  "heldCNY": "1.1765160",
+  "budgetCNY": "5",
+  "priceSource": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+  "priceCheckedDate": "2026-10-22",
+  "actualCashDebitCNY": null,
+  "resourcePackDeduction": null,
+  "humanReviewStatus": "pending",
+  "manualEdits": null,
+  "authorMinutes": null,
+  "authorChoices": 0,
+  "adoptions": 0,
+  "extraGenerationClarifications": 0,
+  "comparison": "actual R5 before vs actual R5 after; one call per task; within-model profile/protocol/output cap unchanged",
+  "verificationLimit": "synthetic R5 Native stage; no real-model Extension session, adoption, full agent tool loop or long-term literary assessment",
+  "groups": [
+    {
+      "model": "glm-4.5-air",
+      "arm": "before",
+      "attempts": 2,
+      "validCandidates": 2,
+      "inputTokens": 8534,
+      "outputTokens": 1024,
+      "catalogueEstimateCNY": "0.0129712",
+      "seconds": 7.948,
+      "outsideSelectionPreserved": 2
+    },
+    {
+      "model": "glm-4.5-air",
+      "arm": "after",
+      "attempts": 2,
+      "validCandidates": 2,
+      "inputTokens": 3956,
+      "outputTokens": 807,
+      "catalogueEstimateCNY": "0.0080068",
+      "seconds": 6.211,
+      "outsideSelectionPreserved": 2
+    },
+    {
+      "model": "glm-4.6v",
+      "arm": "before",
+      "attempts": 2,
+      "validCandidates": 0,
+      "inputTokens": 3809,
+      "outputTokens": 3102,
+      "catalogueEstimateCNY": "0.013115",
+      "seconds": 37.18,
+      "outsideSelectionPreserved": 0
+    },
+    {
+      "model": "glm-4.6v",
+      "arm": "after",
+      "attempts": 2,
+      "validCandidates": 0,
+      "inputTokens": 1909,
+      "outputTokens": 1328,
+      "catalogueEstimateCNY": "0.005893",
+      "seconds": 31.124,
+      "outsideSelectionPreserved": 0
+    }
+  ],
+  "rows": [
+    {
+      "model": "glm-4.5-air",
+      "case": "P1",
+      "arm": "before",
+      "ok": true,
+      "inputTokens": 4260,
+      "outputTokens": 577,
+      "catalogueEstimateCNY": "0.00687",
+      "seconds": 4.66,
+      "hostState": "completed",
+      "promptChars": 6824,
+      "instructionsChars": 1717,
+      "schemaCompactChars": 2089,
+      "wireBytes": 12393,
+      "schemaProperties": [
+        "summary",
+        "revision_markdown",
+        "change_log",
+        "memory_proposals",
+        "risks",
+        "story_index",
+        "book_overview"
+      ],
+      "outsideSelectionPreserved": true,
+      "sourceSha256": "b3b9a521b5bde61db196415eca565f3b5e855c70238ed7fe39356f10c7c73707",
+      "usage": {
+        "input_tokens": 4260,
+        "output_tokens": 577,
+        "total_tokens": 4837,
+        "input_tokens_details": {
+          "cached_tokens": 67
+        }
+      }
+    },
+    {
+      "model": "glm-4.5-air",
+      "case": "P1",
+      "arm": "after",
+      "ok": true,
+      "inputTokens": 1971,
+      "outputTokens": 508,
+      "catalogueEstimateCNY": "0.0046248",
+      "seconds": 3.961,
+      "hostState": "completed",
+      "promptChars": 2836,
+      "instructionsChars": 961,
+      "schemaCompactChars": 423,
+      "wireBytes": 5635,
+      "schemaProperties": [
+        "summary",
+        "revision_markdown",
+        "change_log",
+        "risks"
+      ],
+      "outsideSelectionPreserved": true,
+      "sourceSha256": "fc545cd9cffbc459c8bbecd43c6690ec129941e727077224e6f3ad21aa4de1a9",
+      "usage": {
+        "input_tokens": 1971,
+        "output_tokens": 508,
+        "total_tokens": 2479,
+        "input_tokens_details": {
+          "cached_tokens": 97
+        }
+      }
+    },
+    {
+      "model": "glm-4.5-air",
+      "case": "P2",
+      "arm": "after",
+      "ok": true,
+      "inputTokens": 1985,
+      "outputTokens": 299,
+      "catalogueEstimateCNY": "0.003382",
+      "seconds": 2.25,
+      "hostState": "completed",
+      "promptChars": 2857,
+      "instructionsChars": 961,
+      "schemaCompactChars": 423,
+      "wireBytes": 5698,
+      "schemaProperties": [
+        "summary",
+        "revision_markdown",
+        "change_log",
+        "risks"
+      ],
+      "outsideSelectionPreserved": true,
+      "sourceSha256": "fc545cd9cffbc459c8bbecd43c6690ec129941e727077224e6f3ad21aa4de1a9",
+      "usage": {
+        "input_tokens": 1985,
+        "output_tokens": 299,
+        "total_tokens": 2284,
+        "input_tokens_details": {
+          "cached_tokens": 1298
+        }
+      }
+    },
+    {
+      "model": "glm-4.5-air",
+      "case": "P2",
+      "arm": "before",
+      "ok": true,
+      "inputTokens": 4274,
+      "outputTokens": 447,
+      "catalogueEstimateCNY": "0.0061012",
+      "seconds": 3.288,
+      "hostState": "completed",
+      "promptChars": 6845,
+      "instructionsChars": 1717,
+      "schemaCompactChars": 2089,
+      "wireBytes": 12456,
+      "schemaProperties": [
+        "summary",
+        "revision_markdown",
+        "change_log",
+        "memory_proposals",
+        "risks",
+        "story_index",
+        "book_overview"
+      ],
+      "outsideSelectionPreserved": true,
+      "sourceSha256": "b3b9a521b5bde61db196415eca565f3b5e855c70238ed7fe39356f10c7c73707",
+      "usage": {
+        "input_tokens": 4274,
+        "output_tokens": 447,
+        "total_tokens": 4721,
+        "input_tokens_details": {
+          "cached_tokens": 3132
+        }
+      }
+    },
+    {
+      "model": "glm-4.6v",
+      "case": "P1",
+      "arm": "before",
+      "ok": false,
+      "inputTokens": 1900,
+      "outputTokens": 882,
+      "catalogueEstimateCNY": "0.004546",
+      "seconds": 9.928,
+      "hostState": "host_schema_rejected",
+      "promptChars": 6824,
+      "instructionsChars": 1582,
+      "schemaCompactChars": 2089,
+      "wireBytes": 12093,
+      "schemaProperties": [
+        "summary",
+        "revision_markdown",
+        "change_log",
+        "memory_proposals",
+        "risks",
+        "story_index",
+        "book_overview"
+      ],
+      "outsideSelectionPreserved": null,
+      "sourceSha256": "b3b9a521b5bde61db196415eca565f3b5e855c70238ed7fe39356f10c7c73707",
+      "usage": {
+        "input_tokens": 1900,
+        "output_tokens": 882,
+        "partial": 1
+      }
+    },
+    {
+      "model": "glm-4.6v",
+      "case": "P1",
+      "arm": "after",
+      "ok": false,
+      "inputTokens": 950,
+      "outputTokens": 568,
+      "catalogueEstimateCNY": "0.002654",
+      "seconds": 14.659,
+      "hostState": "host_schema_rejected",
+      "promptChars": 2836,
+      "instructionsChars": 826,
+      "schemaCompactChars": 423,
+      "wireBytes": 5335,
+      "schemaProperties": [
+        "summary",
+        "revision_markdown",
+        "change_log",
+        "risks"
+      ],
+      "outsideSelectionPreserved": null,
+      "sourceSha256": "fc545cd9cffbc459c8bbecd43c6690ec129941e727077224e6f3ad21aa4de1a9",
+      "usage": {
+        "input_tokens": 950,
+        "output_tokens": 568,
+        "partial": 1
+      }
+    },
+    {
+      "model": "glm-4.6v",
+      "case": "P2",
+      "arm": "after",
+      "ok": false,
+      "inputTokens": 959,
+      "outputTokens": 760,
+      "catalogueEstimateCNY": "0.003239",
+      "seconds": 16.465,
+      "hostState": "host_schema_rejected",
+      "promptChars": 2857,
+      "instructionsChars": 826,
+      "schemaCompactChars": 423,
+      "wireBytes": 5398,
+      "schemaProperties": [
+        "summary",
+        "revision_markdown",
+        "change_log",
+        "risks"
+      ],
+      "outsideSelectionPreserved": null,
+      "sourceSha256": "fc545cd9cffbc459c8bbecd43c6690ec129941e727077224e6f3ad21aa4de1a9",
+      "usage": {
+        "input_tokens": 959,
+        "output_tokens": 760,
+        "partial": 1
+      }
+    },
+    {
+      "model": "glm-4.6v",
+      "case": "P2",
+      "arm": "before",
+      "ok": false,
+      "inputTokens": 1909,
+      "outputTokens": 2220,
+      "catalogueEstimateCNY": "0.008569",
+      "seconds": 27.252,
+      "hostState": "host_schema_rejected",
+      "promptChars": 6845,
+      "instructionsChars": 1582,
+      "schemaCompactChars": 2089,
+      "wireBytes": 12156,
+      "schemaProperties": [
+        "summary",
+        "revision_markdown",
+        "change_log",
+        "memory_proposals",
+        "risks",
+        "story_index",
+        "book_overview"
+      ],
+      "outsideSelectionPreserved": null,
+      "sourceSha256": "b3b9a521b5bde61db196415eca565f3b5e855c70238ed7fe39356f10c7c73707",
+      "usage": {
+        "input_tokens": 1909,
+        "output_tokens": 2220,
+        "partial": 1
+      }
+    }
+  ],
+  "sourceIdentities": {
+    "before": {
+      "sha256": "b3b9a521b5bde61db196415eca565f3b5e855c70238ed7fe39356f10c7c73707",
+      "fileCount": 224
+    },
+    "after": {
+      "sha256": "fc545cd9cffbc459c8bbecd43c6690ec129941e727077224e6f3ad21aa4de1a9",
+      "fileCount": 226
+    }
+  },
+  "optimizedCodeCommit": "d1e768cd1c03dd2283db15333a2a58a2e5d4007c",
+  "argumentRulesCommit": "1e3bd9b7b398eaa95a952676b75b3bcd20d30d7c",
+  "caseFile": {
+    "path": "scripts/literary_quality_cases.json",
+    "sha256": "b6a24532f2b7690dd8bd8aff068d4b422294f30be9c687529b2225658d2b1fae",
+    "ids": [
+      "P1",
+      "P2"
+    ]
+  },
+  "humanAndQuality": {
+    "review": "agent_nonblind; author review pending",
+    "scores": null,
+    "manualEdits": null,
+    "authorMinutes": null,
+    "literaryQualityAdvantage": null,
+    "counterexamples": [
+      {
+        "case": "P1",
+        "arm": "after",
+        "observation": "Uses a lyrical simile despite the explicit request forbidding lyrical similes; introduces rusty hinges and an additional metallic scraping sound.",
+        "evidence": "像是远处传来的叹息",
+        "status": "observed task-constraint failure; author literary evaluation pending"
+      },
+      {
+        "case": "P2",
+        "arm": "before",
+        "observation": "Specifies the previously uncertain wood sound as stairs; adjacent prose gives a clue, but certainty changes."
+      },
+      {
+        "case": "P2",
+        "arm": "after",
+        "observation": "Drops explicit single-cough count and joins several perceptions into a longer comma chain; author judgement pending."
+      }
+    ]
+  }
+}
