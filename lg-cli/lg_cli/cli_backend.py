@@ -136,12 +136,8 @@ def dispatch_story(args,config):
         or args.command=='bible' and args.bible_command=='curate')
     if not story:return None
     if args.request_stdin:
-        from .workflow_io import read_story_request
-        if args.request or getattr(args,'passage',None) is not None:raise ValueError('Use stdin request or command-line text, not both')
-        request=read_story_request(sys.stdin)
-        if 'passage' in request and args.command!='edit':raise ValueError('Selected passage applies only to edit')
-        args.request=[request['request']]
-        if 'passage' in request:args.passage=request['passage']
+        from .workflow_io import apply_story_request
+        apply_story_request(args, sys.stdin)
     command='revise' if args.command=='edit' else 'bible-curate' if args.command=='bible' else 'scene-'+args.scene_command
     params={'command':command,'document':args.reference,'request':' '.join(args.request),**options(args)}
     if args.command=='edit':

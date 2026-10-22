@@ -106,15 +106,8 @@ def dispatch_story_command(args: argparse.Namespace, config: LGConfig) -> int | 
     if args.command not in STORY_COMMANDS:
         return None
     if getattr(args,'request_stdin',False):
-        from .workflow_io import read_story_request
-        if args.request or getattr(args,'passage',None) is not None:
-            raise ValueError('Use stdin request or command-line text, not both')
-        request = read_story_request(sys.stdin)
-        if 'passage' in request and args.command!='edit':
-            raise ValueError('Selected passage applies only to edit')
-        args.request = [request['request']]
-        if 'passage' in request:
-            args.passage = request['passage']
+        from .workflow_io import apply_story_request
+        apply_story_request(args, sys.stdin)
     if args.command == "project":
         return _dispatch_project(args, config)
     store = ProjectStore(config.workspace)

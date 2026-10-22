@@ -49,6 +49,18 @@ def read_story_request(stream):
     return request
 
 
+def apply_story_request(args, stream):
+    """Apply a private stdin request after validating CLI argument combinations."""
+    if args.request or getattr(args, 'passage', None) is not None:
+        raise ValueError('Use stdin request or command-line text, not both')
+    request = read_story_request(stream)
+    if 'passage' in request and args.command != 'edit':
+        raise ValueError('Selected passage applies only to edit')
+    args.request = [request['request']]
+    if 'passage' in request:
+        args.passage = request['passage']
+
+
 class WorkflowStream:
     def __init__(self, callback):
         self.callback = callback
