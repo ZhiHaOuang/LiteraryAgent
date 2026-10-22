@@ -28,6 +28,7 @@ export class LiteraryBackend extends EventBackend implements AgentBackend {
   private pagedSnapshots=false;
   private taskScopes=false;
   private naturalTaskRouting=false;
+  private boundedTasks=false;
   private preparedTask?:{prompt:string;task:unknown};
   private recovering=false;
   private deferred:RpcMessage[]=[];
@@ -62,6 +63,7 @@ export class LiteraryBackend extends EventBackend implements AgentBackend {
       this.pagedSnapshots=info.capabilities.includes('pagedSnapshots');
       this.taskScopes=info.capabilities.includes('taskScopes');
       this.naturalTaskRouting=info.capabilities.includes('naturalTaskRouting');
+      this.boundedTasks=info.capabilities.includes('literaryTasks');
       this.emit({type:'backend.status',status:'ready'});
     }catch(error){await this.rpc?.dispose();throw error instanceof z.ZodError?Error('LG Backend 协议不兼容'):error;}
   }
@@ -147,6 +149,46 @@ export class LiteraryBackend extends EventBackend implements AgentBackend {
   async cancel(sessionId:string){
     if(sessionId!==this.sessionId)throw Error('会话不匹配');
     await this.request('run/cancel',{sessionId});
+  }
+  async authorTask(sessionId:string,command:import('../../shared/protocol').AuthorTaskRequest){
+    this.idle();
+    if(sessionId!==this.sessionId)throw Error('会话不匹配');
+    if(!this.boundedTasks)throw Error('当前 LG Python 包尚不支持有限任务，请先核对运行版本');
+    const show=(field:string,value:unknown,title:string,key:string)=>{
+      this.emit({type:'item.updated',sessionId,item:{id:'bounded-read:'+key,runId:'bounded-read:'+key,
+        kind:'notice',title,text:'已读取当前保存状态',state:'completed',structured:{[field]:value}}});
+    };
+    if(command.action==='read'){
+      show('literaryTask',await this.request('task/read',{taskId:command.taskId}),'文学任务状态',command.taskId);return;
+    }
+    if(command.action==='sources'){
+      show('sourceRevalidation',await this.request('sources/check',{document:command.document,
+        ...(command.version?{version:command.version}:{})}),'来源复核 · 已知直接关联',command.document);return;
+    }
+    if(command.action==='receipt'){
+      show('operationReceipt',await this.request('operation/read',{operationId:command.operationId}),
+        '正式提交状态',command.operationId);return;
+    }
+    this.starting=true;
+    try{
+      if(command.action==='start'){
+        const preview=z.object({status:z.string(),fingerprint:z.string()}).passthrough()
+          .parse(await this.request('task/preview',{options:command.options}));
+        if(preview.status!=='ready'){show('literaryTask',preview,'文学任务未开始','preview');return;}
+        await this.request('task/start',{sessionId,options:command.options,expectedFingerprint:preview.fingerprint});
+      }else if(command.action==='narrative'){
+        const preview=z.object({status:z.string(),fingerprint:z.string().optional()}).passthrough()
+          .parse(await this.request('narrative/preview',{options:command.options}));
+        if(preview.status!=='ready'){show('narrativeResult',preview,'有限认知推演未开始','narrative');return;}
+        await this.request('narrative/run',{sessionId,options:command.options,expectedFingerprint:preview.fingerprint});
+      }else if(command.action==='reviewAdopt'){
+        await this.request('creative/apply',{sessionId,action:'acceptVersion',document:command.document,
+          version:command.version,review:true});
+      }else{
+        await this.request('task/'+command.action,{sessionId,taskId:command.taskId,
+          expectedFingerprint:command.fingerprint,...(command.action==='select'?{optionId:command.optionId}:{})});
+      }
+    }finally{this.starting=false;}
   }
   async approve(requestId:string,decision:Approval['choices'][number]){
     const pending=this.pending.get(requestId);

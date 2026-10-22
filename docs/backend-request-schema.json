@@ -19,6 +19,357 @@
       "properties": {},
       "required": []
     },
+    "runtime/identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verifyManifest": {
+          "type": "boolean"
+        }
+      },
+      "required": []
+    },
+    "operation/read": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      },
+      "required": [
+        "operationId"
+      ]
+    },
+    "task/preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "strategy": {
+              "enum": [
+                "polish",
+                "chapter"
+              ]
+            },
+            "document": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "request": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "passage": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 24000
+            },
+            "plot_disagreement": {
+              "type": "boolean"
+            },
+            "maxModelCalls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2
+            },
+            "maxInputChars": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 48000
+            }
+          },
+          "required": [
+            "strategy",
+            "document",
+            "request"
+          ]
+        }
+      },
+      "required": [
+        "options"
+      ]
+    },
+    "task/start": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "strategy": {
+              "enum": [
+                "polish",
+                "chapter"
+              ]
+            },
+            "document": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "request": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "passage": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 24000
+            },
+            "plot_disagreement": {
+              "type": "boolean"
+            },
+            "maxModelCalls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2
+            },
+            "maxInputChars": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 48000
+            }
+          },
+          "required": [
+            "strategy",
+            "document",
+            "request"
+          ]
+        },
+        "expectedFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "sessionId",
+        "options"
+      ]
+    },
+    "task/read": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        }
+      },
+      "required": [
+        "taskId"
+      ]
+    },
+    "task/advance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "taskId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "expectedFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "sessionId",
+        "taskId"
+      ]
+    },
+    "task/select": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "taskId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "optionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "expectedFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "sessionId",
+        "taskId",
+        "optionId",
+        "expectedFingerprint"
+      ]
+    },
+    "narrative/preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "audience": {
+              "enum": [
+                "character",
+                "reader"
+              ]
+            },
+            "position": {
+              "type": "integer",
+              "minimum": -1000000000,
+              "maximum": 1000000000
+            },
+            "operation": {
+              "enum": [
+                "character_next_action",
+                "reader_expectation"
+              ]
+            },
+            "holder_document": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "max_input_chars": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 24000
+            }
+          },
+          "required": [
+            "audience",
+            "position",
+            "operation"
+          ]
+        }
+      },
+      "required": [
+        "options"
+      ]
+    },
+    "narrative/run": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "audience": {
+              "enum": [
+                "character",
+                "reader"
+              ]
+            },
+            "position": {
+              "type": "integer",
+              "minimum": -1000000000,
+              "maximum": 1000000000
+            },
+            "operation": {
+              "enum": [
+                "character_next_action",
+                "reader_expectation"
+              ]
+            },
+            "holder_document": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "max_input_chars": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 24000
+            }
+          },
+          "required": [
+            "audience",
+            "position",
+            "operation"
+          ]
+        },
+        "expectedFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "sessionId",
+        "options"
+      ]
+    },
+    "sources/check": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "document"
+      ]
+    },
     "session/open": {
       "type": "object",
       "additionalProperties": false,

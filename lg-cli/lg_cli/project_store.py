@@ -567,6 +567,15 @@ class ProjectStore:
             version_metadata = dict(metadata or {})
             if expected_version_id is not None:
                 version_metadata["base_version_id"] = expected_version_id
+            if "base_version_id" in version_metadata:
+                base = version_metadata["base_version_id"]
+                if base is not None:
+                    row = connection.execute(
+                        "SELECT document_id FROM document_versions WHERE id = ?",
+                        (base if type(base) is int and base > 0 else -1,),
+                    ).fetchone()
+                    if row is None or row["document_id"] != document_id:
+                        raise ProjectStoreError("Candidate basis must be an exact version of this document.")
             version_id = self._insert_version(
                 connection,
                 document_id=document_id,
@@ -681,8 +690,22 @@ class ProjectStore:
             if expected_version_id is not None and source_document.active_version_id != expected_version_id:
                 raise ProjectStoreError("Active manuscript changed after preview; compare before accepting.")
             base_version = version_record.metadata.get("base_version_id")
-            if version_record.state == "candidate" and base_version is not None and source_document.active_version_id != base_version:
+            if (version_record.state == "candidate" and "base_version_id" in version_record.metadata
+                    and source_document.active_version_id != base_version):
                 raise ProjectStoreError("Candidate is based on an older active version; reconcile before accepting.")
+            required_decision = version_record.metadata.get('required_decision')
+            if version_record.state == 'candidate' and required_decision is not None:
+                from .generation_sources import canonical_sha
+                try:
+                    if (not isinstance(required_decision, dict) or set(required_decision) != {'document_id','selection_sha256'}
+                            or type(required_decision['document_id']) is not int):
+                        raise ValueError()
+                    decision = self.decision_snapshot(required_decision['document_id'])
+                    if (decision['selection'] is None or decision['source_status'] not in {'current','unbound'}
+                            or canonical_sha(decision['selection']) != required_decision['selection_sha256']):
+                        raise ValueError()
+                except (ValueError, KeyError, TypeError):
+                    raise ProjectStoreError('Author-selected direction changed or needs review; regenerate or reconcile before accepting.') from None
             if version_record.state == "rejected":
                 raise ProjectStoreError("A rejected version cannot be accepted; restore it as a new candidate first.")
             reports = candidate_reports(self, source_document, version_record, final=final)
@@ -755,7 +778,9 @@ class ProjectStore:
                     content=source.content,
                     state="candidate",
                     reason=reason,
-                    metadata={"restored_from_version": source.version_number},
+                    metadata={"restored_from_version": source.version_number,
+                        **({'required_decision':source.metadata['required_decision']}
+                            if 'required_decision' in source.metadata else {})},
                 )
             return self._get_version(connection, restored_id)
 
@@ -1758,6 +1783,8 @@ class ProjectStore:
         connection.execute("PRAGMA busy_timeout = 5000")
         try:
             yield connection
+            from .operation_receipts import record_transaction
+            record_transaction(connection, self.workspace)
             connection.commit()
         except Exception:
             connection.rollback()

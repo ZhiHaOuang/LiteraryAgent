@@ -386,6 +386,7 @@ class StoryWorkflowService:
             reason=f"Generated scene draft from run {handle.run_id}",
             metadata={
                 "run_id": handle.run_id,
+                "base_version_id": scene.document.active_version_id,
                 "continuity_notes": payload["continuity_notes"],
                 **({"story_index": payload["story_index"]} if "story_index" in payload else {}),
                 "risks": payload["risks"],
@@ -502,7 +503,10 @@ class StoryWorkflowService:
             metadata={
                 "run_id": handle.run_id,
                 "mode": mode,
+                "base_version_id": _revision_basis(document, source),
                 "source_version": source.version_number if source else document.active_version_number,
+                **({'required_decision':source.metadata['required_decision']}
+                    if source is not None and 'required_decision' in source.metadata else {}),
                 "passage": passage,
                 "change_log": payload["change_log"],
                 **({"story_index": payload["story_index"]} if "story_index" in payload and passage is None else {}),
@@ -815,6 +819,17 @@ class _EventEmitter:
                 self.sink(event)
             except Exception:
                 pass
+
+
+def _revision_basis(document: DocumentRecord, source: DocumentVersion | None) -> int | None:
+    """Keep the selected source's basis; reading an old draft is not a rebase."""
+    if source is None or source.id == document.active_version_id:
+        return document.active_version_id
+    if source.state == 'candidate' and 'base_version_id' in source.metadata:
+        return source.metadata['base_version_id']
+    # An unbound legacy candidate has no verified active base. Retain its own
+    # identity, so it remains comparable without silently authorizing adoption.
+    return source.id
 
 
 def _document_observation(document: DocumentRecord, text: str, *, source: DocumentVersion | None = None,

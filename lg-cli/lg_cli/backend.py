@@ -267,20 +267,28 @@ class Backend:
             from .task_scope import check_operation
             scoped=state['agent'].runtime.read().get('task') if details.get('tool') and not author_action else None
             if scoped:check_operation(self.config.workspace,scoped,details)
+            from .operation_receipts import SUPPORTED
+            operation_id = uuid.uuid4().hex if details.get('tool') in SUPPORTED else None
+            shown = {**details, **({'operationId': operation_id} if operation_id else {})}
+            if operation_id:
+                self.announce_operation(key, run_id, operation_id)
             kind, mode = operation_policy(state['agent'].runtime.read(), details)
             if mode == 'auto_review':
                 from .creative_review import review_creative
-                result = await review_creative(self.config, {'operation': details},
+                result = await review_creative(self.config, {'operation': shown},
                     on_event=lambda method, params: self.emit(key, 'review/event', {'method':method, 'params':params},run_id=run_id))
                 self.emit(key, 'approval/resolved', {'owner':key,'kind':kind,'automatic':True,**result},run_id=run_id)
             else:
-                result=await self.approvals.request(kind, details, owner=key, mode=mode,run_id=run_id)
+                result=await self.approvals.request(kind, shown, owner=key, mode=mode,run_id=run_id)
             if scoped and result.get('decision')=='accept':
                 current=state['agent'].runtime.read().get('task')
                 if not current or current['id']!=scoped['id']:raise ValueError('Author task changed during approval')
                 grant=check_operation(self.config.workspace,current,details)
                 current[grant]=current.get(grant,0)+1
                 state['agent'].runtime.update(task=current)
+            if operation_id and result.get('decision') == 'accept':
+                state.setdefault('operation_ids', []).append((run_id, operation_id))
+                result = {**result, 'operationId': operation_id}
             return result
         agent_requests = set()
         async def bound_approval(details, *, run_id=None, author_action=False):
@@ -345,12 +353,44 @@ class Backend:
                 extra={'exitCode':exc.exit_code,'result':{'workflowResult':exc.result}} if isinstance(exc,WorkflowFailure) else {}
                 self.emit(key, 'run/completed', {'runId': run, 'status': 'failed', 'error': str(exc),**extra})
             finally:
-                if state[field] == run:
-                    state[field] = None
+                try:
+                    self.publish_operation_receipts(key, run)
+                finally:
+                    if state[field] == run:
+                        state[field] = None
         task = asyncio.create_task(work())
         self.tasks[run] = (key, task)
         self.task_kinds[run] = kind
         return {'runId': run, 'sessionId': key}
+
+    def announce_operation(self, key, run, operation_id):
+        # Save the lookup identity before granting execution, including full_access.
+        # No claim of a transaction or a model/tool completion is made here.
+        self.emit(key, 'client/event', {'type':'item.updated','sessionId':key,
+            'item':{'id':'operation-receipt:'+operation_id,'runId':run,'kind':'notice',
+                'title':'正式提交状态','text':'操作尚未确认提交；结果可通过回执核对。','state':'completed',
+                'structured':{'operationReceipt':{'schema':'lg.operation-receipt.v1','operationId':operation_id,
+                    'status':'unknown','effects':[],'toolOutcome':'unknown','derivedFiles':'not_attested',
+                    'replayAllowed':False}}}})
+
+    def publish_operation_receipts(self, key, run):
+        from .operation_receipts import lookup
+        state = self.session(key)
+        for owner, operation_id in state.get('operation_ids', []):
+            if owner != run:
+                continue
+            try:
+                value = lookup(self.config.workspace, operation_id)
+            except (OSError, ValueError, sqlite3.Error):
+                value = {'schema':'lg.operation-receipt.v1','operationId':operation_id,'status':'unknown',
+                    'effects':[],'toolOutcome':'unknown','derivedFiles':'not_attested','replayAllowed':False}
+            text = {'committed': '数据库修改已提交；派生文件状态需另行核对。',
+                'not_committed': '本次操作没有提交数据库修改。',
+                'unknown': '提交结果尚不能确定；请查询回执并核对版本，勿直接重试。'}[value['status']]
+            self.emit(key, 'client/event', {'type': 'item.updated', 'sessionId': key,
+                'item': {'id': 'operation-receipt:' + operation_id, 'runId': run, 'kind': 'notice',
+                    'title': '正式提交状态', 'text': text, 'state': 'completed',
+                    'structured': {'operationReceipt': value}}})
 
     async def natural_task(self,key,author_text,history):
         from .intent_router import catalog,is_continue,resolve,Clarify,InterpretationError
@@ -556,9 +596,31 @@ class Backend:
             return contract()
         key = params.get('sessionId')
         if method == 'initialize':
+            from .runtime_identity import runtime_identity
             return {'protocolVersion': 'lg.backend.v1', 'workspace': str(self.config.workspace), 'runtime': self.config.runtime_engine,
+                'runtimeIdentity': runtime_identity(self.config),
                 'model': self.config.default_model, 'capabilities': ['sessions', 'events', 'structuredOutput',
-                'cancelTree', 'operationApprovals', 'creativeApprovals', 'referenceContracts', 'bookLibrary', 'clientEvents', 'pagedSnapshots','commandWorkflows','storyWorkflows','sceneApproval','runImport','acceptanceReview','runRecords','workflowResume','legacySessions','taskScopes','naturalTaskRouting','analysisScopes','studioCalls']}
+                'cancelTree', 'operationApprovals', 'creativeApprovals', 'referenceContracts', 'bookLibrary', 'clientEvents', 'pagedSnapshots','commandWorkflows','storyWorkflows','sceneApproval','runImport','acceptanceReview','runRecords','workflowResume','legacySessions','taskScopes','naturalTaskRouting','analysisScopes','studioCalls',
+                'runtimeIdentity','operationReceipts','literaryTasks','boundedNarrative','sourceRevalidation']}
+        if method == 'runtime/identity':
+            from .runtime_identity import runtime_identity, verify_manifest
+            value = runtime_identity(self.config)
+            return verify_manifest(self.config, value) if params.get('verifyManifest') else value
+        if method == 'operation/read':
+            from .operation_receipts import lookup
+            return await asyncio.to_thread(lookup, self.config.workspace, params['operationId'])
+        if method in {'task/preview', 'task/read', 'narrative/preview'}:
+            from .backend_tasks import preview
+            return await preview(self, method, params)
+        if method in {'task/start', 'task/advance', 'narrative/run'}:
+            from .backend_tasks import start
+            return start(self, key, method, params)
+        if method == 'task/select':
+            from .backend_tasks import select
+            return await select(self, key, params)
+        if method == 'sources/check':
+            from .backend_tasks import sources
+            return await asyncio.to_thread(sources, self, params)
         if method=='analysis/preview':
             from .backend_analysis import prepare
             return prepare(self.config,params)
@@ -933,10 +995,13 @@ class Backend:
             'state':params.get('state','canonical'),'reason':params.get('reason','')},sort_keys=True).encode()).hexdigest()
         if params.get('expectedFingerprint') is not None and params['expectedFingerprint']!=digest:
             raise ValueError('Creative preview fingerprint changed; review the current content before approving.')
-        details={'action':action,'preview':preview,'final':params.get('final',False),'review':params.get('review',False)}
+        operation_id = uuid.uuid4().hex
+        details={'action':action,'preview':preview,'final':params.get('final',False),'review':params.get('review',False),
+            'operationId': operation_id}
         if action=='acceptProposal':details['state']=params.get('state','canonical')
         if action=='promoteFact':details['reason']=params.get('reason','Confirmed by author')
         async def execute():
+            self.announce_operation(key, state['run_id'], operation_id)
             mode = state['agent'].runtime.read()['creative_mode']
             if mode == 'auto_review':
                 from .creative_review import review_creative
@@ -954,7 +1019,22 @@ class Backend:
                 await self.review_acceptance(key,params,preview)
                 if current()!=preview or project_fingerprint(self.config.workspace)!=book_before:
                     raise ValueError('Book changed during candidate review; request approval again.')
-            return apply()
+            from .operation_receipts import operation_scope, lookup
+            if action == 'acceptVersion':
+                binding = {'tool':'studio_accept', 'arguments':{'slug':preview['document']['slug'],
+                    'version_number':params['version'], 'expected_version_id':preview['document']['active_version_id']}}
+            elif action == 'acceptProposal':
+                binding = {'tool':'studio_accept_proposal', 'arguments':{'proposal_id':params['proposalId'],
+                    'state':params.get('state','canonical')}}
+            elif action == 'approveScene':
+                binding = {'action':action, 'arguments':{'document':preview['document']['id']}}
+            else:
+                binding = {'action':action, 'arguments':{'factId':params['factId']}}
+            binding['approval'] = details
+            state.setdefault('operation_ids', []).append((state['run_id'], operation_id))
+            with operation_scope(self.config.workspace, operation_id, binding, book_before):
+                value = apply()
+            return {**value, 'operationReceipt':lookup(self.config.workspace, operation_id)}
         return self.schedule(key, execute)
 
     async def close(self):

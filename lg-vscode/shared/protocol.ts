@@ -84,6 +84,24 @@ export const SnapshotSchema = z.object({
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 export const ActiveRunSchema = z.object({id,state:z.enum(['running','waiting','cancelling'])});
 export type ActiveRun = z.infer<typeof ActiveRunSchema>;
+const fingerprint = z.string().regex(/^[0-9a-f]{64}$/);
+const TaskOptions = z.object({strategy:z.enum(['polish','chapter']),document:id,
+  request:z.string().trim().min(1).max(4000),passage:z.string().min(1).max(24000).optional(),
+  plot_disagreement:z.boolean().optional()}).strict();
+const NarrativeOptions = z.object({audience:z.enum(['character','reader']),position:z.number().int(),
+  operation:z.enum(['character_next_action','reader_expectation']),
+  holder_document:z.union([id,z.number().int().positive()]).optional()}).strict();
+export const AuthorTaskRequestSchema = z.discriminatedUnion('action',[
+  z.object({action:z.literal('start'),options:TaskOptions}).strict(),
+  z.object({action:z.literal('read'),taskId:id}).strict(),
+  z.object({action:z.literal('advance'),taskId:id,fingerprint}).strict(),
+  z.object({action:z.literal('select'),taskId:id,optionId:id,fingerprint}).strict(),
+  z.object({action:z.literal('reviewAdopt'),document:id,version:z.number().int().positive()}).strict(),
+  z.object({action:z.literal('narrative'),options:NarrativeOptions}).strict(),
+  z.object({action:z.literal('sources'),document:id,version:z.number().int().positive().optional()}).strict(),
+  z.object({action:z.literal('receipt'),operationId:z.string().regex(/^[0-9a-f]{32}$/)}).strict(),
+]);
+export type AuthorTaskRequest = z.infer<typeof AuthorTaskRequestSchema>;
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ready') }).strict(),
   z.object({type:z.literal('manage'),action:z.enum(['selectBook','models','reconnect','setup'])}).strict(),
@@ -103,6 +121,7 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({type:z.literal('library'),query:LibraryQuerySchema}).strict(),
   z.object({type:z.literal('entry'),topic:LibraryTopicSchema,key:id}).strict(),
   z.object({type:z.literal('writingAction'),topic:LibraryTopicSchema,key:z.string().max(512),action:WritingActionSchema,fingerprint:id}).strict(),
+  z.object({type:z.literal('boundedTask'),request:AuthorTaskRequestSchema}).strict(),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export type Session = { id: string; title: string };

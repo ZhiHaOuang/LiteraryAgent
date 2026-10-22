@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import re
+import sys
 import uuid
 from dataclasses import dataclass
 from contextlib import contextmanager
@@ -23,6 +24,9 @@ RUN_SCHEMA = "lg.run.v2"
 def process_owner(pid=None):
     own=pid is None
     pid=os.getpid() if own else pid
+    if sys.platform == 'darwin':
+        from .process_identity import darwin_process_owner
+        return darwin_process_owner(pid)
     try:
         fields=(Path('/proc')/str(pid)/'stat').read_text().rsplit(')',1)[1].split()
         if fields[0]=='Z':return None

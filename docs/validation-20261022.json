@@ -1,0 +1,219 @@
+{
+  "schema": "lg.delivery-validation.v1",
+  "date": "2026-10-22",
+  "version": "0.3.0",
+  "releaseTag": "lg-r5-bounded-20261022",
+  "productBase": "6b22bc47c87aecac99593ca61a1341f1c7e0c720",
+  "corePin": "6b9826e3aa83b1a5947db50f4332cb9c65f1b340",
+  "coreTree": "74ba48a4b6b086beb9226a79ffe0f3d9f6d40f52",
+  "coreChanged": false,
+  "inputManifest": "validation-20261022-inputs.json",
+  "engineeringEvidence": {
+    "pythonFull": {
+      "modules": 128,
+      "total": 1070,
+      "passed": 1027,
+      "skipped": 43,
+      "failures": 0,
+      "groups": [
+        {
+          "group": 0,
+          "modules": 32,
+          "tests": 241,
+          "passed": 229,
+          "skipped": 12,
+          "seconds": 43.819
+        },
+        {
+          "group": 1,
+          "modules": 32,
+          "tests": 268,
+          "passed": 255,
+          "skipped": 13,
+          "seconds": 34.003
+        },
+        {
+          "group": 2,
+          "modules": 32,
+          "tests": 252,
+          "passed": 237,
+          "skipped": 15,
+          "seconds": 65.104
+        },
+        {
+          "group": 3,
+          "modules": 32,
+          "tests": 309,
+          "passed": 306,
+          "skipped": 3,
+          "seconds": 62.09
+        }
+      ]
+    },
+    "actualProjectPython": {
+      "total": 108,
+      "skipped": 0,
+      "failures": 0
+    },
+    "frontend": {
+      "unit": 61,
+      "realNativeBackendIntegration": 1,
+      "failed": 0,
+      "skipped": 0,
+      "typecheck": true,
+      "build": true,
+      "vsixInstalled": false
+    },
+    "wheel": {
+      "packageFilesByteCompared": 138,
+      "sha256": "fc550ae69ec5937c07dd103615afb277945ea19954e3a08762ffa59d3150c185",
+      "unpackedImport": true
+    },
+    "portableSmoke": {
+      "modules": 8,
+      "total": 81,
+      "skipped": 0,
+      "failures": 0
+    }
+  },
+  "skippedTests": [
+    "test_parent_completion_stops_late_child_tool_and_preserves_root_resume (tests.test_codex_lifecycle.CoreChildLifecycleTests.test_parent_completion_stops_late_child_tool_and_preserves_root_resume) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_pending_child_write_is_revoked_without_cancelling_workflow_approval (tests.test_codex_lifecycle.CoreChildLifecycleTests.test_pending_child_write_is_revoked_without_cancelling_workflow_approval) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_core_receives_prepared_context_and_resume_avoids_history_reinjection (tests.test_runtime_boundary.CodexContextBoundaryTests.test_core_receives_prepared_context_and_resume_avoids_history_reinjection) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_cancel_during_config_check_closes_core_and_never_requests_a_model (tests.test_runtime_policy.RuntimePolicyIntegrationTests.test_cancel_during_config_check_closes_core_and_never_requests_a_model) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_foreign_mcp_is_rejected_before_startup_and_before_any_model_request (tests.test_runtime_policy.RuntimePolicyIntegrationTests.test_foreign_mcp_is_rejected_before_startup_and_before_any_model_request) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_full_access_lg_write_keeps_the_core_filesystem_read_only (tests.test_runtime_policy.RuntimePolicyIntegrationTests.test_full_access_lg_write_keeps_the_core_filesystem_read_only) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_inherited_lg_environment_is_rejected_without_echoing_its_value (tests.test_runtime_policy.RuntimePolicyIntegrationTests.test_inherited_lg_environment_is_rejected_without_echoing_its_value) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_trusted_project_cannot_add_mcp_when_resuming_a_saved_session (tests.test_runtime_policy.RuntimePolicyIntegrationTests.test_trusted_project_cannot_add_mcp_when_resuming_a_saved_session) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_untrusted_project_mcp_cannot_activate_during_thread_start (tests.test_runtime_policy.RuntimePolicyIntegrationTests.test_untrusted_project_mcp_cannot_activate_during_thread_start) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_user_hooks_notify_and_optional_execution_surfaces_stay_disabled (tests.test_runtime_policy.RuntimePolicyIntegrationTests.test_user_hooks_notify_and_optional_execution_surfaces_stay_disabled) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_codex_source_impact_tool_cli_and_backend_share_readonly_kernel (tests.test_source_impact_runtime.SourceImpactRuntimeTests.test_codex_source_impact_tool_cli_and_backend_share_readonly_kernel) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_real_core_receives_custom_instructions_from_private_file (tests.test_stage_input.CodexStageInputTests.test_real_core_receives_custom_instructions_from_private_file) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_cancel_drains_host_experts_and_reopen_does_not_replay (tests.test_codex_review_integration.CodexReviewIntegrationTests.test_cancel_drains_host_experts_and_reopen_does_not_replay) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_legacy_root_keeps_history_and_reports_missing_expert_capability (tests.test_codex_review_integration.CodexReviewIntegrationTests.test_legacy_root_keeps_history_and_reports_missing_expert_capability) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_real_core_experts_and_cold_resume_preserve_source_authority_and_root (tests.test_codex_review_integration.CodexReviewIntegrationTests.test_real_core_experts_and_cold_resume_preserve_source_authority_and_root) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_registered_tool_without_review_scope_cannot_request_an_expert (tests.test_codex_review_integration.CodexReviewIntegrationTests.test_registered_tool_without_review_scope_cannot_request_an_expert) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_injected_policy_is_late_bound_prepared_once_and_review_keeps_four_tools (tests.test_launch_policy.CoreLaunchPolicyTests.test_injected_policy_is_late_bound_prepared_once_and_review_keeps_four_tools) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_prepare_and_override_errors_do_not_start_core_or_expose_private_values (tests.test_launch_policy.CoreLaunchPolicyTests.test_prepare_and_override_errors_do_not_start_core_or_expose_private_values) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_rejected_plan_closes_core_before_start_or_resume_without_private_errors (tests.test_launch_policy.CoreLaunchPolicyTests.test_rejected_plan_closes_core_before_start_or_resume_without_private_errors) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_review_resume_disables_inherited_v2_and_normal_resume_restores_it (tests.test_launch_policy.CoreLaunchPolicyTests.test_review_resume_disables_inherited_v2_and_normal_resume_restores_it) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_codex_live_source_capture (tests.test_live_generation_sources.LiveGenerationSourcesTests.test_codex_live_source_capture) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_real_core_uses_private_snapshot_after_source_changes (tests.test_output_schema.RealCoreSchemaTests.test_real_core_uses_private_snapshot_after_source_changes) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_real_requests_remove_execution_and_image_tools (tests.test_stage_tool_gate.StageToolGateTests.test_real_requests_remove_execution_and_image_tools) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned integration'",
+    "test_unadvertised_execution_cannot_return_private_file_content (tests.test_stage_tool_gate.StageToolGateTests.test_unadvertised_execution_cannot_return_private_file_content) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned integration'",
+    "test_actual_cli_and_extension_service_resume_one_runtime_thread (tests.test_terminal_runtime.TerminalRuntimeTests.test_actual_cli_and_extension_service_resume_one_runtime_thread) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned-runtime integration'",
+    "test_real_codex_tool_result_and_schema (tests.test_anthropic_bridge.BridgeTests.test_real_codex_tool_result_and_schema) ... skipped 'set LG_TEST_CODEX_BINARY for native integration'",
+    "test_real_codex_uses_writing_mcp (tests.test_anthropic_bridge.BridgeTests.test_real_codex_uses_writing_mcp) ... skipped 'set LG_TEST_CODEX_BINARY for native integration'",
+    "test_real_core_executes_repaired_tool_once (tests.test_anthropic_bridge.BridgeTests.test_real_core_executes_repaired_tool_once) ... skipped 'set LG_TEST_CODEX_BINARY for native integration'",
+    "test_real_core_rejects_unrepairable_tool_json_without_execution_or_retry (tests.test_anthropic_bridge.BridgeTests.test_real_core_rejects_unrepairable_tool_json_without_execution_or_retry) ... skipped 'set LG_TEST_CODEX_BINARY for native integration'",
+    "test_real_core_stepfun_request_has_lg_identity_without_bundled_harness (tests.test_anthropic_bridge.BridgeTests.test_real_core_stepfun_request_has_lg_identity_without_bundled_harness) ... skipped 'set LG_TEST_CODEX_BINARY for native integration'",
+    "test_codex_review_choice_source_and_author_adoption (tests.test_decision_review_runtime.DecisionReviewRuntimeTests.test_codex_review_choice_source_and_author_adoption) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_real_extension_format_is_read_without_model_then_imported (tests.test_legacy_sessions.LegacyCoreIntegration.test_real_extension_format_is_read_without_model_then_imported) ... skipped 'set pinned runtime for compatibility integration'",
+    "test_creative_reviewer_has_read_tools_only (tests.test_live_runtime.LiveRuntimeTests.test_creative_reviewer_has_read_tools_only) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned-runtime integration'",
+    "test_main_agent_controls_explicit_workflow_over_real_mcp (tests.test_live_runtime.LiveRuntimeTests.test_main_agent_controls_explicit_workflow_over_real_mcp) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned-runtime integration'",
+    "test_persistent_thread_resumes_in_new_app_server_process (tests.test_live_runtime.LiveRuntimeTests.test_persistent_thread_resumes_in_new_app_server_process) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned-runtime integration'",
+    "test_real_core_streaming_and_steering (tests.test_live_runtime.LiveRuntimeTests.test_real_core_streaming_and_steering) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned-runtime integration'",
+    "test_real_parallel_reviewers_report_to_main_agent (tests.test_live_runtime.LiveRuntimeTests.test_real_parallel_reviewers_report_to_main_agent) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned-runtime integration'",
+    "test_real_codex_responses_bridge_and_writing_mcp_roundtrip (tests.test_provider_transport.ProviderTransportTests.test_real_codex_responses_bridge_and_writing_mcp_roundtrip) ... skipped 'set LG_TEST_CODEX_BINARY for native integration'",
+    "test_direct_entry_retains_generic_patch_dispatch (tests.test_standalone_runtime.StandaloneRuntimeTests.test_direct_entry_retains_generic_patch_dispatch) ... skipped 'set LG_TEST_APP_SERVER_BINARY for standalone checks'",
+    "test_direct_entry_validates_policy_streams_and_resumes (tests.test_standalone_runtime.StandaloneRuntimeTests.test_direct_entry_validates_policy_streams_and_resumes) ... skipped 'set LG_TEST_APP_SERVER_BINARY for standalone checks'",
+    "test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption (tests.test_cli_backend.CLIBackendTests.test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_real_tool_call_and_cold_resume_use_same_registered_root (tests.test_codex_dynamic_tools.CoreDynamicTransportTests.test_real_tool_call_and_cold_resume_use_same_registered_root) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+    "test_codex_registered_knowledge_and_independent_author_confirmation (tests.test_narrative_knowledge_runtime.NarrativeKnowledgeRuntimeTests.test_codex_registered_knowledge_and_independent_author_confirmation) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'"
+  ],
+  "environment": {
+    "python": "3.12.0",
+    "platform": "Darwin",
+    "machine": "arm64",
+    "node": "20.18.1",
+    "npm": "10.8.2",
+    "pythonDistributions": {
+      "PyJWT": "2.14.0",
+      "Pygments": "2.21.0",
+      "annotated-types": "0.8.0",
+      "anthropic": "0.125.0",
+      "anyio": "4.15.1",
+      "attrs": "26.1.0",
+      "beautifulsoup4": "4.15.0",
+      "certifi": "2026.7.22",
+      "cffi": "2.1.1",
+      "charset-normalizer": "3.5.2",
+      "click": "8.5.0",
+      "cryptography": "50.0.1",
+      "distro": "1.9.0",
+      "docstring_parser": "0.18.0",
+      "h11": "0.16.0",
+      "httpcore": "1.0.9",
+      "httpx": "0.28.1",
+      "httpx-sse": "0.4.3",
+      "idna": "3.19",
+      "jiter": "0.17.0",
+      "jsonschema": "4.26.0",
+      "jsonschema-specifications": "2025.9.1",
+      "literary-giant": "0.2.0",
+      "markdown-it-py": "4.2.0",
+      "mcp": "1.30.0",
+      "mdurl": "0.1.2",
+      "packaging": "26.3",
+      "pip": "26.2.1",
+      "prompt_toolkit": "3.0.53",
+      "pycparser": "3.0",
+      "pydantic": "2.13.5",
+      "pydantic-settings": "2.15.0",
+      "pydantic_core": "2.46.5",
+      "pypinyin": "0.55.0",
+      "python-dotenv": "1.2.3",
+      "python-multipart": "0.0.32",
+      "referencing": "0.37.0",
+      "requests": "2.34.2",
+      "rich": "14.3.4",
+      "rpds-py": "2026.6.3",
+      "setuptools": "84.2.0",
+      "sniffio": "1.3.1",
+      "soupsieve": "3.0.3",
+      "sse-starlette": "3.4.11",
+      "starlette": "1.6.0",
+      "typing-inspection": "0.4.4",
+      "typing_extensions": "4.16.0",
+      "urllib3": "2.8.0",
+      "uvicorn": "0.53.0",
+      "wcwidth": "0.8.2",
+      "wheel": "0.48.0",
+      "xlsxwriter": "3.2.9"
+    }
+  },
+  "commands": {
+    "smoke": "python -B scripts/verify_review_delivery.py --suite smoke --jobs 2 --output /path/to/new-evidence",
+    "full": "python -B scripts/verify_review_delivery.py --suite full --jobs 4 --output /path/to/new-full-evidence"
+  },
+  "r5Oracles": {
+    "polish": [
+      "outside selection remains unchanged",
+      "candidate binds generation base",
+      "later author edit rejects adoption",
+      "fresh approval cannot rebind stale candidate"
+    ],
+    "chapter": [
+      "three options then waiting_author",
+      "separate creative choice",
+      "restart and advance validate exact base and selection",
+      "review and adoption remain separately approved"
+    ]
+  },
+  "modelEvidence": "local synthetic providers only",
+  "paidModelCalls": 0,
+  "limitations": [
+    "No current Mac pinned Core binary validation; 43 tests remain conditional.",
+    "No human literary-quality or long-term writing evidence.",
+    "No global input isolation, independent Kernel package or standalone UI.",
+    "Dependency metadata is an observed environment, not a cross-platform lock.",
+    "Full and smoke counts overlap and must not be added."
+  ],
+  "formatOnlyNormalization": [
+    "lg-vscode/tests/fixtures/literary_task_backend.py",
+    "tests/test_code_workspace_boundary.py",
+    "tests/test_process_identity.py",
+    "tests/test_review_delivery.py",
+    "tests/test_runtime_identity.py"
+  ]
+}

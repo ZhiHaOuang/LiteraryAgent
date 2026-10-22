@@ -14,8 +14,22 @@ REVISION_MODES = ['light','grammar','pacing','dialogue','imagery','conflict','po
 
 
 def contract():
+    from .narrative_execution import INPUT_SCHEMA as NARRATIVE_INPUT
+    from .literary_tasks import INPUT_SCHEMA as TASK_INPUT
+    fingerprint = {'type':'string','pattern':'^[0-9a-f]{64}$'}
     definitions = {
         'initialize': ({}, []), 'session/list': ({}, []), 'session/create': ({}, []),
+        'runtime/identity': ({'verifyManifest':{'type':'boolean'}}, []),
+        'operation/read': ({'operationId':{'type':'string','pattern':'^[0-9a-f]{32}$'}}, ['operationId']),
+        'task/preview': ({'options':TASK_INPUT}, ['options']),
+        'task/start': ({'sessionId':ID,'options':TASK_INPUT,'expectedFingerprint':fingerprint}, ['sessionId','options']),
+        'task/read': ({'taskId':ID}, ['taskId']),
+        'task/advance': ({'sessionId':ID,'taskId':ID,'expectedFingerprint':fingerprint}, ['sessionId','taskId']),
+        'task/select': ({'sessionId':ID,'taskId':ID,'optionId':TEXT,'expectedFingerprint':fingerprint},
+            ['sessionId','taskId','optionId','expectedFingerprint']),
+        'narrative/preview': ({'options':NARRATIVE_INPUT}, ['options']),
+        'narrative/run': ({'sessionId':ID,'options':NARRATIVE_INPUT,'expectedFingerprint':fingerprint}, ['sessionId','options']),
+        'sources/check': ({'document':TEXT,'version':{'type':'integer','minimum':1}}, ['document']),
         'session/open': ({'sessionId': ID}, ['sessionId']),
         'session/read': ({'sessionId': ID}, ['sessionId']),
         'session/snapshot': ({'sessionId': ID}, ['sessionId']),

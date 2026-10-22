@@ -73,12 +73,15 @@ def create_server(config: LGConfig, *, control_socket: str | None = None, requir
                 if project_fingerprint(config.workspace)!=before:
                     raise ValueError('Project changed during approval; review and request a new operation.')
                 from .generation_sources import bind_generation_sources
-                with bind_generation_sources(decision.get('generation_sources')):
+                from .operation_receipts import operation_scope
+                with bind_generation_sources(decision.get('generation_sources')), operation_scope(
+                        config.workspace, decision.get('operationId'), details, before):
                     return function(*args,**kwargs)
             return local_call
         @functools.wraps(function)
         def call(*args, **kwargs):
             receipt = None
+            result, details, before = {}, {}, ''
             if control_socket:
                 from .workflow_control import control_request
                 from .mcp_approval import operation_details, project_fingerprint
@@ -93,7 +96,9 @@ def create_server(config: LGConfig, *, control_socket: str | None = None, requir
                     raise ValueError('Project changed during approval; review and request a new operation.')
                 receipt = result.get('generation_sources')
             from .generation_sources import bind_generation_sources
-            with bind_generation_sources(receipt):
+            from .operation_receipts import operation_scope
+            with bind_generation_sources(receipt), operation_scope(
+                    config.workspace, result.get('operationId'), details, before):
                 return function(*args, **kwargs)
         return call
 
@@ -237,6 +242,8 @@ def create_server(config: LGConfig, *, control_socket: str | None = None, requir
                 expected_version_id=expected_version_id,
                 reason=f"Author requested restore of version {version_number}",
                 metadata={"restored_from_version": previous.version_number,
+                    **({"required_decision":previous.metadata['required_decision']}
+                        if 'required_decision' in previous.metadata else {}),
                     **({"story_index": previous.metadata["story_index"]} if "story_index" in previous.metadata else {})},
             )
         return candidate_result(document, version)

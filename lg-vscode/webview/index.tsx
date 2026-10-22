@@ -12,6 +12,7 @@ import './ui/styles/components.css';
 import './ui/styles/timeline.css';
 import './styles.css';
 import {HomePanel,LibraryPanel} from './WorkspacePanels';
+import {LiteraryTasksPanel,TaskResult} from './LiteraryTasksPanel';
 import type {LibraryTopic} from '../shared/protocol';
 
 type View='home'|'chat'|'book'|'library';
@@ -108,6 +109,7 @@ function App() {
           {snapshot?.items.map(item => <article key={item.runId + ':' + item.id} className="group item" data-item-id={item.id}>
             {item.kind === 'user' ? <UserMessage content={item.text} timestamp={0} /> : item.kind === 'assistant' ? <><AssistantMessage content={item.text} status={item.state === 'failed' ? 'error' : 'default'} /><CopyButton text={item.text} /></> : <ToolCallContainer label={item.title} status={item.state === 'completed' ? 'success' : item.state === 'failed' ? 'error' : item.state === 'running' ? 'loading' : 'warning'} labelSuffix={labels[item.state]}>
               <details><summary>{item.text.slice(0, 90) || '查看执行内容'}</summary><CodeBlock>{item.text}</CodeBlock>{item.structured !== undefined && <CodeBlock>{JSON.stringify(item.structured, null, 2)}</CodeBlock>}</details>
+              <TaskResult structured={item.structured} send={send} disabled={!ready||busy}/>
               {item.files?.map(path => <button key={path} onClick={() => send({ type: 'open', path })}>打开产物 · {path.split('/').pop()}</button>)}
               {item.diff && <button onClick={() => send({ type: 'diff', itemId: item.id })}>查看只读差异 · {item.diff.applied ? '已应用' : '候选对比'}</button>}
             </ToolCallContainer>}
@@ -117,6 +119,7 @@ function App() {
           {snapshot?.run && <p className="run-state" role="status">{labels[snapshot.run.state]}</p>}
         </div>
         <div className="composer-host">
+          <LiteraryTasksPanel send={send} disabled={!ready||busy}/>
           {snapshot?.attachment && <div className="attachment">已附加：{snapshot.attachment.path}<button onClick={() => send({ type: 'detach' })}>移除</button></div>}
           <InputForm inputText={draft} inputFieldRef={input as React.RefObject<HTMLDivElement>} isStreaming={busy} isWaitingForResponse={false}
             isComposing={composing} editModeInfo={{ label: '逐次审批', title: '写入前由作者确认', icon: null }} thinkingEnabled={false}

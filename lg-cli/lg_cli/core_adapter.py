@@ -26,6 +26,17 @@ if TYPE_CHECKING:
 EngineEventCallback = Callable[[dict[str, Any]], None]
 
 
+def ensure_code_workspace(workspace: Path) -> None:
+    """Reject book roots and their children without reading content or creating state.
+
+    This is an entry boundary, not an OS sandbox: no descendant scan is performed.
+    """
+    from .project_store import ProjectStore
+    resolved = workspace.resolve()
+    if any(ProjectStore(path).initialized for path in (resolved, *resolved.parents)):
+        raise ValueError('Code execution is unavailable in an initialized book workspace; use a separate code workspace.')
+
+
 @dataclass(frozen=True)
 class CoreCommandCandidate:
     name: str
@@ -93,6 +104,11 @@ class CodexStageExecutor:
         output_schema: Path | None = None,
         on_event: EngineEventCallback | None = None,
     ) -> CoreExecutionResult:
+        if mode == 'code':
+            try:
+                ensure_code_workspace(config.workspace)
+            except ValueError as exc:
+                return _failure(str(exc), used_stub=True)
         if not instructions.strip():
             return _failure("Codex stage instructions must not be empty or whitespace", used_stub=True)
         try:

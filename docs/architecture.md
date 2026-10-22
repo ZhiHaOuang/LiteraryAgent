@@ -2,7 +2,19 @@
 
 LiteraryGiant 拥有文学任务的执行语义、故事状态与作者控制。Codex 和 Native 是现有执行适配器；Skill、subagent 和声明式工作流是实现特定策略的手段。架构演进以文学任务能否可靠完成为依据，不以新增角色数量或目录拆分数量衡量。
 
-本文描述 2026-10-16 当前实现及后续职责划分。已验收范围、尚未完成的能力和下一阶段顺序见 [项目路线与进度](roadmap.md)；分批实施证据见 [Oh Story 融合记录](oh-story-integration.md)。目标职责不表示同名模块已经存在。
+本文描述截至 2026-10-22 的实现及后续职责划分。已验收范围、尚未完成的能力和下一阶段顺序见 [项目路线与进度](roadmap.md)；历史分批证据见 [Oh Story 融合记录](oh-story-integration.md)，本轮实际调用链与限制见 [接手实施记录](review-implementation.md)。目标职责不表示同名模块已经存在。
+
+## 接手审查新增边界（2026-10-22）
+
+`backend_tasks.py` 把有限 `task/*`、`narrative/*`、`sources/check` 接到共享 Backend。`task_cli.py` 和现有 `LiteraryBackend.ts` 消费同一契约，React 增加任务及结果动作，不另建 UI 框架。`literary_tasks.py` 在 RunStore 中保存两种有界任务的进度，复用 Story 修订、创作方向和候选；方向选择与正式采用仍走既有独立创作批准。chapter 生成候选携带 `required_decision`，ProjectStore 在采用事务中核对精确选择及来源，不能用任务完成事件替代正式提交。
+
+Story 候选保存实际生成基础版本；旧候选修订不自动重绑最新 active head。`chapter_sync.py` 在导入前保存精确意图，提交后索引／基线失败明确为 `committed-needs-sync`，重试只在数据库内容、版本和 origin 相符时修复派生状态。原始导入只解析同一次文件快照。
+
+`operation_receipts.py` 为受支持正式转换保存操作 ID／请求绑定；DB 效果记录与领域事务一起提交，运行尝试与结果保存在独立的运行收据库。`operation/read` 区分 committed、not_committed、unknown，重复 ID 不自动重放。收据不证明全部派生文件或工具返回成功，也不是任意 JSON-RPC 的全局幂等实现。
+
+`narrative_execution.py` 只为 Native Responses 构造全新、无历史、无工具、固定用途的请求。人物／读者视图缺必要记录、来源失效、截断或超预算时拒绝；前后视图改变不释放结果。普通聊天和旧工作流的 `model_input_isolation=false` 不变；作者写作的“知道规划但不提前揭示”是另一类审读任务。
+
+`runtime_identity.py` 报告实际包路径、解释器和磁盘包摘要，可显式核验 manifest 的文件 hash／pin；不证明旧进程已加载相同代码或可复现构建。`lg code` 不经 Backend，CLI 与适配器均对解析后的当前目录及祖先检查完整作品标记；此门禁不是全盘 OS 隔离。Mac RunStore 以进程启动时间和 boot UUID 校验恢复所有权，Linux 分支保留。Core 源码、Rust TUI 与独立 app_server 未改变。
 
 ## 本阶段验收结论（2026-10-16）
 
@@ -66,7 +78,7 @@ Runtime 精简与文学执行模型建设并行推进，目标是减少不需要
 
 工具实现存在、发布包包含工具、某次任务获准调用工具是三个独立决定。只读审读不能因 Runtime 支持 shell 就获得 shell 权限；通用编辑可处理候选或临时制品，正式写入仍经 Kernel 的版本、范围和作者授权。若尚不能防止通用执行绕过权威数据库或正文，应继续限制任务暴露范围，不能以删除基础能力代替权限设计。
 
-搜索复用通用检索能力，产品层绑定作品、版本、身份、时间/揭示范围与预算；并发审读绑定同一版本，各自只生成候选结果。职责拆分不要求重新实现搜索、会话或并发。Rust TUI 的产品去留尚未决定，不属于已批准删除对象。
+搜索复用通用检索能力，产品层绑定作品、版本、身份、时间/揭示范围与预算；并发审读绑定同一版本，各自只生成候选结果。职责拆分不要求重新实现搜索、会话或并发。Rust TUI 已按作者决定保留为独立兼容入口，不属于删除对象。
 
 [OpenAI 对 harness 与 App Server 的说明](https://openai.com/index/unlocking-the-codex-harness/)将会话持久化、工具执行、审批交互及客户端事件作为执行框架组成；这里将其作为概念背景，具体裁剪依赖仍以本地固定版本源码和构建证据为准。
 

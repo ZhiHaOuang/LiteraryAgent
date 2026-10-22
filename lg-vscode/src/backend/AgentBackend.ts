@@ -1,6 +1,7 @@
 import type { Approval, BackendEvent, Item, Session, LibraryQuery, LibraryPage, LibraryDetail, LibraryTopic, WritingAction, Stage } from '../../shared/protocol';
 
 export interface AgentBackend {
+  authorTask?(sessionId:string,request:import('../../shared/protocol').AuthorTaskRequest):Promise<void>;
   connect(): Promise<void>;
   list(): Promise<Session[]>;
   create(): Promise<Session>;

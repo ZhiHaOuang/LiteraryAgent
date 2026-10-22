@@ -12,6 +12,22 @@ from typing import Any
 _runtime_loaded = False
 
 
+class _CLIArgumentParser(argparse.ArgumentParser):
+    def parse_args(self, args=None, namespace=None):
+        parsed, extra = self.parse_known_args(args, namespace)
+        # Python 3.12.0 can leave nargs='*' prose after a leaf option unconsumed.
+        # Keep the exact request order; never interpret an unknown flag as prose.
+        story = (getattr(parsed, 'command', None) == 'edit' or
+            getattr(parsed, 'command', None) == 'scene' and getattr(parsed, 'scene_command', None) in {'plan','draft'} or
+            getattr(parsed, 'command', None) == 'bible' and getattr(parsed, 'bible_command', None) == 'curate')
+        if extra and story and hasattr(parsed, 'request') and all(not item.startswith('-') for item in extra):
+            parsed.request.extend(extra)
+            extra = []
+        if extra:
+            self.error('unrecognized arguments: ' + ' '.join(extra))
+        return parsed
+
+
 def _load_runtime():
     global _runtime_loaded
     if _runtime_loaded:
@@ -41,7 +57,8 @@ def _load_runtime():
     from .workflow_runner import COMMAND_TO_WORKFLOW, WorkflowExecutionResult, WorkflowRunner
     TASK_COMMANDS = tuple(COMMAND_TO_WORKFLOW)
     TOP_LEVEL_COMMANDS = {*TASK_COMMANDS, *STORY_COMMANDS, 'init', 'status', 'doctor',
-        'skills', 'agents', 'modes', 'run', 'native', 'auth', 'newbook', 'novel', 'studio'}
+        'skills', 'agents', 'modes', 'run', 'native', 'auth', 'newbook', 'novel', 'studio',
+        'task', 'narrative', 'identity', 'operation', 'sources'}
     globals().update(locals())
     _runtime_loaded = True
 
@@ -105,7 +122,7 @@ def _main(raw_argv):
 
 def build_parser() -> argparse.ArgumentParser:
     _load_runtime()
-    parser = argparse.ArgumentParser(
+    parser = _CLIArgumentParser(
         prog="literary",
         description="LiteraryGiant long-form writing agent CLI.",
     )
@@ -123,6 +140,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_auth_parser(sub)
     from .studio_cli import add_parser as add_studio_parser
     add_studio_parser(sub)
+    from .task_cli import add_parsers
+    add_parsers(sub)
 
     sub.add_parser("init", help="Initialize the LG project workspace.")
     newbook = sub.add_parser("newbook", help="Create a book inside the selected bookshelf.")
@@ -263,6 +282,9 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
     if args.command == "studio":
         from .studio_cli import dispatch
         return dispatch(args, config)
+    if args.command in {'task', 'narrative', 'identity', 'operation', 'sources'}:
+        from .task_cli import dispatch
+        return dispatch(args, config)
     if args.command is None:
         if not sys.stdin.isatty():
             prompt = sys.stdin.read().strip()
@@ -317,6 +339,9 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser, config:
 
 
 def _run_task(command: str, prompt: str, config: LGConfig, args: argparse.Namespace) -> int:
+    if command == 'code':
+        from .core_adapter import ensure_code_workspace
+        ensure_code_workspace(config.workspace)
     if Bookshelf(config.workspace).marker.is_file():
         raise ValueError("Focus a book before starting a writing request")
     ensure_agent_config(config.workspace)

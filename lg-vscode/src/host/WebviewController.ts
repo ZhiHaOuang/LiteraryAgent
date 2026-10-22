@@ -106,6 +106,11 @@ export class WebviewController implements vscode.WebviewViewProvider, vscode.Dis
     }
     if (!vscode.workspace.isTrusted) throw Error('当前工作区尚未受信任。');
     switch (message.type) {
+      case 'boundedTask':
+        if(this.store.busy||state.connection!=='ready')throw Error('请等待当前任务结束后再操作');
+        if(!this.backend.authorTask)throw Error('当前连接器不支持有限文学任务');
+        await this.workspace.ensureClean();
+        await this.backend.authorTask(state.sessionId,message.request);break;
       case 'create':
         if (this.store.busy) throw Error('请先停止当前任务');
         await this.backend.create(); state.sessions = await this.backend.list(); this.store.publish(); break;
