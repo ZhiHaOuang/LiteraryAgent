@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "revision_markdown": {"type": "string", "minLength": 1, "maxLength": 24000},
+    "change_log": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 1000}},
+    "risks": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 1000}}
+  },
+  "required": ["summary", "revision_markdown", "change_log", "risks"]
+}

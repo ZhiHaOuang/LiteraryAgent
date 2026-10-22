@@ -107,7 +107,11 @@ class ComparisonTests(unittest.TestCase):
                 schema = ((request.get('text') or {}).get('format') or {}).get('schema', {})
                 if 'revision_markdown' in schema.get('properties', {}):
                     payload = {'summary': 'synthetic revision', 'revision_markdown': '修改。',
-                        'change_log': ['synthetic change'], 'memory_proposals': [], 'risks': [], 'book_overview': '合成故事。'}
+                        'change_log': ['synthetic change'], 'risks': []}
+                    if 'memory_proposals' in schema['properties']:
+                        payload['memory_proposals'] = []
+                    if 'book_overview' in schema['properties']:
+                        payload['book_overview'] = '合成故事。'
                     if owner.invalid_schema:
                         payload.pop('summary')
                         payload.pop('risks')

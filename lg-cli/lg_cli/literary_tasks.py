@@ -15,7 +15,7 @@ from .generation_sources import bind_generation_sources, canonical_sha, make_obs
 from .output_writer import write_workflow_output
 from .project_store import ProjectStore
 from .run_store import RunStore, _atomic_json, _atomic_private_text
-from .story_workflow import StoryWorkflowService
+from .story_workflow import POLISH_PROFILE, StoryWorkflowService, polish_profile_fingerprint
 
 POLICY = 'lg.literary-task.v1'
 INPUT_SCHEMA = {'type':'object','additionalProperties':False,'properties':{
@@ -73,6 +73,19 @@ def _base(document):
         'state':document.state,'content_sha256':text_sha(document.content)}
 
 
+def _input_profile():
+    return {'name':POLISH_PROFILE,'fingerprint':polish_profile_fingerprint()}
+
+
+def _profile_changed(state):
+    if state['strategy']!='polish': return False
+    try:
+        return state.get('inputProfile')!=_input_profile()
+    except OSError:
+        # Missing current resources prohibit execution, not inspection of saved work.
+        return True
+
+
 def prepare(config, options):
     """Read-only author preview; a fingerprint can bind subsequent start approval."""
     options = _normalize(options)
@@ -86,7 +99,8 @@ def prepare(config, options):
         raise ValueError('Polish passage must occur exactly once in the active chapter.')
     identity = _identity(config)
     base = _base(document)
-    signature = canonical_sha({'policy':POLICY,'options':options,'base':base,'identity':identity})
+    profile = {'inputProfile':_input_profile()} if options['strategy']=='polish' else {}
+    signature = canonical_sha({'policy':POLICY,'options':options,'base':base,'identity':identity,**profile})
     # A local revision sends the selection and up to 600 adjacent characters on
     # either side, not the whole chapter. The adapter checks the complete prepared
     # prompt again after the existing Story service adds its bounded context.
@@ -100,6 +114,7 @@ def prepare(config, options):
         'reason':'input_char_budget_exceeded' if oversized else None,
         'fingerprint':signature,'strategy':options['strategy'],'document':document.slug,
         'baseVersion':document.active_version_id,'base':base,'identity':identity,'options':options,
+        **profile,
         'contextBasis':{'state':document.state,'empty':not bool(document.content.strip()),
             'sourceIsCanonical':False,'role':'exact_chapter_text_or_container_version'},
         'limits':{'maxModelCalls':options['maxModelCalls'],'maxInputChars':options['maxInputChars'],
@@ -135,6 +150,9 @@ def _load(config, run_id):
 def read(config, run_id):
     state = _load(config,run_id)
     public = _public(state)
+    if _profile_changed(state):
+        public.update(inputPolicyChanged=True,reason='input_profile_changed',
+            nextAction='inspect_saved_candidate' if state.get('candidate') else 'new_task')
     if state['status']=='executing':
         public.update(status='interrupted',reason='execution_outcome_uncertain',nextAction='inspect_run')
     try:
@@ -167,6 +185,7 @@ def validate_current(config, run_id):
 
 def _check(config,state,cancelled):
     if cancelled(): raise _Stopped('author_cancelled')
+    if _profile_changed(state): raise _Stopped('input_profile_changed')
     if _identity(config)!=state['identity']: raise _Stopped('runtime_or_policy_changed')
     document = ProjectStore(config.workspace).get_document(state['document'])
     if _base(document)!=state['base']: raise _Stopped('source_changed')
@@ -249,6 +268,11 @@ def advance(config, run_id, *, expected_fingerprint=None, adapter=None, cancelle
         state = _load(config,run_id)
         if expected_fingerprint is not None and expected_fingerprint!=state['fingerprint']:
             return {**_public(state),'status':'stopped','reason':'task_preview_changed','nextAction':'read_task'}
+        if _profile_changed(state):
+            current=read(config,run_id)
+            if current['status']=='adopted': return current
+            return {**current,'status':'stopped','reason':'input_profile_changed',
+                'nextAction':'inspect_saved_candidate' if state.get('candidate') else 'new_task'}
         if state['status']=='executing': return read(config,run_id)
         if state['status']!='waiting_author': return read(config,run_id)
         return _execute(config,state,adapter or execution_adapter(config),cancelled or (lambda:False))
@@ -264,7 +288,7 @@ def _execute(config,state,adapter,cancelled):
         bounded = _BoundedAdapter(config,state,adapter,cancelled,selection)
         if state['strategy']=='polish':
             result = StoryWorkflowService(config,adapter=bounded).revise_document(state['document'],mode='light',
-                request=state['options']['request'],passage=state['options']['passage'])
+                request=state['options']['request'],passage=state['options']['passage'],input_profile=POLISH_PROFILE)
             if bounded.stopped: raise _Stopped(bounded.stopped)
             if not result.ok: return _finish(config,state,'failed','polish_stage_failed')
             candidate={'document':document.slug,'versionNumber':result.version.version_number,'versionId':result.version.id,

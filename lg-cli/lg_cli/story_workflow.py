@@ -11,7 +11,7 @@ from .core_adapter import CoreExecutionResult
 from .execution_adapter import execution_adapter
 from .definitions import DefinitionRegistry
 from .events import EventSink, EventType, RunEvent
-from .generation_sources import bind_generation_sources, make_receipt, text_sha
+from .generation_sources import bind_generation_sources, canonical_sha, make_receipt, text_sha
 from .logging_utils import append_agent_log, ensure_log_dir, write_text
 from .output_writer import write_workflow_output
 from .output_schema import read_schema, validate_output
@@ -32,6 +32,15 @@ REVISION_MODES = {
     "style",
     "rewrite",
 }
+
+POLISH_PROFILE = 'r5-polish.v1'
+
+
+def polish_profile_fingerprint() -> str:
+    """Bind the host's finite input policy and packaged output contract."""
+    return canonical_sha({'profile':POLISH_PROFILE,
+        'instructions':_resource_path('polish-stage.txt').read_text(encoding='utf-8'),
+        'schema':_resource_path('polish.schema.json').read_text(encoding='utf-8')})
 
 
 @dataclass(frozen=True)
@@ -204,11 +213,15 @@ class StoryWorkflowService:
         passage: str | None = None,
         dry_run: bool = False,
         on_event: EventSink | None = None,
+        input_profile: str | None = None,
     ) -> StoryTaskResult:
         normalized_mode = mode.strip().lower()
         if normalized_mode not in REVISION_MODES:
             raise ValueError(f"Revision mode must be one of: {', '.join(sorted(REVISION_MODES))}.")
         document = self.project.get_document(reference)
+        if input_profile is not None and (input_profile != POLISH_PROFILE or normalized_mode != 'light'
+                or document.kind != 'chapter' or passage is None or source_version is not None):
+            raise ValueError('R5 polish requires light mode, an exact active chapter passage, and its host profile.')
         source = self.project.get_version(document.id, source_version) if source_version is not None else None
         source_text = source.content if source is not None else document.content
         request_text = request.strip() or f"Apply a {normalized_mode} revision while preserving the agreed story facts."
@@ -244,7 +257,8 @@ class StoryWorkflowService:
                                 source_text[offset + len(passage):offset + len(passage) + 600])
             prompt = _revision_prompt(document, passage if passage is not None else source_text, snapshot,
                                       normalized_mode, request_text, passage_only=passage is not None,
-                                      surroundings=surroundings, context_text=context)
+                                      surroundings=surroundings, context_text=context,
+                                      input_profile=input_profile)
             observations = [observation, _document_observation(document,
                 passage if passage is not None else source_text, source=source, excerpt=passage is not None)]
             if surroundings is not None:
@@ -255,7 +269,8 @@ class StoryWorkflowService:
                               document=document, stage_id="revision")
         return self._execute_revision(handle, emit, document, prompt, dry_run, normalized_mode, source,
                                       passage=passage, source_text=source_text,
-                                      context_documents=tuple(snapshot["documents"]), observations=observations)
+                                      context_documents=tuple(snapshot["documents"]), observations=observations,
+                                      input_profile=input_profile)
 
     def _execute_scene_plan(
         self,
@@ -453,9 +468,15 @@ class StoryWorkflowService:
         source_text: str = "",
         context_documents: tuple[DocumentRecord, ...] = (),
         observations: list[dict] | None = None,
+        input_profile: str | None = None,
     ) -> StoryTaskResult:
+        schema_name = 'polish.schema.json' if input_profile == POLISH_PROFILE else 'revision.schema.json'
         try:
-            prepared, preview_prompt = self._write_prompt(handle, "revision", prompt, "revision.schema.json", observations)
+            if input_profile == POLISH_PROFILE:
+                prepared, preview_prompt = self._write_prompt(handle, 'revision', prompt, schema_name,
+                    observations, input_profile=input_profile)
+            else:
+                prepared, preview_prompt = self._write_prompt(handle, 'revision', prompt, schema_name, observations)
         except Exception:
             return self._fail(handle, emit, "Story stage input contract is invalid or could not be saved.",
                               EXIT_CONFIGURATION, document=document, stage_id="revision")
@@ -472,11 +493,11 @@ class StoryWorkflowService:
                 document=document,
             )
         emit.emit(EventType.STAGE_STARTED, f"Creating {mode} revision", stage_id="revision")
-        result = self._model_run(prepared, "revision", "revision.schema.json", emit)
+        result = self._model_run(prepared, "revision", schema_name, emit)
         if not result.ok:
             return self._fail_from_model(handle, emit, result, document, "revision")
         try:
-            payload = _parse_revision(result.output_text)
+            payload = _parse_revision(result.output_text, input_profile=input_profile)
         except ValueError as exc:
             return self._fail(handle, emit, str(exc), EXIT_MODEL, document=document, stage_id="revision")
         replacement = payload["revision_markdown"].strip()
@@ -503,6 +524,7 @@ class StoryWorkflowService:
             metadata={
                 "run_id": handle.run_id,
                 "mode": mode,
+                **({'input_profile':input_profile} if input_profile is not None else {}),
                 "base_version_id": _revision_basis(document, source),
                 "source_version": source.version_number if source else document.active_version_number,
                 **({'required_decision':source.metadata['required_decision']}
@@ -513,11 +535,8 @@ class StoryWorkflowService:
                 "risks": payload["risks"],
             },
         )
-        proposals = self._store_memory_proposals(
-            payload["memory_proposals"],
-            document.id,
-            version.version_number,
-        )
+        proposals = [] if input_profile == POLISH_PROFILE else self._store_memory_proposals(
+            payload["memory_proposals"], document.id, version.version_number)
         self.runs.write_stage(
             handle,
             stage_id="revision",
@@ -540,7 +559,7 @@ class StoryWorkflowService:
             output_root=self.config.output_path,
             run_id=handle.run_id,
         )
-        if payload.get('book_overview'):
+        if input_profile != POLISH_PROFILE and payload.get('book_overview'):
             from .book_overview import save_overview
             save_overview(self.config.workspace, payload['book_overview'],
                 source={'run': handle.run_id, 'version': version.id, 'state': 'candidate'})
@@ -586,25 +605,35 @@ class StoryWorkflowService:
         return self.registry.agent(agent_id), self.registry.skill(skill_id)
 
     def _write_prompt(self, handle: RunHandle, stage_id: str, prompt: str, schema_name: str,
-                      observations: list[dict] | None = None) -> tuple[_PreparedStoryInput, str]:
-        if stage_id in {'scene-draft', 'revision'}:
-            from .book_overview import overview_context
-            prompt += '\n' + overview_context(self.config.workspace)
-        from .book_analysis import BookAnalysisStore
+                      observations: list[dict] | None = None, *,
+                      input_profile: str | None = None) -> tuple[_PreparedStoryInput, str]:
+        instructions = None
+        if input_profile == POLISH_PROFILE:
+            if stage_id != 'revision' or schema_name != 'polish.schema.json':
+                raise ValueError('The polish profile is only valid for its exact revision contract.')
+            prompt = '## Project Writing Instructions\n' + self.config.project_instructions + '\n\n' + prompt
+            instructions = _resource_path('polish-stage.txt').read_text(encoding='utf-8')
+            model_profile = 'writer'
+        else:
+            if stage_id in {'scene-draft', 'revision'}:
+                from .book_overview import overview_context
+                prompt += '\n' + overview_context(self.config.workspace)
+            from .book_analysis import BookAnalysisStore
 
-        agent, skill = self._specialist(stage_id)
-        prompt = "\n\n".join([
-            f"## Assigned Subagent: {agent.id}\n{agent.prompt}",
-            f"## Assigned Skill: {skill.id}\n{skill.instructions}",
-            "## Project Writing Instructions\n" + self.config.project_instructions,
-            "## Current Book Analyses\nTreat these as source-linked interpretations, not Canonical facts.\n"
-            + BookAnalysisStore(self.project).context(),
-            prompt,
-            "Use the operation's supplied JSON schema, not any alternative schema mentioned in a skill.",
-        ])
+            agent, skill = self._specialist(stage_id)
+            model_profile = agent.model_profile
+            prompt = "\n\n".join([
+                f"## Assigned Subagent: {agent.id}\n{agent.prompt}",
+                f"## Assigned Skill: {skill.id}\n{skill.instructions}",
+                "## Project Writing Instructions\n" + self.config.project_instructions,
+                "## Current Book Analyses\nTreat these as source-linked interpretations, not Canonical facts.\n"
+                + BookAnalysisStore(self.project).context(),
+                prompt,
+                "Use the operation's supplied JSON schema, not any alternative schema mentioned in a skill.",
+            ])
         source = _resource_path(schema_name)
         schema_text, _ = read_schema(source)
-        value = prepare_stage_input(prompt, output_schema=source)
+        value = prepare_stage_input(prompt, output_schema=source, instructions=instructions)
         receipt = make_receipt(mode='story', run_id=handle.run_id, stage_id=stage_id,
             observations=observations or [], prompt=value.prompt, instructions=value.instructions,
             unknown_reasons=[
@@ -614,7 +643,7 @@ class StoryWorkflowService:
             ])
         schema_path = self.runs.write_stage_schema(handle, stage_id=stage_id, name=source.name, text=schema_text)
         prepared = _PreparedStoryInput(value.prompt, value.instructions, stage_id, schema_text,
-                                       schema_path, agent.model_profile, json.dumps(receipt, ensure_ascii=False))
+                                       schema_path, model_profile, json.dumps(receipt, ensure_ascii=False))
         self.runs.write_stage_prompt(handle, stage_id=stage_id,
                                     prompt=prepared.prompt, instructions=prepared.instructions)
         self.runs.write_generation_sources(handle, stage_id=stage_id, receipt=prepared.generation_sources)
@@ -911,6 +940,7 @@ def _revision_prompt(
     passage_only: bool = False,
     surroundings: tuple[str, str] | None = None,
     context_text: str | None = None,
+    input_profile: str | None = None,
 ) -> str:
     scene = snapshot.get("scene")
     constraints = "Preserve the source narrative POV and tense unless the author explicitly requests a change."
@@ -944,7 +974,9 @@ def _revision_prompt(
                 + "Apply requested changes to revision_markdown itself, not only the summary or change_log. "
                 "For manuscript prose, keep author instructions and planning commentary out of narration and dialogue. "
                 "change_log identifies concrete changes actually present in the returned text. "
-                "memory_proposals is only for facts that would require author confirmation."
+                + ("Record unresolved concerns in risks; do not add facts or expand the task."
+                   if input_profile == POLISH_PROFILE else
+                   "memory_proposals is only for facts that would require author confirmation.")
             ),
         ]
     )
@@ -978,14 +1010,16 @@ def _parse_scene_draft(text: str) -> dict[str, Any]:
     return payload
 
 
-def _parse_revision(text: str) -> dict[str, Any]:
+def _parse_revision(text: str, *, input_profile: str | None = None) -> dict[str, Any]:
     payload = _json_object(text, "Revision")
     _require_string(payload, "summary", "Revision")
-    from .book_overview import validate_overview
-    validate_overview(payload.get('book_overview'))
+    if input_profile != POLISH_PROFILE:
+        from .book_overview import validate_overview
+        validate_overview(payload.get('book_overview'))
     _require_nonempty_string(payload, "revision_markdown", "Revision")
     _validate_strings(payload.get("change_log"), "Revision change_log")
-    _validate_proposals(payload.get("memory_proposals"), "Revision")
+    if input_profile != POLISH_PROFILE:
+        _validate_proposals(payload.get("memory_proposals"), "Revision")
     _validate_strings(payload.get("risks"), "Revision risks")
     if 'story_index' in payload:
         from .story_index import validate_graph

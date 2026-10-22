@@ -71,7 +71,7 @@ class LiteraryTaskTests(unittest.TestCase):
         result=start(self.config,{'strategy':'polish','document':'one','passage':'SELECTED.',
             'request':'Polish only the selected passage.'},adapter=adapter)
         self.assertEqual(result['status'],'awaiting_review',result)
-        self.assertEqual(adapter.calls,['revision.schema.json'])
+        self.assertEqual(adapter.calls,['polish.schema.json'])
         version=self.store.get_version('one',result['candidate']['versionNumber'])
         self.assertEqual(version.content,'Prefix. REVISED. Suffix.')
         self.assertEqual(self.store.get_document('one').content,self.document.content)
@@ -179,7 +179,7 @@ class LiteraryTaskTests(unittest.TestCase):
         result=start(self.config,{'strategy':'polish','document':'one','passage':'SELECTED.',
             'request':'Polish only these words.','maxInputChars':24000},adapter=adapter)
         self.assertEqual(result['status'],'awaiting_review',result)
-        self.assertEqual(adapter.calls,['revision.schema.json'])
+        self.assertEqual(adapter.calls,['polish.schema.json'])
         self.assertEqual(self.store.get_version('one',result['candidate']['versionNumber']).content,
             source.replace('SELECTED.','REVISED.'))
 

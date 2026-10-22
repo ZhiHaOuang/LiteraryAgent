@@ -59,8 +59,9 @@ class ReviewDeliveryTests(unittest.IsolatedAsyncioTestCase):
                         'summary': 'Provisional chapter ready.', 'risks': []}
                 elif 'revision_markdown' in properties:
                     value = specimen(schema)
-                    value.update(revision_markdown='REVISED.', memory_proposals=[], change_log=['Polished selection.'],
-                        risks=[], book_overview='维修师在浮城寻找失灵闸门背后的真相。')
+                    value.update(revision_markdown='REVISED.', change_log=['Polished selection.'],risks=[])
+                    if 'memory_proposals' in properties: value['memory_proposals']=[]
+                    if 'book_overview' in properties: value['book_overview']='维修师在浮城寻找失灵闸门背后的真相。'
                 elif 'findings' in properties or 'entries' in properties:
                     value = {'summary': 'Checked exact candidate source.', 'entries': [], 'findings': []}
                 elif 'evidence' in properties:

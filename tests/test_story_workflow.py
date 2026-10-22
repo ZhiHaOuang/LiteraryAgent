@@ -28,9 +28,10 @@ class StoryAdapter:
                 "category": "world", "key": "gate-curfew", "value": "The gate closes at dusk.",
                 "tags": ["gate"], "rationale": "The source explicitly states the closing time."
             }], "risks": []}
-        elif schema == "revision.schema.json":
+        elif schema in {"revision.schema.json", "polish.schema.json"}:
             payload = {"summary": "Revised.", "revision_markdown": self.revision_text,
-                       "change_log": ["Applied request."], "memory_proposals": [], "risks": []}
+                       "change_log": ["Applied request."], "risks": []}
+            if schema == 'revision.schema.json': payload['memory_proposals'] = []
         elif schema == "scene-plan.schema.json":
             payload = {
                 "summary": "A concrete plan is ready.",

@@ -29,8 +29,9 @@ class Provider(BaseHTTPRequestHandler):
             output.write(json.dumps(request) + '\n')
         schema = request['text']['format']['schema']
         payload = specimen(schema)
-        payload.update(revision_markdown='REVISED.', change_log=['Polished the selection.'], memory_proposals=[],
-            risks=[], book_overview='维修师在浮城寻找失灵闸门背后的真相。')
+        payload.update(revision_markdown='REVISED.', change_log=['Polished the selection.'],risks=[])
+        if 'memory_proposals' in schema['properties']: payload['memory_proposals']=[]
+        if 'book_overview' in schema['properties']: payload['book_overview']='维修师在浮城寻找失灵闸门背后的真相。'
         text = json.dumps(payload)
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
