@@ -1,6 +1,0 @@
-{
-  "runtime": "codex-cli 0.154.0",
-  "commit": "6b9826e3aa83b1a5947db50f4332cb9c65f1b340",
-  "generatedBy": "codex app-server generate-ts",
-  "files": 112
-}

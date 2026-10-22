@@ -1,30 +1,21 @@
+// Product history uses the LG snapshot contract; Core pagination is service-owned.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {resolve} from 'node:path';
-import {CodexBackend} from '../src/backend/CodexBackend';
+import {LiteraryBackend} from '../src/backend/LiteraryBackend';
 import {SessionStore} from '../src/host/SessionStore';
-
-class HistoryBackend extends CodexBackend {
-  constructor(private fixtureFlag='') {super({python:process.execPath,manifest:'/unused-fixture',workspace:process.cwd()});}
-  protected launch(){return {command:process.execPath,args:[resolve('tests/fixtures/resolved-server.cjs'),'--paginated',this.fixtureFlag],cwd:process.cwd()};}
+class HistoryBackend extends LiteraryBackend {
+ constructor(){super({python:process.execPath,manifest:'',workspace:process.cwd()});}
+ protected override launch(){return {command:process.execPath,args:[resolve('tests/fixtures/history-pages-server.cjs')],cwd:process.cwd(),jsonRpc:true};}
 }
-test('paginated history restores every page once without starting a task',{timeout:10000},async()=>{
-  const backend=new HistoryBackend(),store=new SessionStore('codex');
-  backend.subscribe(e=>store.apply(e));
-  try {
-    await backend.connect();
-    assert.deepEqual((await backend.list()).map(s=>s.id),['old','new']);
-    assert.deepEqual((await backend.read('thread')).map(i=>i.text),['saved answer 1','saved answer 2']);
-    await backend.resume('thread');
-    assert.deepEqual(store.state.items.map(i=>i.text),['saved answer 1','saved answer 2']);
-    assert.equal(store.state.run,null);assert.equal(store.state.error,null);
-    assert.equal(store.state.approvals.length,0);
-  } finally {await backend.dispose();}
+test('listing, reading and reopening paged history are stable and never start a task',{timeout:10000},async()=>{
+ const backend=new HistoryBackend(),store=new SessionStore('codex');backend.subscribe(e=>store.apply(e));
+ try{
+  await backend.connect();assert.deepEqual((await backend.list()).map(s=>s.id),['thread']);
+  const first=await backend.read('thread');assert.deepEqual(await backend.read('thread'),first);
+  await backend.resume('thread');assert.deepEqual(store.state.items,first);
+  assert.equal(store.state.run,null);assert.equal(store.state.error,null);assert.equal(store.state.approvals.length,0);
+ }finally{await backend.dispose();}
 });
-for(const [flag,message]of [['--repeat-cursor',/重复返回历史游标/],['--summary',/完整历史内容/]] as const){
-  test('incomplete history fails explicitly: '+flag,{timeout:10000},async()=>{
-    const backend=new HistoryBackend(flag);
-    try {await backend.connect();await assert.rejects(backend.read('thread'),message);}
-    finally {await backend.dispose();}
-  });
-}
+// Corrupt/repeated/incomplete pages, cursor races and older LG services are
+// exercised in literary-history.test.ts at this same production boundary.

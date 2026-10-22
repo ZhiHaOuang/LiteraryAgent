@@ -5,11 +5,12 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { chromium, expect } from '@playwright/test';
 import chromiumBinary from '@sparticuz/chromium';
-import { CodexBackend } from '../src/backend/CodexBackend';
+import { LiteraryBackend } from '../src/backend/LiteraryBackend';
+import {z} from 'zod';
 import { SessionStore } from '../src/host/SessionStore';
 import { LatestSnapshotSender } from '../src/host/LatestSnapshotSender';
 import { ClientMessageSchema } from '../shared/protocol';
-import {record} from '../src/backend/normalize';
+const record=(value:unknown):Record<string,unknown>=>{const parsed=z.record(z.unknown()).safeParse(value);return parsed.success?parsed.data:{};};
 import type {Item} from '../shared/protocol';
 
 function draftVersion(items:Item[]):number {
@@ -31,7 +32,7 @@ const operations:{tool:string;arguments:Record<string,unknown>}[]=from?JSON.pars
 const results:unknown[]=from?JSON.parse(await readFile(evidence+'/results.json','utf8')):[];
 let candidateVersion:number|undefined;
 if(from&&(from.startsWith('review')||from==='accept'||from==='overview'))candidateVersion=draftVersion(JSON.parse(await readFile(evidence+'/revision.json','utf8')));
-const backend=new CodexBackend({workspace,python,manifest,env:{...process.env,LITERARYGIANT_REGISTRY_HOME:workspace+'/registry'}});
+const backend=new LiteraryBackend({workspace,python,manifest,runtimeEngine:'codex',env:{...process.env,LITERARYGIANT_REGISTRY_HOME:workspace+'/registry'}});
 const store=new SessionStore('codex');backend.subscribe(e=>{store.apply(e);if(e.type==='error')console.log('Backend notice:',e.message);});
 const server=createServer(async(req,res)=>{
   try{
@@ -60,6 +61,7 @@ try{
         await initialization;store.publish();
       }else if(message.type==='run')await backend.run(store.state.sessionId,message.text);
       else if(message.type==='approve')await backend.approve(message.requestId,message.decision);
+      else if(message.type==='answer')await backend.answer(message.requestId,message.answers);
       else if(message.type==='refreshBook')await backend.refreshBook();
       else if(message.type==='cancel')await backend.cancel(store.state.sessionId);
     }).catch(e=>{store.error(e instanceof Error?e.message:'Host error');});return queue;

@@ -1,7 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {LiteraryBackend,type LiteraryBackendSettings} from '../src/backend/LiteraryBackend';
-import {CodexBackend} from '../src/backend/CodexBackend';
 import {createBackend} from '../src/backend/createBackend';
 
 class LaunchBackend extends LiteraryBackend{
@@ -47,8 +46,3 @@ for(const runtime of ['native','missing']){
     try{await assert.rejects(backend.connect(),/指定执行器/);}finally{await backend.dispose();}
   });
 }
-test('legacy Codex connector still requires its manifest',async()=>{
-  const backend=new CodexBackend(settings);
-  await assert.rejects(backend.connect());
-  await backend.dispose();
-});

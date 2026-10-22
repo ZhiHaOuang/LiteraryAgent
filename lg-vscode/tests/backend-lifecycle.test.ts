@@ -1,13 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {resolve} from 'node:path';
-import {CodexBackend} from '../src/backend/CodexBackend';
+import {LiteraryBackend} from '../src/backend/LiteraryBackend';
 import {RpcTransport} from '../src/backend/RpcTransport';
 import {SessionStore} from '../src/host/SessionStore';
 import type {BackendEvent} from '../shared/protocol';
 
-class FixtureBackend extends CodexBackend {
-  protected launch() { return {command:process.execPath,args:[resolve('tests/fixtures/resolved-server.cjs')],cwd:process.cwd()}; }
+class FixtureBackend extends LiteraryBackend {
+  protected launch() { return {command:process.execPath,args:[resolve('tests/fixtures/lg-resolved-server.cjs')],cwd:process.cwd(),jsonRpc:true}; }
 }
 
 test('server resolution expires only matching requests and blocks late approval/input replies', {timeout:10000}, async()=>{

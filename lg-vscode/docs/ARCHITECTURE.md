@@ -26,9 +26,7 @@ Python `backend_stdio` 使用 LG JSON-RPC 契约，写作入口与 CLI 共用 Ba
 | `shared/protocol.ts` | Zod 校验 Webview 请求、自有快照与事件；不向浏览器暴露原始 RPC |
 | `src/backend/createBackend.ts` | 两种正式设置均选择 LiteraryBackend；codex 指定执行器 |
 | `src/backend/LiteraryBackend.ts` | LG 握手、会话、公开事件、审批、取消及资料读取 |
-| `src/backend/CodexBackend.ts` | 保留旧直连源码和协议回归，生产工厂不再引用 |
 | `src/backend/RpcTransport.ts` | UTF-8 字节分帧、请求 ID、超时、子进程及断线收敛 |
-| `src/backend/generated/` | 固定二进制生成的协议类型闭包，仅用于适配层 |
 | `src/host/LatestSnapshotSender.ts` | 一份在途快照与一份最新待发送快照，限制慢 Webview 导致的发送积压 |
 | `src/host/SessionStore.ts` | 宿主持有界面状态，Webview 重建时重发快照；小说权威状态仍在产品存储 |
 | `src/host/WorkspaceBridge.ts` | 作品路径约束、文件打开、只读 diff、未保存文件保护 |
@@ -66,6 +64,14 @@ Python `anthropic_bridge.py` 在完整上游响应确认后才提交工具调用
 
 正式安装只启动 LiteraryBackend；codex 设置指定其执行器，literary 沿用 LG 配置。显式执行器要求握手确认，不兼容服务明确失败。Mock 必须处于开发宿主或明确的 LitIsLand 测试目录，普通用户设置不能开启演示。管理入口即使在后端配置失败时仍保留。共享凭证/配置文件变化合并为重连，忽略仅权限修复的事件；任务运行时延后，手动切换前检查任务及未保存文件。重连关闭旧进程、监听器和消息接收器，只恢复当前作品历史。
 
-CLI 每次创作前重读同一配置；连接复用身份包括配置空间、账号、协议、地址、模型和密钥摘要。同模型不同账号或更新密钥也会重新建立连接，摘要不输出到日志或界面。固定核心和协议生成类型没有修改。
+CLI 每次创作前重读同一配置；连接复用身份包括配置空间、账号、协议、地址、模型和密钥摘要。同模型不同账号或更新密钥也会重新建立连接，摘要不输出到日志或界面。固定核心没有修改；扩展不再携带旧直连连接器及其生成类型。
 
 Python 还过滤当前配置空间所有已保存 API 配置对应的密钥环境变量值，防止切换账号后旧账号的自定义环境变量进入核心子进程。
+
+## 旧连接器退出后的验证职责
+
+Extension 正式路径继续使用 LiteraryBackend，`backend=codex` 仍表示选择共享 Backend 的 Codex 执行器。旧 `CodexBackend.ts`、TypeScript `normalize.ts` 和生成类型不再作为扩展源码维护；`RpcTransport`、通用工具、Python CodexRuntime、Rust TUI 和独立 app_server 保留。
+
+生命周期与分页回归走 LG 事件和快照契约。候选 diff、私有推理及失败输出由 `lg_cli.codex_events` 转换，`tests/presentation.integration.ts` 调用真实 Python 转换并校验 UI schema。旧桥接错误分类不再在前端复制；RPC 错误正文与 stderr 仍不得进入界面。
+
+`tests/real-backend.integration.ts` 使用底层 RpcTransport 检查保留的 Core stdio 兼容入口，需显式提供已验证的 Runtime 与 Python；条件跳过不代表验收通过。产品任务的候选、批准、取消、恢复与采用在 LiteraryBackend/Native 集成中验证。付费模型 `creative.smoke.ts` 已改用 LiteraryBackend，但不得将类型检查或合成模型测试解释为其真实模型验收。

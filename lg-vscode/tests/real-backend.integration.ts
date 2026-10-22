@@ -1,97 +1,73 @@
-import { test } from 'node:test';
+/** Low-level compatibility entry remains supported; this is not an Extension connector. */
+import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { CodexBackend, type BackendSettings } from '../src/backend/CodexBackend';
-import { SessionStore } from '../src/host/SessionStore';
-import type { BackendEvent } from '../shared/protocol';
-import type { RpcMessage } from '../src/backend/RpcTransport';
-
-class FixtureBackend extends CodexBackend {
-  constructor(private fixture: BackendSettings) { super(fixture); }
-  protected override launch() {
-    return { command: this.fixture.python, args: [resolve('tests/fixtures/app_server_fixture.py'), '--workspace', this.fixture.workspace,
-      '--runtime-manifest', this.fixture.manifest], cwd: this.fixture.workspace, env: this.fixture.env };
-  }
+import {mkdtemp} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {resolve,join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {z} from 'zod';
+import {RpcTransport,type RpcMessage,type LaunchSpec} from '../src/backend/RpcTransport';
+const object=z.record(z.unknown());
+const record=(value:unknown)=>object.parse(value);
+async function until(predicate:()=>boolean){
+ const end=Date.now()+45000;
+ while(!predicate()){if(Date.now()>end)throw Error('Core compatibility event timeout');await new Promise(r=>setTimeout(r,20));}
 }
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-async function until(predicate: () => boolean, ms = 45_000) {
-  const start = Date.now(); while (!predicate()) { if (Date.now() - start > ms) throw Error('Timed out waiting for backend event'); await sleep(25); }
-}
-test('real pinned app-server: LG MCP approval, denial, overview, cancel, history across process restart', { timeout: 180_000,
-  skip: !process.env.LG_TEST_RUNTIME_MANIFEST || !process.env.LG_TEST_PYTHON }, async t => {
-  const workspace = await mkdtemp(join(tmpdir(), 'lg-real-extension-'));
-  const settings: BackendSettings = { workspace, python: process.env.LG_TEST_PYTHON!, manifest: process.env.LG_TEST_RUNTIME_MANIFEST!,
-    env: { ...process.env, LITERARYGIANT_REGISTRY_HOME: join(workspace, 'registry') } };
-  let backend = new FixtureBackend(settings);
-  const store = new SessionStore('codex'), events: BackendEvent[] = [];
-  backend.subscribe(e => { events.push(e); store.apply(e); });
-  t.after(async () => {
-    t.diagnostic(JSON.stringify({workspace, approvals:events.filter(e=>e.type==='approval.requested').length,
-      terminalStates:events.filter(e=>e.type==='run.finished').map(e=>e.status)}));
-    await backend.dispose();
-  });
-  await backend.connect(); const session = await backend.create();
-  async function turn(marker: string, decision?: 'accept' | 'decline') {
-    await backend.run(session.id, marker);
-    if (decision) {
-      await until(() => store.state.approvals.some(a => a.state === 'pending') || (!!store.state.run && !store.busy));
-      const approval = store.state.approvals.find(a => a.state === 'pending')!;
-      assert.ok(approval,'Expected LG tool approval before turn completion');
-      await backend.approve(approval.id, decision);
-      await assert.rejects(backend.approve(approval.id, decision), /过期|已回答/);
-    }
-    await until(() => !!store.state.run && !store.busy);
-    assert.equal(store.state.run?.state, 'completed', JSON.stringify(events.filter(e=>e.type==='error'||e.type==='backend.status'||e.type==='run.finished')));
-  }
-  await turn('CASE:init', 'accept');
-  await turn('CASE:plan', 'accept');
-  await turn('CASE:denied', 'decline');
-  await assert.rejects(readFile(join(workspace,'ReferenceLibrary/bible/book-overview.json')));
-  await turn('CASE:accepted', 'accept');
-  await backend.refreshBook();
-  assert.equal(store.state.book.source,'backend');
-  assert.equal(store.state.book.targetWords,1_000_000);
-  assert.equal(store.state.book.positioning,'原创机械悬疑长篇');
-  assert.match(store.state.book.overview,/浮城/);
-  await turn('CASE:refdeny','decline');
-  assert.equal((await backend.readLibrary({topic:'characters',query:'不得保存',offset:0})).entries.length,0);
-  await turn('CASE:reference','accept');
-  const people=await backend.readLibrary({topic:'characters',query:'林砚',offset:0});
-  assert.equal(people.entries.length,1);
-  const person=await backend.readEntry('characters',people.entries[0].key);
-  assert.match(person.body,/隔离电源/);assert.match(person.body,/第 1 版.*候选资料/);
-  assert.ok(store.state.items.some(i=>i.files?.some(p=>p.startsWith('ReferenceLibrary/bible/characters/'))));
-  const beforeRun=store.state.run?.id;
-  assert.match(await backend.prepareWriting('characters',person.key,'generate',person.fingerprint),/studio_reference/);
-  assert.equal(store.state.run?.id,beforeRun,'Reading/preparing must not start a model turn');
-  const pending=await backend.readLibrary({topic:'pending',query:'林砚',offset:0});
-  assert.equal(pending.entries[0].status,'candidate');
-  await turn('CASE:adoptref','accept');
-  assert.equal((await backend.readLibrary({topic:'pending',query:'林砚',offset:0})).total,0);
-  await assert.rejects(backend.prepareWriting('characters',person.key,'generate',person.fingerprint),/已变化/);
-  await turn('CASE:edit', 'accept');
-  assert.ok(store.state.items.some(i => i.diff?.before === '作者已采纳的原稿。'
-    && i.diff.after === 'Agent 提出的改稿候选。' && !i.diff.applied));
-  const chapters = await backend.readLibrary({topic:'chapters',query:'原稿',offset:0});
-  const manuscript = await backend.readEntry('chapters',chapters.entries[0].key);
-  assert.match(manuscript.body,/作者已采纳的原稿。/);
-  assert.ok((await backend.readLibrary({topic:'pending',query:'原稿',offset:0})).total > 0);
-  await turn('CASE:restore', 'accept');
-  const preserved = await backend.readEntry('chapters',chapters.entries[0].key);
-  assert.match(preserved.body,/作者已采纳的原稿。/);
-  await turn('CASE:text');
-  assert.ok(events.some(e=>e.type==='assistant.delta'));
-  await backend.run(session.id,'CASE:slow'); await backend.cancel(session.id);
-  await until(()=>!store.busy); assert.equal(store.state.run?.state,'cancelled');
-  const history = await backend.read(session.id); assert.ok(history.some(i=>i.text.includes('CASE:accepted')));
-  await backend.dispose();
-  backend = new FixtureBackend(settings);backend.subscribe(e=>store.apply(e));
-  await backend.connect();
-  assert.ok((await backend.list()).some(s=>s.id===session.id));
-  await backend.resume(session.id);
-  assert.ok(store.state.items.some(i=>i.text.includes('CASE:accepted')));
-  assert.equal(store.state.run,null);
-  console.log('Real-runtime evidence workspace:',workspace);
+test('retained Core stdio entry: MCP decisions, stream, cancel and persisted history',{
+ timeout:180000,skip:!process.env.LG_TEST_RUNTIME_MANIFEST||!process.env.LG_TEST_PYTHON},async t=>{
+ const workspace=await mkdtemp(join(tmpdir(),'lg-core-compat-'));
+ const spec:LaunchSpec={command:process.env.LG_TEST_PYTHON!,
+  args:[resolve('tests/fixtures/app_server_fixture.py'),'--workspace',workspace,'--runtime-manifest',process.env.LG_TEST_RUNTIME_MANIFEST!],
+  cwd:workspace,env:{...process.env,LITERARYGIANT_REGISTRY_HOME:join(workspace,'registry')}};
+ const description=record(JSON.parse(execFileSync(spec.command,[...spec.args,'--describe'],{encoding:'utf8',cwd:workspace,env:spec.env})));
+ assert.equal(description.workspace,workspace);
+ const messages:RpcMessage[]=[],replyErrors:unknown[]=[];
+ let decision:'accept'|'decline'='accept',approvalCount=0;
+ let rpc:RpcTransport;
+ const connect=async()=>{
+  rpc=new RpcTransport(spec,message=>{
+   messages.push(message);
+   if(message.id!==undefined&&message.method){
+    if(message.method==='mcpServer/elicitation/request'){
+     approvalCount++;void rpc.respond(message.id,{action:decision,content:decision==='accept'?{confirm:true}:null,_meta:null}).catch(e=>replyErrors.push(e));
+    }else void rpc.reject(message.id).catch(e=>replyErrors.push(e));
+   }
+  },()=>{});
+  rpc.start();await rpc.request('initialize',{clientInfo:{name:'lg-compat-test',version:'0.3.0'},capabilities:{experimentalApi:true}});
+  await rpc.notify('initialized',{});
+ };
+ t.after(async()=>{await rpc?.dispose();t.diagnostic(JSON.stringify({workspace,approvalCount}));});
+ await connect();
+ const thread=record(record(await rpc!.request('thread/start',{cwd:workspace,model:description.model||null,sandbox:'read-only',
+  approvalPolicy:'on-request',approvalsReviewer:'user',baseInstructions:description.baseInstructions,ephemeral:false})).thread);
+ const threadId=z.string().parse(thread.id);
+ const call=(tool:string,args:unknown)=>rpc!.request('mcpServer/tool/call',{threadId,server:'lg_writing',tool,arguments:args});
+ const content=(value:unknown)=>{
+  const reply=record(value);if(reply.structuredContent)return record(reply.structuredContent);
+  const blocks=z.array(object).parse(reply.content);return record(JSON.parse(String(blocks.find(b=>b.type==='text')?.text)));
+ };
+ await call('studio_initialize',{});assert.ok(approvalCount>0,'Initialization must cross elicitation');
+ decision='decline';const declinedBefore=approvalCount;
+ await call('update_book_overview',{overview:'这条简介不应保存。'});assert.equal(approvalCount,declinedBefore+1);
+ assert.equal(content(await call('book_dashboard',{})).overview,'');
+ decision='accept';await call('update_book_overview',{overview:'维修师在浮城寻找失灵闸门背后的真相。'});
+ assert.match(String(content(await call('book_dashboard',{})).overview),/浮城/);
+ const start=async(text:string)=>record(record(await rpc!.request('turn/start',{threadId,input:[{type:'text',text,text_elements:[]}]})).turn);
+ const finished=(id:unknown)=>messages.some(m=>m.method==='turn/completed'&&record(record(m.params).turn).id===id);
+ const text=await start('CASE:text');await until(()=>finished(text.id));
+ assert.ok(messages.some(m=>m.method==='item/agentMessage/delta'));
+ const slow=await start('CASE:slow');
+ await until(()=>messages.some(m=>m.method==='turn/started'&&record(record(m.params).turn).id===slow.id));
+ await rpc!.request('turn/interrupt',{threadId,turnId:slow.id});await until(()=>finished(slow.id));
+ assert.equal(record(record(messages.find(m=>m.method==='turn/completed'&&record(record(m.params).turn).id===slow.id)!.params).turn).status,'interrupted');
+ assert.equal(replyErrors.length,0);
+ await rpc!.dispose();await connect();
+ const listed=record(await rpc!.request('thread/list',{cwd:workspace,limit:100}));
+ assert.ok(z.array(object).parse(listed.data).some(value=>value.id===threadId));
+ await rpc!.request('thread/resume',{threadId,cwd:workspace,sandbox:'read-only',approvalPolicy:'on-request',baseInstructions:description.baseInstructions});
+ const saved=record(record(await rpc!.request('thread/read',{threadId,includeTurns:false})).thread);
+ const turns=saved.historyMode==='paginated'?await rpc!.request('thread/turns/list',{threadId,limit:100}):saved.turns;
+ assert.ok(JSON.stringify(turns).includes('CASE:text'));
 });
+// Product candidate/diff/library/author-adoption checks now run through
+// literary-backend.integration.ts and native-runtime.integration.ts.
