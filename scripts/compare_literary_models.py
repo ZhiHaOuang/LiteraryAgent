@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from lg_cli.anthropic_bridge import translate_request
+from lg_cli.anthropic_bridge import SchemaOutputError, translate_request
 from lg_cli.config import load_config
 from lg_cli.credentials import read_profiles
 from lg_cli.execution_adapter import NativeStageExecutor
@@ -111,11 +111,17 @@ class Budget:
         self.save()
         return record
 
-    def finish(self, record, usage, *, transport_complete):
+    def finish(self, record, usage, *, transport_complete, host_schema_rejected=False):
         valid = bool(usage) and all(type(usage.get(k)) is int and usage[k] >= 0 for k in ('input_tokens', 'output_tokens'))
         valid = valid and usage['input_tokens'] <= MAX_INPUT and usage['output_tokens'] <= MAX_OUTPUT
         record['usage'] = usage
         record['state'] = 'completed' if transport_complete and valid else 'uncertain_stop'
+        if host_schema_rejected and valid:
+            # A Responses final event reached local schema validation. Preserve the
+            # entire reservation, reject the candidate, and permit other distinct jobs.
+            record['state'] = 'host_schema_rejected'
+            record['fullReservationRetained'] = True
+            self.pending = False
         if transport_complete and valid:
             record['heldCNY'] = str(known_cost(record['model'], usage['input_tokens'], usage['output_tokens'], upper=True))
             record['catalogueEstimateCNY'] = str(known_cost(record['model'], usage['input_tokens'], usage['output_tokens']))
@@ -135,11 +141,14 @@ class ObservedModel:
         write_json(self.folder / 'model-input.json', {'protocol': self.config.protocol, 'baseURL': self.config.base_url,
                                                     'payload': wire, 'headersOmitted': True})
         record = self.budget.begin(self.label, request['model'], wire)
-        response, started = None, time.monotonic()
+        response, started, host_rejection = None, time.monotonic(), False
         try:
             response = await NativeModel(self.config).generate(request, delta)
             write_json(self.folder / 'model-output.json', safe_response(response))
             return response
+        except SchemaOutputError:
+            host_rejection = self.config.uses_responses
+            raise
         finally:
             rows = []
             database = self.config.workspace / '.literarygiant/usage.sqlite3'
@@ -159,7 +168,31 @@ class ObservedModel:
             model_match = reported_model is None or (isinstance(reported_model, str) and reported_model.lower() == request['model'].lower())
             record['returnedModelStatus'] = 'not_exposed' if reported_model is None else ('matches' if model_match else 'mismatch')
             complete = complete and model_match
-            self.budget.finish(record, usage, transport_complete=complete)
+            self.budget.finish(record, usage, transport_complete=complete, host_schema_rejected=host_rejection)
+
+
+def reviewed_pending_jobs(path, cases):
+    """Explicit inspected continuation; never infer that an interrupted call is replayable."""
+    manifest = json.loads(path.read_text())
+    previous = Path(manifest['previousOutput']).resolve()
+    raw = (previous / 'budget.json').read_bytes()
+    if hashlib.sha256(raw).hexdigest() != manifest['previousBudgetSha256']:
+        raise ValueError('Previous budget changed after review.')
+    previous_plan = json.loads((previous / 'plan.json').read_text())
+    if previous_plan['cases'] != cases or previous_plan['models'] != MODELS or previous_plan['maxOutputTokens'] != MAX_OUTPUT:
+        raise ValueError('Cases, model identity or output budget changed after the original run.')
+    budget = json.loads(raw)
+    sent = {r['label'] for r in budget['requests']}
+    all_jobs = {(profile, c['id'], arm) for profile in MODELS for c in cases for arm in ('lg', 'baseline')}
+    pending = {(profile, case, arm) for profile, case, arm in all_jobs if MODELS[profile]+'/'+case+'/'+arm not in sent}
+    proposed = [tuple(value) for value in manifest['jobs']]
+    if len(proposed) != len(set(proposed)) or set(proposed) != pending:
+        raise ValueError('Reviewed jobs must be exactly the unsent jobs; no duplicate, retry or omission.')
+    if Decimal(manifest['carriedReserveCNY']) != Decimal(budget['heldCNY']):
+        raise ValueError('The complete prior budget reservation must be carried forward.')
+    if manifest.get('neverReplaySentRequests') is not True:
+        raise ValueError('Continuation must explicitly preserve all prior request outcomes.')
+    return proposed, Decimal(manifest['carriedReserveCNY']), manifest
 
 
 def metrics(case, text):
@@ -262,6 +295,7 @@ def main(argv=None):
     parser.add_argument('--budget-cny', default='5')
     parser.add_argument('--initial-probe-reserve-cny', default='.74', help='Hold the full worst-case reservation for all three documented setup probes.')
     parser.add_argument('--run', action='store_true')
+    parser.add_argument('--reviewed-pending-jobs', type=Path, help='Explicit reviewed manifest of only unsent jobs, carrying the prior reservation.')
     args = parser.parse_args(argv)
     cases = json.loads(CASES.read_text())
     output = args.output.expanduser().resolve()
@@ -270,7 +304,12 @@ def main(argv=None):
     if any((parent / '.literarygiant/story.sqlite3').exists() for parent in output.parents):
         raise ValueError('Experiment output must not be inside an existing formal book.')
     output.mkdir(mode=0o700, parents=True)
-    budget = Budget(output, Decimal(args.budget_cny), Decimal(args.initial_probe_reserve_cny))
+    jobs = [(profile, case['id'], arm) for profile in MODELS for index, case in enumerate(cases)
+            for arm in (('lg', 'baseline') if index % 2 == 0 else ('baseline', 'lg'))]
+    reserve, continuation = Decimal(args.initial_probe_reserve_cny), None
+    if args.reviewed_pending_jobs:
+        jobs, reserve, continuation = reviewed_pending_jobs(args.reviewed_pending_jobs, cases)
+    budget = Budget(output, Decimal(args.budget_cny), reserve)
     plan = {'schema': 'lg.same-model-quality.v1', 'models': MODELS, 'cases': cases, 'comparisonCalls': 16,
             'maxOutputTokens': MAX_OUTPUT, 'maxWireBytes': MAX_WIRE_BYTES,
             'temperature': 'omitted in both arms; provider default effective value unknown',
@@ -284,6 +323,8 @@ def main(argv=None):
                               'scriptSha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                               'casesSha256': hashlib.sha256(CASES.read_bytes()).hexdigest(),
                               'python': sys.executable}
+    plan['comparisonCalls'] = len(jobs)
+    plan['reviewedContinuation'] = continuation
     write_json(output / 'plan.json', plan)
     if not args.run:
         print(json.dumps({'status': 'plan_only', 'callsSent': 0, 'output': str(output)}))
@@ -291,20 +332,19 @@ def main(argv=None):
     results, stopped = [], None
     try:
         # Serial requests let every provider usage settle before the next reservation.
-        for profile, model in MODELS.items():
-            for case_index, case in enumerate(cases):
-                arms = ('lg', 'baseline') if case_index % 2 == 0 else ('baseline', 'lg')
-                for arm in arms:
-                    folder = output / model / case['id'] / arm
-                    workspace = output / 'synthetic-books' / model / case['id'] / arm
-                    config = selected_config(workspace, args.environment, profile)
-                    value = execute_case(case, arm, folder, config, budget)
-                    results.append(value)
-                    write_json(output / 'results.json', results)
-                    print(json.dumps({'model': model, 'case': case['id'], 'arm': arm, 'ok': value['ok'],
-                                      'seconds': value['seconds'], 'budgetHeldCNY': str(budget.held())}), flush=True)
-                    if budget.pending:
-                        raise ValueError('Uncertain provider completion or usage; stopped without replay.')
+        for profile, case_id, arm in jobs:
+            model = MODELS[profile]
+            case = next(c for c in cases if c['id'] == case_id)
+            folder = output / model / case['id'] / arm
+            workspace = output / 'synthetic-books' / model / case['id'] / arm
+            config = selected_config(workspace, args.environment, profile)
+            value = execute_case(case, arm, folder, config, budget)
+            results.append(value)
+            write_json(output / 'results.json', results)
+            print(json.dumps({'model': model, 'case': case['id'], 'arm': arm, 'ok': value['ok'],
+                              'seconds': value['seconds'], 'budgetHeldCNY': str(budget.held())}), flush=True)
+            if budget.pending:
+                raise ValueError('Uncertain provider completion or usage; stopped without replay.')
     except Exception as exc:
         stopped = type(exc).__name__
     finally:

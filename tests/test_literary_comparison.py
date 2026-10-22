@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 
-from scripts.compare_literary_models import Budget, execute_case, known_cost, main, metrics, safe_response, worst_cost
+from scripts.compare_literary_models import Budget, MODELS, execute_case, known_cost, main, metrics, reviewed_pending_jobs, safe_response, worst_cost
 from tests.helpers import make_config
 
 
@@ -37,6 +37,35 @@ class ComparisonTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             budget.begin('too-large', 'glm-4.6v', {'x': 'a' * 65000})
         self.assertEqual(budget.records, [])
+
+    def test_known_schema_rejection_keeps_full_reservation_and_does_not_weaken_output(self):
+        budget = Budget(self.root, Decimal('5'), Decimal(0))
+        record = budget.begin('schema-rejected', 'glm-4.6v', {})
+        reserve = record['heldCNY']
+        budget.finish(record, {'input_tokens': 1900, 'output_tokens': 1338}, transport_complete=False, host_schema_rejected=True)
+        self.assertFalse(budget.pending)
+        self.assertEqual(record['state'], 'host_schema_rejected')
+        self.assertEqual(record['heldCNY'], reserve)
+        self.assertIsNone(record['catalogueEstimateCNY'])
+        budget.begin('different-task', 'glm-4.6v', {})
+
+    def test_explicit_continuation_refuses_retry_and_dropped_prior_reservation(self):
+        import hashlib
+        previous = self.root / 'previous';previous.mkdir()
+        raw = json.dumps({'heldCNY': '1.0856268', 'requests': [{'label': 'glm-4.5-air/P/lg'}]}).encode()
+        (previous / 'budget.json').write_bytes(raw)
+        (previous / 'plan.json').write_text(json.dumps({'cases':[{'id':'P'}], 'models':MODELS, 'maxOutputTokens':4096}))
+        manifest = {'previousOutput': str(previous), 'previousBudgetSha256': hashlib.sha256(raw).hexdigest(),
+                    'carriedReserveCNY': '1.0856268', 'neverReplaySentRequests': True,
+                    'jobs': [['zhipu-air', 'P', 'baseline'], ['zhipu-vision', 'P', 'lg'], ['zhipu-vision', 'P', 'baseline']]}
+        path = self.root / 'review.json';path.write_text(json.dumps(manifest))
+        jobs, reserve, _ = reviewed_pending_jobs(path, [{'id': 'P'}])
+        self.assertEqual(len(jobs), 3)
+        self.assertEqual(reserve, Decimal('1.0856268'))
+        manifest['jobs'].append(['zhipu-air', 'P', 'lg']);path.write_text(json.dumps(manifest))
+        with self.assertRaises(ValueError): reviewed_pending_jobs(path, [{'id': 'P'}])
+        manifest['jobs'].pop();manifest['carriedReserveCNY']='0';path.write_text(json.dumps(manifest))
+        with self.assertRaises(ValueError): reviewed_pending_jobs(path, [{'id': 'P'}])
 
     def test_cost_and_requested_output_caps_include_thinking_usage(self):
         self.assertEqual(known_cost('glm-4.5-air', 1000, 500), Decimal('.0038'))
@@ -68,6 +97,8 @@ class ComparisonTests(unittest.TestCase):
 
     def test_real_http_r5_and_baseline_accounting_do_not_adopt_or_log_secrets(self):
         seen = []
+        owner = self
+        self.invalid_schema = False
         class Provider(BaseHTTPRequestHandler):
             def log_message(self, *_): pass
             def do_POST(self):
@@ -75,8 +106,12 @@ class ComparisonTests(unittest.TestCase):
                 seen.append(request)
                 schema = ((request.get('text') or {}).get('format') or {}).get('schema', {})
                 if 'revision_markdown' in schema.get('properties', {}):
-                    text = json.dumps({'summary': 'synthetic revision', 'revision_markdown': '修改。',
-                        'change_log': ['synthetic change'], 'memory_proposals': [], 'risks': [], 'book_overview': '合成故事。'}, ensure_ascii=False)
+                    payload = {'summary': 'synthetic revision', 'revision_markdown': '修改。',
+                        'change_log': ['synthetic change'], 'memory_proposals': [], 'risks': [], 'book_overview': '合成故事。'}
+                    if owner.invalid_schema:
+                        payload.pop('summary')
+                        payload.pop('risks')
+                    text = json.dumps(payload, ensure_ascii=False)
                 else:
                     text = '前文。修改。后文。'
                 response = {'id': 'synthetic-response', 'model': 'glm-4.5-air', 'status': 'completed',
@@ -109,3 +144,15 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(len(budget.records), 2)
         self.assertFalse(budget.pending)
         self.assertEqual([r['usage']['input_tokens'] for r in budget.records], [100, 100])
+        self.invalid_schema = True
+        rejected_folder = self.root / 'outputs' / 'rejected'
+        rejected_workspace = self.root / 'books' / 'rejected'
+        config = replace(config, workspace=rejected_workspace, memory_path=rejected_workspace/'.literarygiant/memory',
+                         output_path=rejected_workspace/'.literarygiant/output', reference_path=rejected_workspace/'ReferenceLibrary')
+        rejected = execute_case(case, 'lg', rejected_folder, config, budget)
+        self.assertFalse(rejected['ok'])
+        self.assertTrue(rejected['activeManuscriptUnchanged'])
+        self.assertEqual(budget.records[-1]['state'], 'host_schema_rejected')
+        self.assertTrue(budget.records[-1]['fullReservationRetained'])
+        self.assertFalse(budget.pending)
+        self.assertEqual(len(seen), 3)
