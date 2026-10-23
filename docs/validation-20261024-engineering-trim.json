@@ -2,7 +2,7 @@
   "date": "2026-10-24",
   "baseline": "8e926aa5a1d3b963c2eef6def4503dcf7b24ece9",
   "branch": "codex/polish-compliance-20261022",
-  "scope": "Retired private terminal rendering and unused Extension bindings; no whole-file deletions.",
+  "scope": "Retired private terminal rendering, unused Extension bindings and maintenance generator drift; no whole-file deletions.",
   "environment": {
     "python": "3.12.0",
     "node": "20.18.1",
@@ -10,10 +10,24 @@
   },
   "isolation_and_actual": {
     "python": {
-      "run": 126,
-      "passed": 124,
+      "run": 130,
+      "passed": 128,
       "skipped": 2,
-      "failed": 0
+      "failed": 0,
+      "groups": [
+        {
+          "name": "product regression",
+          "run": 126,
+          "passed": 124,
+          "skipped": 2
+        },
+        {
+          "name": "materializer subprocess regression",
+          "run": 4,
+          "passed": 4,
+          "skipped": 0
+        }
+      ]
     },
     "extension_unit": {
       "run": 59,
@@ -44,7 +58,8 @@
     "tests.test_slime_animation",
     "tests.test_literary_tasks",
     "tests.test_polish_profile",
-    "tests.test_workflow_builtin_contract"
+    "tests.test_workflow_builtin_contract",
+    "tests.test_definition_materializer"
   ],
   "core_skips": "Pinned Core runtime unavailable; retained compatibility paths are not claimed as validated.",
   "baseline_unused_diagnostics": 6,
@@ -144,6 +159,18 @@
       "path": "lg-vscode/tsconfig.json",
       "before_sha256": "b99c8502c975fd282355abe09ae28397ea76e5bd6d776ad6c53167e3ce01bc99",
       "after_sha256": "f5d7a0d299045ce1bf1ec87a3e95ee3faf185b9025a8448143d274b162569c2d"
+    },
+    {
+      "group": "materializer",
+      "path": "scripts/materialize_lg_definitions.py",
+      "before_sha256": "ebc9876601a968df65e5c0849213bfd7ed653299b6c845e3e0f551c7ce8e418f",
+      "after_sha256": "10b4dca7fc0ae3d11549df9898155bb62edc1d3ce3e7a3cec853eb145b16bb72"
+    },
+    {
+      "group": "materializer",
+      "path": "tests/test_definition_materializer.py",
+      "before_sha256": null,
+      "after_sha256": "cbe0af073c9f616941722481fdc0069901c737b3be863875048fc61cb5eecdf2"
     }
   ],
   "new_deleted_files": [],
@@ -154,5 +181,16 @@
     "No paid model calls or new literary quality evidence.",
     "Not merged to main or literary-agent; not deployed."
   ],
-  "private_evidence_directory": "LiteraryGiant-engineering-trim-20261024"
+  "private_evidence_directory": "LiteraryGiant-engineering-trim-20261024",
+  "maintenance_generator": {
+    "baseline_check_exit": 1,
+    "baseline_regression_failed": 4,
+    "after_check_exit": 0,
+    "after_regression_passed": 4,
+    "resources_unchanged": 104,
+    "runtime_resource_sync_check": "passed",
+    "automatic_build_invocation": "not found",
+    "changed_runtime_definitions": 0
+  },
+  "batch_one_commit": "63180ea364"
 }

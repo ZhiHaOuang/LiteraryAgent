@@ -94,6 +94,17 @@ def render_skill(item: dict[str, Any]) -> str:
     if condition.lower().startswith("when "):
         condition = condition[5:]
     description = f"{item.get('purpose', '')} Use when {condition.lower()}."
+    filing_note = ""
+    if name == "memory-updater":
+        description = (
+            "Propose source-linked database memory updates after writing or review creates durable story facts; "
+            "classify supplemental notes in ReferenceLibrary/bible without silently changing Canonical facts."
+        )
+        filing_note = (
+            "   LG persists the structured result immediately in its classified book directory.\n"
+            "   Proposed file references belong under ReferenceLibrary/bible, never runtime\n"
+            "   output or conversation folders. Notes and proposals are not authoritative canon.\n"
+        )
     inputs = _bullets(item.get("inputs", []))
     outputs = _bullets(item.get("outputs", []))
     checks = _bullets(item.get("quality_checklist", []))
@@ -111,7 +122,7 @@ description: {json.dumps(description, ensure_ascii=False)}
 2. Confirm the concrete reader or artifact outcome before expanding details.
 3. Apply this instruction: {item.get("instructions", "")}
 4. Return the requested outputs with explicit assumptions and unresolved risks.
-5. Run the quality gate before handing work to the next agent.
+{filing_note}5. Run the quality gate before handing work to the next agent.
 
 ## Inputs
 
@@ -216,7 +227,7 @@ def render_agent_prompt(item: dict[str, Any]) -> str:
 
 
 def agent_output_schema(item: dict[str, Any]) -> dict[str, Any]:
-    return {
+    schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": f"{item['name']} output",
         "type": "object",
@@ -246,6 +257,14 @@ def agent_output_schema(item: dict[str, Any]) -> dict[str, Any]:
         },
         "required": ["summary", "artifact_markdown", "handoff", "risks"],
     }
+    if item["name"] == "DirectorAgent":
+        schema["properties"]["book_overview"] = {
+            "type": "string",
+            "maxLength": 500,
+            "description": "One concise Chinese sentence about the whole book, updated with generated prose; not a chapter recap. Empty only for non-prose stages.",
+        }
+        schema["required"].append("book_overview")
+    return schema
 
 
 def _agent_id(name: str) -> str:

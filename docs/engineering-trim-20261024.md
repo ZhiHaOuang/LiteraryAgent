@@ -76,4 +76,26 @@ LG_TEST_PYTHON=/absolute/path/to/LitIsLand/bin/python PYTHONPATH=../lg-cli:.. TM
 模型前后、作者等待前后、正式采用事务中的重复版本／来源检查处于不同时间边界，不属于无用重复。
 上述盘点是有限产品层审计，不是全仓“零冗余”证明。
 
+## 批次二：修复定义生成器与现有产物的漂移
+
+`scripts/materialize_lg_definitions.py --check` 在原基线退出 1：只报告
+`lg-skills/memory-updater/SKILL.md` 和 `lg-subagents/director/output.schema.json` 不一致。
+旧脚本无参执行会用通用模板覆盖记忆 Skill 已有的分类保存／非 Canonical 说明，并去掉 Director 的
+book_overview 属性与 required。当前正确产物分别来自 `a5559ea15a90`、`dadd663a3e208`。
+这是手动维护入口，未发现自动构建调用，不能把潜在覆盖说成当前运行时已经丢失这些规则。
+
+本批仅修正生成逻辑，使它重现当前特化内容；没有改写现有 Skill、catalog、Schema 或提示资源。
+`tests/test_definition_materializer.py` 通过真实子进程在临时副本验证：只读检查不写文件、重复生成幂等、
+篡改安全段与 Schema 后检查拒绝且不写入、生成恢复后再检查通过。原脚本 4 项失败，修复后隔离和实际各 4 项通过。
+104 份已跟踪的 Skill／subagent／包资源与基线、隔离、实际源码逐字节相同；资源同步检查也通过。
+
+```bash
+python scripts/materialize_lg_definitions.py --check
+python scripts/sync_runtime_resources.py --check
+PYTHONPATH=lg-cli:. TMPDIR=/private/tmp python -m unittest tests.test_definition_materializer -v
+```
+
+两批不重叠的 Python 测试合计每处 130 项：128 通过、2 项 Core 条件跳过。批次一提交为
+`63180ea364`，第二批与其分开提交，便于独立审查和回退。这项生成源修复不改变运行时文学契约，也不增加模型调用。
+
 每批可按相应 Git 提交单独 revert；先检查后续变更，不连带回退作者作品或主线之外的提交。
