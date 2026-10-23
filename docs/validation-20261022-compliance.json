@@ -15,7 +15,7 @@
       "id": 1,
       "scope": "polish instructions and comparable complete author input",
       "engineeringAcceptance": "passed",
-      "effectAcceptance": "pending_actual_author_review",
+      "effectAcceptance": "not_established_after_author_choices",
       "summary": [
         "r5-polish.v2 narrows facts, counts, uncertainty and allowed additions",
         "lg.author-request.v1 compiles identical request and constraints for all experiment conditions",
@@ -175,7 +175,7 @@
     {
       "id": 2,
       "scope": "limited actual author review",
-      "status": "awaiting_actual_author_review",
+      "status": "author_choices_received_acceptance_pending",
       "authorAcceptability": null,
       "authorRevisions": null,
       "authorRevisionRounds": null,
@@ -186,7 +186,7 @@
       "packetId": "1a5eeee6ff71f9a66a70bfaae4caca0f4e7d1f72e14ad8ced202e1c84f9a33fa",
       "conditionExposureSelfReport": null,
       "strictBlindnessVerified": false,
-      "conditionDisclosure": "Author packet excludes mapping; technical evidence may expose condition. Author must report prior exposure.",
+      "conditionDisclosure": "Mapping disclosed after author submitted choices; prior exposure unknown, subsequent review nonblind.",
       "artifactSha256": {
         "anonymous-review.md": "1a5eeee6ff71f9a66a70bfaae4caca0f4e7d1f72e14ad8ced202e1c84f9a33fa",
         "review-form.html": "906edb1470ee733c904ae70bc5dd1726456f5dc66f86240e38412b02b14f7470",
@@ -211,7 +211,241 @@
         "browserVisualChecked": false,
         "networkCalls": 0
       },
-      "acceptanceCommit": "pending actual author feedback; current evidence commit is not batch acceptance"
+      "acceptanceCommit": "pending explicit effect acceptance; feedback record commit is not batch acceptance",
+      "authorUseDecisions": {
+        "schema": "lg.actual-author-use-decisions.v2",
+        "receivedDate": "2026-10-23",
+        "packetId": "1a5eeee6ff71f9a66a70bfaae4caca0f4e7d1f72e14ad8ced202e1c84f9a33fa",
+        "source": "author supplied current conversation message",
+        "rawResponseSha256": "e6079295da348484b7db55432a6a7f0ab3fbc2f5672eb15964dfb64338179ccb",
+        "authorExposureSelfReport": null,
+        "strictBlindnessVerified": false,
+        "mappingDisclosedAfterThisResponse": true,
+        "futureReading": "nonblind",
+        "pairs": [
+          {
+            "pair": "M1-H1-r1",
+            "authorChoice": "neither",
+            "rawAuthorChoice": "都不满意，换个写法",
+            "candidateAvailable": {
+              "A": true,
+              "B": true
+            },
+            "selectedCondition": null,
+            "bothCandidatesAvailable": true
+          },
+          {
+            "pair": "M1-H1-r2",
+            "authorChoice": "B",
+            "rawAuthorChoice": "用 B",
+            "candidateAvailable": {
+              "A": true,
+              "B": true
+            },
+            "selectedCondition": "before",
+            "bothCandidatesAvailable": true
+          },
+          {
+            "pair": "M1-H2-r1",
+            "authorChoice": null,
+            "rawAuthorChoice": null,
+            "candidateAvailable": {
+              "A": false,
+              "B": false
+            },
+            "selectedCondition": null,
+            "bothCandidatesAvailable": false
+          },
+          {
+            "pair": "M1-H2-r2",
+            "authorChoice": null,
+            "rawAuthorChoice": null,
+            "candidateAvailable": {
+              "A": false,
+              "B": false
+            },
+            "selectedCondition": null,
+            "bothCandidatesAvailable": false
+          },
+          {
+            "pair": "M1-H3-r1",
+            "authorChoice": "A",
+            "rawAuthorChoice": "用 A",
+            "candidateAvailable": {
+              "A": true,
+              "B": true
+            },
+            "selectedCondition": "after",
+            "bothCandidatesAvailable": true
+          },
+          {
+            "pair": "M1-H3-r2",
+            "authorChoice": "unsure",
+            "rawAuthorChoice": "差别太小，选不出",
+            "candidateAvailable": {
+              "A": true,
+              "B": true
+            },
+            "selectedCondition": null,
+            "bothCandidatesAvailable": true
+          },
+          {
+            "pair": "M1-H4-r1",
+            "authorChoice": "A",
+            "rawAuthorChoice": "用 A",
+            "candidateAvailable": {
+              "A": true,
+              "B": true
+            },
+            "selectedCondition": "after",
+            "bothCandidatesAvailable": true
+          },
+          {
+            "pair": "M1-H4-r2",
+            "authorChoice": "B",
+            "rawAuthorChoice": "用 B",
+            "candidateAvailable": {
+              "A": false,
+              "B": true
+            },
+            "selectedCondition": "after",
+            "bothCandidatesAvailable": false
+          }
+        ],
+        "twoCandidatePairs": {
+          "count": 5,
+          "before": 1,
+          "after": 2,
+          "neither": 1,
+          "undecided": 1
+        },
+        "unpairedSelectedCandidate": {
+          "pair": "M1-H4-r2",
+          "side": "B",
+          "condition": "after",
+          "pairedWin": false
+        },
+        "conditionAvailability": {
+          "before": {
+            "requests": 8,
+            "candidates": 5,
+            "noTextualProgress": 3
+          },
+          "after": {
+            "requests": 8,
+            "candidates": 6,
+            "noTextualProgress": 2
+          }
+        },
+        "workflowPreference": {
+          "choice": "clarify",
+          "raw": "先问清我想改哪一点",
+          "covers": [
+            "M1-H2-r1",
+            "M1-H2-r2"
+          ],
+          "implemented": false,
+          "generationAuthorizedByChoice": false
+        },
+        "authorRevisions": null,
+        "authorMinutes": null,
+        "authorRevisionRounds": null,
+        "taskComplianceApproval": false,
+        "batch2Accepted": false,
+        "mergeApproved": false,
+        "newModelCalls": 0
+      },
+      "reviewProtocol": "v2 use-choice desk replaced scoring/time questionnaire at author request",
+      "currentArtifactSha256": {
+        "author-response-20261023.txt": "e6079295da348484b7db55432a6a7f0ab3fbc2f5672eb15964dfb64338179ccb",
+        "index.html": "d73232a1e2e404fd17bb0adbfdc5bdcad88d9ac0021c086196de648df789b332",
+        "packet.json": "64568277d828d1e88188c8f9d48a569402afbac0d209a7fc8a27939a9af760bb",
+        "assessment-20261023.json": "e30eb4eda8da439012085a8240542f2612c549de22e935642b9d1bb98f16cfa4",
+        "validation.json": "6334bd90593fc536d895a75fbdd1a32b068c99dda2b5df40cf82f9121985d59d",
+        "protocol.json": "f153d268c106412d23bad1604a618ae01b650cd7b0e8b487f08b52361c9a33de",
+        "app.js": "910aa94f63222c98dc5ee37e3cc614d9bde944ec26491a04f20b273920a6f34c",
+        "actual-author-decisions-20261023.json": "6b9d7e93b866060712c75e1779b03070d90f6f0c5368377e00ddd8ba50eccc0f"
+      },
+      "semanticAssessment": {
+        "schema": "lg.author-decision-assessment.v1",
+        "date": "2026-10-23",
+        "packetId": "1a5eeee6ff71f9a66a70bfaae4caca0f4e7d1f72e14ad8ced202e1c84f9a33fa",
+        "evidenceType": "author use choices plus separate source-text review; no new experiment",
+        "verdict": "limited positive use-preference signal; stable improvement not established",
+        "pairedCounts": {
+          "before": 1,
+          "after": 2,
+          "neither": 1,
+          "undecided": 1
+        },
+        "availability": {
+          "before": {
+            "requests": 8,
+            "candidates": 5,
+            "noTextualProgress": 3
+          },
+          "after": {
+            "requests": 8,
+            "candidates": 6,
+            "noTextualProgress": 2
+          }
+        },
+        "findings": [
+          {
+            "pair": "M1-H1-r2",
+            "side": "A",
+            "condition": "after",
+            "authorSelected": false,
+            "certainty": "clear_violation",
+            "source": "闻岚合上登记册，没有再问。",
+            "candidate": "闻岚没有合拢登记册，只是让书页悬在手中，任晚风掀起又合上。",
+            "reason": "Reverses closing action and adds a wind event despite preservation/no-environment-addition requirements."
+          },
+          {
+            "pair": "M1-H1-r2",
+            "side": "B",
+            "condition": "before",
+            "authorSelected": true,
+            "certainty": "unresolved_attribution",
+            "candidate": "先等水位退下去。",
+            "reason": "Condition text survives but moves outside dialogue quotation marks; author preference does not decide speaker attribution or instruction compliance."
+          },
+          {
+            "pair": "M1-H3-r1",
+            "side": "A",
+            "condition": "after",
+            "authorSelected": true,
+            "certainty": "interpretation_limit",
+            "candidate": "顾荻指尖轻叩了一下木桌边缘",
+            "reason": "Uses permitted desk gesture; whether tapping conflicts with no added sounds remains an interpretation limit, not a confirmed violation from a keyword."
+          },
+          {
+            "pairs": [
+              "M1-H4-r1",
+              "M1-H4-r2"
+            ],
+            "condition": "after",
+            "authorSelected": true,
+            "certainty": "scoped_text_inspection",
+            "reason": "Both selected outputs preserve the required corridor simile, two windows, left hand and no knock under this reread; no general semantic pass inferred."
+          }
+        ],
+        "limitations": [
+          "four developer-authored short tasks, two repetitions only",
+          "prior exposure unknown; no strict blind-review claim",
+          "one preferred candidate has no available opposite candidate",
+          "undecided does not establish equivalence",
+          "author revisions and time unmeasured",
+          "workflow preference is a proposed interaction, not validated behavior"
+        ],
+        "nextFocus": [
+          "limited no-progress clarification proposal, no automatic retry or budget reset",
+          "dialogue action/attribution preservation before broader quality claims"
+        ],
+        "mergeReady": false,
+        "productCodeChanged": false,
+        "newModelCalls": 0
+      }
     },
     {
       "id": 3,
@@ -290,7 +524,7 @@
     }
   ],
   "prospectiveExperiment": {
-    "status": "completed_author_review_pending",
+    "status": "completed_author_choices_received_effect_not_established",
     "callsSent": 16,
     "budgetApproval": "confirmed_by_author",
     "proposedMaxCNY": "5",
@@ -342,9 +576,20 @@
       "activeManuscriptUnchanged": 16,
       "outsideSelectionPreservedForAvailableCandidates": 11,
       "completeAuthorRequestInActualWireExactlyOnce": 16,
-      "perConditionBreakdown": "withheld_until_author_review",
-      "literaryQualityVerdict": null,
-      "actualAuthorUtility": null
+      "perConditionBreakdown": {
+        "before": {
+          "requests": 8,
+          "candidates": 5,
+          "noTextualProgress": 3
+        },
+        "after": {
+          "requests": 8,
+          "candidates": 6,
+          "noTextualProgress": 2
+        }
+      },
+      "literaryQualityVerdict": "limited positive preference signal; stable improvement not established",
+      "actualAuthorUtility": "six use-choice responses received; one workflow preference, no time/revision measurement"
     },
     "approvedMaxCNY": "5",
     "failedRequestsIncluded": true,
@@ -392,10 +637,11 @@
     "source inspection",
     "offline regression",
     "real localhost HTTP and Backend/Native integration",
-    "real configured GLM-4.5-Air API requests on synthetic polish tasks"
+    "real configured GLM-4.5-Air API requests on synthetic polish tasks",
+    "actual author use decisions on six candidate pairs and one grouped no-progress scenario"
   ],
   "notVerified": [
-    "actual author usefulness",
+    "total author revision workload and time",
     "current pinned Core runtime",
     "literary quality nonregression",
     "long-term consistency",
@@ -418,7 +664,7 @@
     "paidRun": "Only after round budget is confirmed; use a separate new output and explicit --run. Never replay an existing output."
   },
   "mergeGate": {
-    "status": "not_ready_actual_author_review_and_quality_evidence_pending",
+    "status": "not_ready_compliance_and_improvement_not_established",
     "require": [
       "three independently accepted batch commits",
       "combined verification",
@@ -673,5 +919,14 @@
         "skipped": 0
       }
     ]
+  },
+  "feedbackRecord": {
+    "date": "2026-10-23",
+    "documentationOnly": true,
+    "newModelCalls": 0,
+    "sourceCodeChanged": false,
+    "engineeringTestsRerun": false,
+    "authorResponseSha256": "e6079295da348484b7db55432a6a7f0ab3fbc2f5672eb15964dfb64338179ccb",
+    "mainMerged": false
   }
 }
