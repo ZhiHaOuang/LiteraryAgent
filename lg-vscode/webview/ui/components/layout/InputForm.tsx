@@ -154,7 +154,6 @@ export const InputForm: FC<InputFormProps> = ({
   onKeyDown,
   onSubmit,
   onCancel,
-  onToggleEditMode,
   // onToggleThinking,  // Temporarily disabled
   onToggleSkipAutoActiveContext,
   onShowCommandMenu,

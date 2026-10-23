@@ -1,0 +1,158 @@
+{
+  "date": "2026-10-24",
+  "baseline": "8e926aa5a1d3b963c2eef6def4503dcf7b24ece9",
+  "branch": "codex/polish-compliance-20261022",
+  "scope": "Retired private terminal rendering and unused Extension bindings; no whole-file deletions.",
+  "environment": {
+    "python": "3.12.0",
+    "node": "20.18.1",
+    "platform": "macOS arm64"
+  },
+  "isolation_and_actual": {
+    "python": {
+      "run": 126,
+      "passed": 124,
+      "skipped": 2,
+      "failed": 0
+    },
+    "extension_unit": {
+      "run": 59,
+      "passed": 59,
+      "failed": 0
+    },
+    "extension_integration": {
+      "run": 4,
+      "passed": 3,
+      "skipped": 1,
+      "failed": 0
+    },
+    "typecheck": "passed with noUnusedLocals and noUnusedParameters",
+    "build": "passed",
+    "cli_help": "passed"
+  },
+  "python_modules": [
+    "tests.test_terminal_view",
+    "tests.test_terminal_input",
+    "tests.test_ui_redesign",
+    "tests.test_terminal_runtime",
+    "tests.test_terminal_backend",
+    "tests.test_cli_backend",
+    "tests.test_workflow_control",
+    "tests.test_auth_session",
+    "tests.test_ui_details",
+    "tests.test_dashboard",
+    "tests.test_slime_animation",
+    "tests.test_literary_tasks",
+    "tests.test_polish_profile",
+    "tests.test_workflow_builtin_contract"
+  ],
+  "core_skips": "Pinned Core runtime unavailable; retained compatibility paths are not claimed as validated.",
+  "baseline_unused_diagnostics": 6,
+  "after_unused_diagnostics": 0,
+  "extension_artifacts_before": {
+    "dist/webview.css": {
+      "sha256": "97d66b13a84b93e9d8a7220cf75a8f5d489a15dcab3a543b9c5a27eb11959878",
+      "bytes": 50948
+    },
+    "dist/extension.cjs": {
+      "sha256": "751faa9527167804a4c143cd7639c1df2f285a11bf6a14c3e17bca90d3a68748",
+      "bytes": 130544
+    },
+    "dist/webview.js": {
+      "sha256": "dfd38e707ad0888c3c51f506618ec5b4b3d65c851c3d11fd39e1ff381446a8f1",
+      "bytes": 473978
+    }
+  },
+  "extension_artifacts_after": {
+    "dist/webview.css": {
+      "sha256": "97d66b13a84b93e9d8a7220cf75a8f5d489a15dcab3a543b9c5a27eb11959878",
+      "bytes": 50948
+    },
+    "dist/extension.cjs": {
+      "sha256": "9a45760eec760d6aa080025237a75ffc22b8cc7ccd203e56ee776b10fdd43256",
+      "bytes": 130517
+    },
+    "dist/webview.js": {
+      "sha256": "53ecbe5802bacbec7c26cc11010c1346e629343a3d515496d6e9dc11468a858e",
+      "bytes": 473955
+    }
+  },
+  "wheel": {
+    "wheel": "literarygiant_cli-0.3.0-py3-none-any.whl",
+    "sha256": "2770686593027a8a0362220df37f978a668392e371d8fff22b544e3bd6e73dd9",
+    "bytes": 434113,
+    "matched_package_files": 141,
+    "cli_help_exit_code": 0
+  },
+  "source_files": [
+    {
+      "group": "trim",
+      "path": "lg-cli/lg_cli/terminal_input.py",
+      "before_sha256": "3e5a26fcda9611598edf8f94b8aaa2c17dfe7cbab0a84ec8b1683319ea97a78d",
+      "after_sha256": "92271c6839c0f69d28caed38bb0e3c8958ab51227bd68dbe91cecda004320a10"
+    },
+    {
+      "group": "trim",
+      "path": "lg-cli/lg_cli/terminal_view.py",
+      "before_sha256": "71c17789b833823a88f407670cf0261f34a15efacbb8a2d624d819782d0fa8d9",
+      "after_sha256": "0d9bb210c021faeae6a798f86ab4b7b7c72a6508e5dc01633a90b244ff0ec9b0"
+    },
+    {
+      "group": "trim",
+      "path": "tests/test_terminal_view.py",
+      "before_sha256": "b91a7c14898a5f7c4e7b48a9a016dad920aae887700bfce4679eda80622f36fd",
+      "after_sha256": "4cfdca127bd648720895c5dc1ba8c49e06b953c96dae5d72e7367c08486a33d6"
+    },
+    {
+      "group": "trim",
+      "path": "lg-vscode/src/host/DesktopHost.ts",
+      "before_sha256": "5f4315461787d81e0505b70dedfe0a8f7dee18fe21208eff0cfd6c7b11cf1bda",
+      "after_sha256": "4df1124e24cfceaef8519984535d8906845421fadee9a3bfd8c3b3535894ef45"
+    },
+    {
+      "group": "trim",
+      "path": "lg-vscode/src/backend/LiteraryBackend.ts",
+      "before_sha256": "43c43c1c4ac9f7dccee9c7d014e626808d27aadea008e0f2a658d57c174394f0",
+      "after_sha256": "bfc74ea0a6c338a40df305fdc3ab191fab26f139e7821a7819d4c73d12d25709"
+    },
+    {
+      "group": "trim",
+      "path": "lg-vscode/webview/LiteraryTasksPanel.tsx",
+      "before_sha256": "6d4119187f5284c76bfa91cceb9cc5b622c2723b08a0593efcff8db6371e99e9",
+      "after_sha256": "af9e4f9e169255dc8d8663b984bdf13b8b5d1d8cf2e556a0aab58f97ee3cf515"
+    },
+    {
+      "group": "trim",
+      "path": "lg-vscode/webview/WorkspacePanels.tsx",
+      "before_sha256": "0ff5c8af3942f3feb8199f58e5db89f6f1fa7d769c6b2ba829ab1ef89a6e26d3",
+      "after_sha256": "708c47e0ba8953494a57f532010418691bc26901f5eb6fcf8c7b0a2cfd90e4cf"
+    },
+    {
+      "group": "trim",
+      "path": "lg-vscode/webview/ui/components/layout/InputForm.tsx",
+      "before_sha256": "66c4593a673eb2ec69a1981c04cf751ac8ce35fb29a35ad3829c3926a84d9f7a",
+      "after_sha256": "c1af9167efd392a9fa530adb3a1c0880aa10b31f0c6c5d018104d1ca0671baea"
+    },
+    {
+      "group": "trim",
+      "path": "lg-vscode/tests/legacy-history.integration.ts",
+      "before_sha256": "974912cfb89fb68806a3ac65c3ea94845ce5cfcef8f4adb08ae3e1f97eb28f0c",
+      "after_sha256": "04635415c76e98e3e5592d00aed8b04d8d6b4b715b11b23829f4b3ba5428563b"
+    },
+    {
+      "group": "trim",
+      "path": "lg-vscode/tsconfig.json",
+      "before_sha256": "b99c8502c975fd282355abe09ae28397ea76e5bd6d776ad6c53167e3ce01bc99",
+      "after_sha256": "f5d7a0d299045ce1bf1ec87a3e95ee3faf185b9025a8448143d274b162569c2d"
+    }
+  ],
+  "new_deleted_files": [],
+  "limitations": [
+    "Targeted tests, not a full Python suite rerun.",
+    "No installed VSIX or desktop GUI acceptance; builds and connector integration only.",
+    "No Rust changes or Rust build.",
+    "No paid model calls or new literary quality evidence.",
+    "Not merged to main or literary-agent; not deployed."
+  ],
+  "private_evidence_directory": "LiteraryGiant-engineering-trim-20261024"
+}

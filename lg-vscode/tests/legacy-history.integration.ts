@@ -8,7 +8,7 @@ import {LiteraryBackend,type LiteraryBackendSettings} from '../src/backend/Liter
 import {SessionStore} from '../src/host/SessionStore';
 
 class LegacyBackend extends LiteraryBackend{
-  constructor(private fixture:LiteraryBackendSettings){super(fixture);}
+  constructor(fixture:LiteraryBackendSettings){super(fixture);}
   protected override launch(){
     const spec=super.launch();
     return {...spec,args:[resolve('tests/fixtures/legacy_backend_fixture.py'),...spec.args.slice(2)]};

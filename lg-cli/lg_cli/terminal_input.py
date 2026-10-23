@@ -29,8 +29,8 @@ from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import Style
 
 from .slash_commands import CATEGORIES, CommandUsage, SlashCommand, matching_commands
-from .slime_animation import BODY, CROWN, FRAME_INTERVAL, prepare_frames
-from .terminal_view import choice_rows, render_conversation, compact_content, clip
+from .slime_animation import BODY, CROWN
+from .terminal_view import choice_rows, render_conversation, clip
 from .working_animation import choose_word, loading_text
 
 
@@ -1159,11 +1159,6 @@ class LiteraryInput:
             await asyncio.gather(animation, return_exceptions=True)
             self._local_command = False
             self.end_work()
-
-    def _progress_text(self):
-        elapsed = max(0, time.monotonic() - self.started) if self.started else 0
-        return [('class:lg-prompt', loading_text(elapsed, self._loading_word,
-            plain=os.environ.get('TERM') == 'dumb'))]
 
     async def _animate_progress(self):
         while True:

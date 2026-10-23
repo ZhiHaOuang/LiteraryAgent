@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ActiveRunSchema, BackendEventSchema, BookSchema, ItemSchema, LibraryPageSchema, LibraryDetailSchema,
-  type Approval, type BackendEvent, type InputRequest, type Item, type Session,
+  type Approval, type InputRequest, type Item, type Session,
   type LibraryQuery, type LibraryTopic, type WritingAction, type Stage } from '../../shared/protocol';
 import { EventBackend, type AgentBackend } from './AgentBackend';
 import { RpcTransport, type LaunchSpec, type RpcMessage } from './RpcTransport';

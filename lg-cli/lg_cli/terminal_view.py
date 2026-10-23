@@ -7,7 +7,6 @@ import re
 from prompt_toolkit.utils import get_cwidth
 from rich.console import Console, Group
 from rich.markdown import Markdown
-from rich.padding import Padding
 from rich.panel import Panel
 from rich.align import Align
 from rich import box

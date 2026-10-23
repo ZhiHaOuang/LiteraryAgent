@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from 'react';
+import {useEffect,useState} from 'react';
 import {LIBRARY_TOPICS,type Snapshot,type LibraryTopic,type WritingAction,type ClientMessage} from '../shared/protocol';
 
 type Props={snapshot:Snapshot;send:(message:ClientMessage)=>void;chat:()=>void;open:(topic:LibraryTopic)=>void};

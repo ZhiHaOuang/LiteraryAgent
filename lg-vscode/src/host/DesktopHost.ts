@@ -17,7 +17,6 @@ export class DesktopHost implements vscode.WebviewViewProvider,vscode.Disposable
   private changing=false;
   private disposed=false;
   private client?:DesktopClient;
-  private inventory?:Inventory;
   constructor(private context:vscode.ExtensionContext,private root:string){}
   async resolveWebviewView(view:vscode.WebviewView){
     this.view=view;
@@ -71,7 +70,6 @@ export class DesktopHost implements vscode.WebviewViewProvider,vscode.Disposable
     if(this.disposed)return;
     this.watcher?.dispose();clearTimeout(this.timer);
     await this.controller?.shutdown();
-    this.inventory=data;
     const store=new SessionStore(mock?'mock':'codex');
     if(data)store.state.configuration={workspace,environment:data.environment,profile:data.active,model:data.model,provider:data.provider};
     const settings={workspace,python,manifest,environment:data?.environment||config.get<string>('environment','')};

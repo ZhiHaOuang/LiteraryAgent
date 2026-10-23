@@ -14,6 +14,7 @@ from lg_cli.slash_commands import command_catalog
 from lg_cli.terminal_input import LiteraryInput
 from lg_cli.terminal_view import choice_rows, render_conversation
 from prompt_toolkit.data_structures import Size
+from prompt_toolkit.formatted_text import to_plain_text
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.utils import get_cwidth
@@ -274,17 +275,67 @@ class TerminalViewTests(unittest.TestCase):
             self.assertIn("Failed in", editor.transcript)
 
     def test_progress_animation_changes_without_transcript_growth(self):
+        with (
+            tempfile.TemporaryDirectory() as raw,
+            create_pipe_input() as pipe,
+            patch.dict(os.environ, {"TERM": "xterm-256color"}),
+        ):
+            editor = LiteraryInput(
+                Path(raw) / "history", input=pipe, output=DummyOutput()
+            )
+            editor.home_visible = False
+            editor.started = 10
+            editor._loading_word = "weaving"
+            editor._loading_epoch = 0
+            editor.begin_work()
+            with patch("lg_cli.terminal_input.time.monotonic", return_value=11):
+                first = to_plain_text(editor.messages.content.text())
+            with patch("lg_cli.terminal_input.time.monotonic", return_value=11.125):
+                second = to_plain_text(editor.messages.content.text())
+            self.assertIn("I am weaving", first)
+            self.assertIn("I am weaving", second)
+            self.assertNotEqual(first, second)
+            self.assertEqual(editor.transcript, "")
+            self.assertEqual(editor._blocks, [])
+
+    def test_progress_is_hidden_while_idle_or_running_a_local_command(self):
         with tempfile.TemporaryDirectory() as raw, create_pipe_input() as pipe:
             editor = LiteraryInput(
                 Path(raw) / "history", input=pipe, output=DummyOutput()
             )
-            color_env = patch.dict(os.environ, {'TERM':'xterm-256color'})
-            color_env.start()
-            self.addCleanup(color_env.stop)
+            editor.home_visible = False
             editor.started = 10
+            editor._loading_word = "weaving"
+            editor._loading_epoch = 0
             with patch("lg_cli.terminal_input.time.monotonic", return_value=11):
-                first = editor._progress_text()
+                self.assertNotIn("I am weaving", to_plain_text(editor.messages.content.text()))
+                editor.begin_work()
+                self.assertIn("I am weaving", to_plain_text(editor.messages.content.text()))
+                editor._local_command = True
+                self.assertNotIn("I am weaving", to_plain_text(editor.messages.content.text()))
+                editor._local_command = False
+                editor.end_work()
+                self.assertNotIn("I am weaving", to_plain_text(editor.messages.content.text()))
+
+    def test_dumb_terminal_keeps_progress_static_within_word_interval(self):
+        with (
+            tempfile.TemporaryDirectory() as raw,
+            create_pipe_input() as pipe,
+            patch.dict(os.environ, {"TERM": "dumb"}),
+        ):
+            editor = LiteraryInput(
+                Path(raw) / "history", input=pipe, output=DummyOutput()
+            )
+            editor.home_visible = False
+            editor.started = 10
+            editor._loading_word = "weaving"
+            editor._loading_epoch = 0
+            editor.begin_work()
+            with patch("lg_cli.terminal_input.time.monotonic", return_value=11):
+                first = to_plain_text(editor.messages.content.text())
             with patch("lg_cli.terminal_input.time.monotonic", return_value=11.125):
-                second = editor._progress_text()
-            self.assertNotEqual(first[0], second[0])
+                second = to_plain_text(editor.messages.content.text())
+            self.assertIn("I am weaving", first)
+            self.assertEqual(first, second)
             self.assertEqual(editor.transcript, "")
+            self.assertEqual(editor._blocks, [])
