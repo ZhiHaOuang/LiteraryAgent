@@ -80,6 +80,31 @@ Extension 的 `literary` 与 `codex` 设置均通过 `createBackend → Literary
 
 上表 Python 文件位于 `lg-cli/lg_cli/`。协议细节以 [Backend 契约](extension-backend.md) 和实际 `backend_protocol.py` 为准。
 
+## 兼容声明与实际执行规则（2026-10-24）
+
+`lg-tools/tool_policy.json`、`lg-context/context_spec.json` 是仍分发的历史声明：
+`catalog.load_json_catalog` 支持 checkout 和 wheel 资源读取，`sync_runtime_resources.py` 同步它们，
+但当前产品未把这两份内容加载为工具授权或上下文执行配置。修改 allow／deny、roots／context_budget
+不会直接更改实际执行边界；stub／future_adapter 字段也不是已实现能力的证据。
+
+`lg-agent/task_modes.json` 仍由 `main._main → print_modes → catalog.load_task_modes` 供
+`lg modes --json` 原样展示；正式CLI已实跑核对13个模式。此文件的system_prompt、allowed_tools、can_*、
+requires_*等字段没有实际执行消费者，不应拿它们判断某次请求是否有文件、Shell或创作权限。
+`lg-prompts/prompts.md` 为这些标签的历史参考，未发现运行时加载，也不入wheel；它仍参与实验源码指纹。
+保留其数据与标签不表示恢复旧策略，不修改既有实验记录。
+
+实际执行应追踪以下代码，而非从声明名推定：
+
+- 阶段／角色：`workflow_runner.WorkflowRunner._workflow` 使用workflows.json，`DefinitionRegistry`
+  加载Skill／subagent；`prompt_builder.build_stage_prompt` 将工具声明标为declarative。
+- 最终指令：`stage_input.prepare_stage_input`、Story专用profile与`runtime_context.LiteraryContext`。
+- 工具和授权：`native.writing_settings`、`codex_policy.WritingLaunchPolicy`、`native_tools.NativeTools`、
+  `mcp_approval.ApprovingMCP` 以及ProjectStore的正式状态转换；Native阶段执行器另有无工具边界。
+- 检索与上下文：`knowledge.KnowledgeGateway.search` 落实检索顺序和raw开关，`story_context` 等服务执行实际预算与来源读取。
+
+两份旧策略JSON单份合计1961字节，仍有公共读取／分发兼容职责，本轮保留；若以后退出，应先定义兼容迁移。
+完整证据及本轮UI精简见 [后续冗余盘点](redundancy-followup-20261024.md)。
+
 ## 产品裁剪、通用机制与任务策略
 
 Runtime 精简与文学执行模型建设并行推进，目标是减少不需要的产品耦合、依赖和维护范围。分类依据是职责与实际使用，不是是否曾用于 Coding。

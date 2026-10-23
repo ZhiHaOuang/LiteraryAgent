@@ -72,3 +72,23 @@ SHA-256 `07b79314ebb5de839237fc22a84bf1e09cdfacd47c25825aa538750c1c5421de`。
 额外退出的17条CSS规则／980字节仅服务于旧文件或其注释，保留类与规则核验通过。
 这是删除前验证，不代表已经批准或已经删除。具体清单在本机 `file-deletion-manifest.json`，
 确认前正式文件保留。授权范围不包括任何共享CSS、工具能力或其它文件。
+
+## 批次三：历史策略声明查清后保留
+
+| 声明 | 实际用途 | 执行边界 |
+| --- | --- | --- |
+| lg-tools/tool_policy.json | catalog.py公共读取、sync_runtime_resources.py同步，打包进wheel | 没有当前执行消费者；allow／deny不是宿主权限开关 |
+| lg-context/context_spec.json | 同上；含旧stub和future_adapter描述 | roots及预算字段没有驱动当前上下文构造 |
+| lg-agent/task_modes.json | main._main先初始化，再由print_modes／load_task_modes供CLI展示 | system_prompt、allowed_tools、can_*、requires_*等字段不授权任务 |
+| lg-prompts/prompts.md | 模式标签的参考文本；参与compare_polish_sources源码冻结 | 不入wheel，未发现运行时读入最终模型指令 |
+
+对前三份JSON核对checkout、实际bundled回退及源／包字节一致；正式 `python -m lg_cli modes --json`
+退出0、stderr为空，返回完整13个模式及原字段；13个模式的引用都在14个参考标题中，无失效标签。
+初始声明来自65d613c020，fe0d338ff9加入包资源回退；本轮没有证据表明公共读取已被迁移或退役。
+
+因此保留这四类声明和两份bundled副本，不删除字段、不修改payload、不补另一套策略加载器。
+两旧JSON单份合计1961字节；此批成果是明确维护边界，不能算代码体积减少。
+实际权限、上下文和模型输入落点已写入[架构说明](architecture.md#兼容声明与实际执行规则2026-10-24)。
+
+本批只改审计与架构文档。没有以绕过初始化的内部helper调用替代正式CLI验证，
+没有新增模型请求、第三方依赖、Rust裁剪或文学质量结论。

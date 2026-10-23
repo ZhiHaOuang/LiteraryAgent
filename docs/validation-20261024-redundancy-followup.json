@@ -107,7 +107,8 @@
         "bytes": 473925
       }
     },
-    "desktop_click_validation": false
+    "desktop_click_validation": false,
+    "commit": "62e07d6af0"
   },
   "pending_file_deletion": {
     "path": "lg-vscode/webview/ui/components/layout/FileLink.tsx",
@@ -119,5 +120,34 @@
     "additional_css_rules_removed": 17,
     "additional_css_bytes_removed": 980,
     "original_file_preserved": true
+  },
+  "historical_catalog_audit": {
+    "catalogs": [
+      {
+        "path": "lg-tools/tool_policy.json",
+        "sha256": "852e72ed53bead101729706a94d36799891076168b480c178998d88559d884e8",
+        "bytes": 1100,
+        "checkout_equals_bundle": true
+      },
+      {
+        "path": "lg-context/context_spec.json",
+        "sha256": "7866e5af8662e81318c3cf5f54ba478bcd5670fd34ce0c96b500a304455dcb93",
+        "bytes": 861,
+        "checkout_equals_bundle": true
+      },
+      {
+        "path": "lg-agent/task_modes.json",
+        "sha256": "ab25c6621c234cdc9082cfa3e3f9256ee853d132ec7719194a8b3cbce82ca385",
+        "bytes": 8140,
+        "checkout_equals_bundle": true
+      }
+    ],
+    "formal_cli_exit": 0,
+    "formal_cli_stderr_empty": true,
+    "cli_json_preserves_all_mode_fields": true,
+    "mode_count": 13,
+    "reference_heading_count": 14,
+    "unresolved_prompt_tags": [],
+    "changed_payloads": []
   }
 }
