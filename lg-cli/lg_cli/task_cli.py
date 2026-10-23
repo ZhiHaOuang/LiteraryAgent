@@ -18,6 +18,10 @@ def add_parsers(sub):
         if name == 'select': child.add_argument('option_id')
         child.add_argument('--confirm', action='store_true')
         child.add_argument('--json', action='store_true')
+    clarify = commands.add_parser('clarify', help='Print a new-task options draft; never execute or resume.')
+    clarify.add_argument('task_id')
+    clarify.add_argument('--guidance', required=True, help='Specific author clarification appended to the original request.')
+    clarify.add_argument('--json', action='store_true')
     narrative = sub.add_parser('narrative', help='Preview or run a fresh registered-knowledge inference.')
     commands = narrative.add_subparsers(dest='narrative_command', required=True)
     for name in ('preview', 'run'):
@@ -53,6 +57,10 @@ def dispatch(args, config):
                     **({'version':args.version} if args.version is not None else {})})
             elif args.command == 'task' and args.task_command == 'show':
                 value = await reader.backend.dispatch('task/read', {'taskId':args.task_id})
+            elif args.command == 'task' and args.task_command == 'clarify':
+                from .literary_tasks import clarified_options
+                task = await reader.backend.dispatch('task/read', {'taskId':args.task_id})
+                value = clarified_options(task,args.guidance)
             else:
                 kind = args.command
                 name = args.task_command if kind == 'task' else args.narrative_command

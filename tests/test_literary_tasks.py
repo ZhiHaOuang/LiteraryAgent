@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from lg_cli.literary_tasks import prepare, start, advance, read
+from lg_cli.literary_tasks import prepare, start, advance, read, clarified_options
 from lg_cli.core_adapter import CoreExecutionResult
 from lg_cli.project_store import ProjectStore
 from tests.helpers import make_config
@@ -144,6 +144,69 @@ class LiteraryTaskTests(unittest.TestCase):
         self.assertEqual(result['status'],'stopped',result)
         self.assertEqual(result['reason'],'no_textual_progress')
         self.assertEqual(len(self.store.list_versions('one')),1)
+
+    def test_no_progress_clarification_is_readonly_and_preserves_original_request_scope_and_budget(self):
+        from lg_cli.run_store import RunStore
+        options={'strategy':'polish','document':'one','passage':'SELECTED.',
+            'request':'Polish the selected words. Do not change the facts.','maxInputChars':12000}
+        adapter=StoryAdapter(revision_text='SELECTED.')
+        result=start(self.config,options,adapter=adapter)
+        self.assertEqual(result['nextAction'],'clarify_request',result)
+        self.assertEqual(result['modelCalls'],1)
+        self.assertEqual(result['limits']['maxModelCalls'],1)
+        path=RunStore(self.root)._path(result['runId'],'literary-task.json')
+        snapshot=path.read_bytes()
+        restored=read(self.config,result['runId'])
+        draft=clarified_options(restored,'  Make the pause before the reply clearer.  ')
+        self.assertEqual(draft['request'],options['request']+'\n\n作者补充：\nMake the pause before the reply clearer.')
+        self.assertEqual(draft['maxInputChars'],12000)
+        self.assertEqual(draft['maxModelCalls'],1)
+        self.assertEqual(draft['passage'],options['passage'])
+        self.assertEqual(draft['document'],'one')
+        again=advance(self.config,result['runId'],adapter=adapter)
+        self.assertEqual(again['status'],'stopped')
+        self.assertEqual(again['modelCalls'],1)
+        self.assertEqual(adapter.calls,['polish.schema.json'])
+        self.assertEqual(path.read_bytes(),snapshot)
+        self.assertEqual(len(self.store.list_versions('one')),1)
+        self.assertEqual(self.store.get_document('one').content,self.document.content)
+        self.assertEqual(restored['clarification']['options']['request'],options['request'])
+
+    def test_clarification_is_withheld_when_source_runtime_or_profile_changes(self):
+        from unittest.mock import patch
+        adapter=StoryAdapter(revision_text='SELECTED.')
+        task=start(self.config,{'strategy':'polish','document':'one','passage':'SELECTED.',
+            'request':'Polish these words.'},adapter=adapter)
+        self.assertIn('clarification',task)
+        for changed in (replace(self.config,provider='different'),replace(self.config,default_model='different'),
+                replace(self.config,max_output_tokens=self.config.max_output_tokens+1)):
+            with self.subTest(config=changed.provider,model=changed.default_model):
+                result=read(changed,task['runId'])
+                self.assertNotIn('clarification',result)
+                self.assertEqual(result['nextAction'],'new_task')
+        with patch('lg_cli.literary_tasks._input_profile',return_value={'name':'changed','fingerprint':'changed'}):
+            result=read(self.config,task['runId'])
+            self.assertNotIn('clarification',result)
+            self.assertTrue(result['inputPolicyChanged'])
+        self.store.edit_active_document('one',content='Prefix. SELECTED. Author changed the ending.',
+            expected_version_id=self.document.active_version_id,reason='author')
+        result=read(self.config,task['runId'])
+        self.assertNotIn('clarification',result)
+        self.assertTrue(result['sourceStale'])
+        self.assertEqual(adapter.calls,['polish.schema.json'])
+
+    def test_clarification_draft_rejects_missing_guidance_oversize_and_noneligible_tasks(self):
+        task=start(self.config,{'strategy':'polish','document':'one','passage':'SELECTED.',
+            'request':'Polish.'},adapter=StoryAdapter(revision_text='SELECTED.'))
+        for guidance in ('', '  ', None, 'x'*4000):
+            with self.subTest(guidance=type(guidance).__name__):
+                with self.assertRaises(ValueError): clarified_options(task,guidance)
+        for update in ({'sourceStale':True},{'inputPolicyChanged':True},{'status':'awaiting_review'},
+                {'strategy':'chapter'},{'nextAction':'new_task'},{'clarification':None}):
+            with self.subTest(update=update):
+                with self.assertRaises(ValueError): clarified_options({**task,**update},'Change the rhythm.')
+        broken={**task,'clarification':{'options':{**task['clarification']['options'],'maxModelCalls':2}}}
+        with self.assertRaises(ValueError): clarified_options(broken,'Change the rhythm.')
 
     def test_uncertain_execution_is_inspect_only_and_not_replayed(self):
         from lg_cli.literary_tasks import _load, _save

@@ -2,19 +2,23 @@
 
 LiteraryGiant 拥有文学任务的执行语义、故事状态与作者控制。Codex 和 Native 是现有执行适配器；Skill、subagent 和声明式工作流是实现特定策略的手段。架构演进以文学任务能否可靠完成为依据，不以新增角色数量或目录拆分数量衡量。
 
-本文描述截至 2026-10-22 的实现及后续职责划分。已验收范围、尚未完成的能力和下一阶段顺序见 [项目路线与进度](roadmap.md)；历史分批证据见 [Oh Story 融合记录](oh-story-integration.md)，本轮实际调用链与限制见 [接手实施记录](review-implementation.md)。目标职责不表示同名模块已经存在。
+本文描述截至 2026-10-24 的实现及后续职责划分。已验收范围、尚未完成的能力和下一阶段顺序见 [项目路线与进度](roadmap.md)；历史分批证据见 [Oh Story 融合记录](oh-story-integration.md)，本轮实际调用链与限制见 [接手实施记录](review-implementation.md)。目标职责不表示同名模块已经存在。
 
 ## 接手审查新增边界（2026-10-22）
 
 `backend_tasks.py` 把有限 `task/*`、`narrative/*`、`sources/check` 接到共享 Backend。`task_cli.py` 和现有 `LiteraryBackend.ts` 消费同一契约，React 增加任务及结果动作，不另建 UI 框架。`literary_tasks.py` 在 RunStore 中保存两种有界任务的进度，复用 Story 修订、创作方向和候选；方向选择与正式采用仍走既有独立创作批准。chapter 生成候选携带 `required_decision`，ProjectStore 在采用事务中核对精确选择及来源，不能用任务完成事件替代正式提交。
 
-R5 局部润色由宿主固定选择 `r5-polish.v2`，只适用于活动章节的精确选区和 light 模式。`StoryWorkflowService` 继续复用有界事实／参考、项目指令、最新 guidance、来源收据、冻结 Schema、替换拼接和候选保存；本次不要求角色／Skill 通用包装、全书分析、概览、图谱或记忆提案。专用 `resources/polish.schema.json` 严格要求 summary、revision_markdown、change_log、risks 四字段并拒绝额外字段。通用 revise、scene 和 chapter 契约保留；这不是给通用工具增加权限。
+R5 局部润色由宿主固定选择 `r5-polish.v3`，只适用于活动章节的精确选区和 light 模式。`StoryWorkflowService` 继续复用有界事实／参考、项目指令、最新 guidance、来源收据、冻结 Schema、替换拼接和候选保存；本次不要求角色／Skill 通用包装、全书分析、概览、图谱或记忆提案。专用 `resources/polish.schema.json` 严格要求 summary、revision_markdown、change_log、risks 四字段并拒绝额外字段。通用 revise、scene 和 chapter 契约保留；这不是给通用工具增加权限。
 
 v2 在现有局部指令中明确事实、数量、身份、先后顺序、不确定性和允许补写的边界，要求遵守作者的文风禁令；允许比喻的任务仍允许比喻。这些是模型输入指令，不是宿主已经实现文学语义判定。宿主仍只强制 Schema、精确选区拼接、版本／来源、预算与独立作者采用等可确定规则；是否遵守选区内的全部要求需要单独评阅。没有增加强制审读模型调用或字符黑名单。
 
+v3进一步明确已有动作是否发生及其结果状态、台词条件和承诺的说话者归属。提示资源增加336个英文字符，不新增模型调用、输出字段或机械引号检查。跨Responses／Anthropic的本地HTTP验证能确认这些要求进入最终请求，不能证明真实模型已稳定遵守语义约束。
+
+无文本进展仍是终止状态 `stopped/no_textual_progress`。`literary_tasks._offer_clarification` 仅在无候选且原来源、Runtime和输入策略均仍匹配时，给公共结果附加澄清问题与原始选区／要求／预算草稿，`nextAction=clarify_request`；不改旧任务的持久化内容和已用调用次数。`task clarify RUN_ID --guidance TEXT` 经共享Backend读取后只输出新任务选项。Extension结果卡保留原要求、精确选区和较低输入上限，补充后仍经 `task/preview → task/start → 独立批准`；原请求与补充合计不得超过4000字符。新任务重新检查版本和指纹，生成后仍只是候选。新任务的单次请求上限不是旧任务续额，也不是全局人民币费用预算；旧策略或旧来源的任务不能直接获得澄清草稿。使用及验证见 [澄清与润色约束交付](polish-clarification-20261024.md)。
+
 `literary_tasks.prepare` 把专用指令和 Schema 的指纹纳入 inputProfile；启动及模型前后检查变化。旧候选仍可读取，资源不可读也只标记策略变化；继续操作不会自动重放旧策略，已经采用的版本仍准确显示 adopted。`workflow_io.apply_story_request` 共用 stdin 参数组合规则，CLI 与受控 worker 分别调用它，保留两个执行边界。实际调用链和保留／待补证候选见 [路径盘点](path-inventory-20261022.json)，工程验证见 [有限精简验收](validation-20261022-simplify.json)。
 
-实验入口 `scripts/compare_literary_models.py` 现在用 `author_request` 为所有条件编译相同的完整作者请求，并记录其摘要；`compare_polish_sources.py` 冻结产品源码、实验工具、题目与请求摘要。真实 localhost 请求回归核验每项约束进入最终输入。实验分别记录契约通过、候选可用、任务合规待评和作者收益待评，不把结构化成功等同于文学成功。新题Air请求已完成16次：实际wire中完整作者请求均只出现一次，16次Schema通过，11份候选保持选区外文字，5次因返回原选区而按无文本进展停止，所有原稿未改变。作者效果尚待评阅；证据见 [本批验证](validation-20261022-compliance.json)。
+实验入口 `scripts/compare_literary_models.py` 现在用 `author_request` 为所有条件编译相同的完整作者请求，并记录其摘要；`compare_polish_sources.py` 冻结产品源码、实验工具、题目与请求摘要。真实 localhost 请求回归核验每项约束进入最终输入。实验分别记录契约通过、候选可用、任务合规待评和作者收益待评，不把结构化成功等同于文学成功。此前Air对照已完成16次：实际wire中完整作者请求均只出现一次，16次Schema通过，11份候选保持选区外文字，5次因返回原选区而按无文本进展停止，所有原稿未改变。2026-10-23已收到有限作者用稿选择，稳定改善仍未证实；该旧实验不验证后续v3策略。证据见 [本批验证](validation-20261022-compliance.json)。
 
 Story 候选保存实际生成基础版本；旧候选修订不自动重绑最新 active head。`chapter_sync.py` 在导入前保存精确意图，提交后索引／基线失败明确为 `committed-needs-sync`，重试只在数据库内容、版本和 origin 相符时修复派生状态。原始导入只解析同一次文件快照。
 

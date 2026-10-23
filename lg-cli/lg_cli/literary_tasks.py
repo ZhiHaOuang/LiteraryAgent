@@ -137,6 +137,35 @@ def _public(state):
     return {key:value for key,value in state.items() if key not in {'options','base','identity','initialFingerprint'}}
 
 
+def _offer_clarification(config, state, public):
+    """Offer a new-task draft, never permission to resume an exhausted run."""
+    if (state['strategy']!='polish' or state['status']!='stopped'
+            or state.get('reason')!='no_textual_progress' or state.get('candidate')):
+        return public
+    try:
+        _check(config,state,lambda:False)
+    except (ValueError,OSError):
+        return public
+    return {**public,'nextAction':'clarify_request','clarification':{
+        'question':'这次没有产生文字修改。你最想改哪一句，希望它读起来有什么不同？',
+        'options':dict(state['options'])}}
+
+
+def clarified_options(task, guidance):
+    """Build options for an independently previewed/approved task; no I/O."""
+    if (task.get('strategy')!='polish' or task.get('status')!='stopped'
+            or task.get('reason')!='no_textual_progress' or task.get('nextAction')!='clarify_request'
+            or task.get('sourceStale') or task.get('inputPolicyChanged')):
+        raise ValueError('A current no-progress polish task is required; refresh the task first.')
+    draft=(task.get('clarification') or {}).get('options')
+    if not isinstance(draft,dict) or draft.get('strategy')!='polish':
+        raise ValueError('No current clarification draft is available.')
+    if not isinstance(guidance,str) or not guidance.strip():
+        raise ValueError('Describe the specific change you want before preparing a new task.')
+    options=_normalize(draft)
+    return _normalize({**options,'request':options['request']+'\n\n作者补充：\n'+guidance.strip()})
+
+
 def _load(config, run_id):
     store = RunStore(config.workspace)
     value = json.loads(store._path(run_id,'literary-task.json').read_text())
@@ -170,7 +199,7 @@ def read(config, run_id):
             return {**public,'sourceState':'stale','sourceStale':True,'nextAction':'new_task'}
     except (ValueError,OSError):
         return {**public,'sourceState':'unavailable','sourceStale':True,'nextAction':'inspect_run'}
-    return {**public,'sourceState':'current','sourceStale':False}
+    return _offer_clarification(config,state,{**public,'sourceState':'current','sourceStale':False})
 
 
 def validate_current(config, run_id):
@@ -242,7 +271,7 @@ class _BoundedAdapter:
 def _finish(config,state,status,reason=None,**fields):
     state.update(status=status,reason=reason,nextAction={'waiting_author':'select_decision',
         'awaiting_review':'review_candidate','stopped':'new_task','failed':'inspect_run'}[status],**fields)
-    return _save(config,state)
+    return _offer_clarification(config,state,_save(config,state))
 
 
 def start(config, options, *, adapter=None, cancelled=None, expected_fingerprint=None):

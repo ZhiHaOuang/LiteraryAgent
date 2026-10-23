@@ -2,6 +2,7 @@
 import json
 import unittest
 from dataclasses import replace
+from importlib import resources
 from unittest.mock import patch
 
 from lg_cli.generation_sources import text_sha
@@ -55,6 +56,57 @@ class PolishProfileTests(unittest.TestCase):
         self.assertEqual(candidate.content,'Before. 小门像一本合拢的书。 After.')
         self.assertEqual(self.store.get_document('one').active_version_id,self.source.id)
         self.assertEqual(len(self.fixture.requests),1)
+
+    def test_action_and_speech_constraints_reach_both_native_wire_protocols(self):
+        # Independent synthetic prose exercises transport and candidate persistence.
+        # The canned answer is not evidence that a model follows these instructions.
+        passage='禾青把收据装进抽屉。她说：“等买主签字，我才交货。”卢遥推回空椅，站到柜台旁。'
+        source='店门已经锁好。'+passage+'柜台上只剩一张清单。'
+        author_request='让句子衔接自然；保持动作是否完成、台词说话者及交货条件。可换引号或分段，不补新事件。'
+        replacement='禾青把收据装进抽屉，说：「等买主签字，我才交货。」\n卢遥推回空椅，站到柜台旁。'
+        active=self.store.edit_active_document('one',content=source,
+            expected_version_id=self.source.id,reason='independent synthetic transport case')
+        output={'summary':'合并已有动作与发言。','revision_markdown':replacement,
+                'change_log':['调整衔接和分段。'],'risks':[]}
+        expected_instructions=resources.files('lg_cli.resources').joinpath('polish-stage.txt').read_text()
+        for protocol in ('responses','anthropic'):
+            with self.subTest(protocol=protocol),patch('tests.test_execution_adapter.specimen',return_value=output):
+                count=len(self.fixture.requests)
+                result=start(replace(self.config,protocol=protocol),
+                    {**self.options,'passage':passage,'request':author_request})
+                self.assertEqual(result['status'],'awaiting_review',result)
+                self.assertEqual(len(self.fixture.requests),count+1)
+                request=self.fixture.requests[-1]
+                if protocol=='responses':
+                    instructions=request['instructions']
+                    prompt=request['input'][0]['content']
+                    schema=request['text']['format']['schema']
+                    self.assertEqual(request['tools'],[])
+                else:
+                    # Anthropic appends one transport-only structured-output notice;
+                    # the saved source receipt binds the unchanged domain block.
+                    self.assertEqual(len(request['system']),2)
+                    instructions=request['system'][0]['text']
+                    self.assertIn('Use lg_structured_output for your final answer',request['system'][1]['text'])
+                    prompt='\n'.join(item['text'] for item in request['messages'][0]['content'])
+                    self.assertEqual([item['name'] for item in request['tools']],['lg_structured_output'])
+                    schema=request['tools'][0]['input_schema']
+                self.assertEqual(instructions,expected_instructions)
+                self.assertEqual(prompt.count(author_request),1)
+                self.assertEqual(prompt.count(passage),1)
+                self.assertIn('<unchanged_before>\n店门已经锁好。\n</unchanged_before>',prompt)
+                self.assertIn('<unchanged_after>\n柜台上只剩一张清单。\n</unchanged_after>',prompt)
+                self.assertEqual(set(schema['required']),{'summary','revision_markdown','change_log','risks'})
+                candidate=self.store.get_version('one',result['candidate']['versionNumber'])
+                self.assertEqual(candidate.content,source.replace(passage,replacement,1))
+                self.assertEqual(candidate.metadata['base_version_id'],active.id)
+                self.assertEqual(candidate.metadata['generation_sources']['input'],{
+                    'prompt_sha256':text_sha(prompt),'instructions_sha256':text_sha(instructions)})
+                stages=RunStore(self.root).handle(result['stageRunId']).directory/'stages'
+                self.assertEqual((stages/'revision.instructions.md').read_text(),instructions)
+                self.assertEqual((stages/'revision.prompt.md').read_text(),prompt)
+                self.assertEqual(self.store.get_document('one').active_version_id,active.id)
+                self.assertEqual(self.store.get_document('one').content,source)
 
     def test_polish_keeps_project_guidance_facts_and_saved_input_receipt_without_side_writes(self):
         fact=self.store.set_fact(category='world',key='gate',value='KNOWN_GATE_FACT')

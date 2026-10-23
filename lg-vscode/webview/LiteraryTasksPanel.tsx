@@ -1,10 +1,12 @@
 import React,{useState} from 'react';
 import {z} from 'zod';
-import type {AuthorTaskRequest,ClientMessage} from '../shared/protocol';
+import {TaskOptionsSchema,type TaskOptions,type AuthorTaskRequest,type ClientMessage} from '../shared/protocol';
 
 type Send=(message:ClientMessage)=>void;
 const taskState=z.object({runId:z.string().optional(),status:z.string(),reason:z.string().nullable().optional(),
   fingerprint:z.string().optional(),document:z.string().optional(),sourceStale:z.boolean().optional(),
+  nextAction:z.string().optional(),inputPolicyChanged:z.boolean().optional(),
+  clarification:z.object({question:z.string().min(1),options:TaskOptionsSchema}).optional(),
   candidate:z.object({document:z.string(),versionNumber:z.number().int().positive()}).optional(),
   decision:z.object({options:z.array(z.object({id:z.string(),title:z.string(),summary:z.string()}))}).optional()});
 const receipt=z.object({operationId:z.string(),status:z.enum(['committed','not_committed','unknown']),
@@ -30,6 +32,35 @@ reasons.invalid_evidence='输出引用未通过校验，模型原文未发布。
 reasons.model_execution_failed='模型请求或输出结构未通过检查，结果未发布。';
 const describe=(reason:string)=>reasons[reason]??reason;
 
+export function buildClarifiedPolishRequest(options:TaskOptions,answer:string):Extract<AuthorTaskRequest,{action:'start'}>{
+  const original=TaskOptionsSchema.parse(options);
+  if(original.strategy!=='polish')throw Error('只有指定选区润色可以补充本次要求。');
+  if(!answer.trim())throw Error('请先说明具体希望改哪一点。');
+  const request=original.request+'\n\n作者补充：\n'+answer.trim();
+  if(request.length>4000)throw Error('原要求与补充合计不能超过 4000 字符，请缩短补充内容。');
+  return {action:'start',options:TaskOptionsSchema.parse({...original,request})};
+}
+
+function PolishClarification({question,options,send,disabled}:{question:string;options:TaskOptions;send:Send;disabled:boolean}){
+  const [answer,setAnswer]=useState(''),[error,setError]=useState('');
+  return <form aria-label="补充局部润色要求" onSubmit={event=>{
+    event.preventDefault();if(disabled)return;
+    try{const request=buildClarifiedPolishRequest(options,answer);setError('');send({type:'boundedTask',request});}
+    catch(cause){setError(cause instanceof Error?cause.message:'补充要求无效，请检查后再试。');}
+  }}>
+    <p>{question}</p>
+    <details><summary>查看原要求和准确选区</summary>
+      <p><strong>原要求</strong></p><pre>{options.request}</pre>
+      <p><strong>准确选区</strong></p><pre>{options.passage}</pre></details>
+    <label>具体希望改哪一点<textarea required value={answer} maxLength={4000} disabled={disabled}
+      onChange={event=>{setAnswer(event.target.value);setError('');}} placeholder="例如：对话保持原样，只调整动作之间的停顿。"/></label>
+    <p className="muted">原任务已停止，已用请求不会重置。补充后是独立的新任务，批准后最多再使用 1 次模型请求；保留原选区、原要求和输入预算上限，正文仍需独立采用。</p>
+    <p className="muted">新任务预算：最多 {options.maxModelCalls??1} 次模型请求，宿主输入最多 {options.maxInputChars??24000} 字符；这不是费用总额上限。</p>
+    {error&&<p role="alert">{error}</p>}
+    <button type="submit" disabled={disabled||!answer.trim()}>预览新任务并申请执行</button>
+  </form>;
+}
+
 export function TaskResult({structured,send,disabled}:{structured:unknown;send:Send;disabled:boolean}){
   if(!structured||typeof structured!=='object')return null;
   const data=structured as Record<string,unknown>;
@@ -40,6 +71,10 @@ export function TaskResult({structured,send,disabled}:{structured:unknown;send:S
     return <section className="bounded-result" aria-label="文学任务状态">
       <p><strong>{statuses[t.status]??t.status}</strong>{t.reason?' · '+describe(t.reason):''}</p>
       {t.sourceStale&&<p role="status">基础资料已经变化，请复核后创建新任务。</p>}
+      {t.status==='stopped'&&t.reason==='no_textual_progress'&&t.nextAction==='clarify_request'&&
+        !t.sourceStale&&!t.inputPolicyChanged&&t.clarification?.options.strategy==='polish'&&
+        <PolishClarification key={t.runId+':'+t.fingerprint} question={t.clarification.question}
+          options={t.clarification.options} send={send} disabled={disabled}/>}
       {t.status==='waiting_author'&&t.decision&&t.runId&&t.fingerprint&&<>
         <p>这里只保存了备选。选择需要独立创作批准，选择后再继续写作。</p>
         {t.decision.options.map(option=><div key={option.id}><strong>{option.title}</strong><p>{option.summary}</p>

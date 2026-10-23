@@ -20,16 +20,20 @@ store.create_document(kind='chapter', slug='one', title='One', content='Prefix. 
 
 
 class Provider(BaseHTTPRequestHandler):
+    requests = 0
     def log_message(self, *_): pass
     def do_POST(self):
         if self.path != '/responses':
             self.send_response(404); self.end_headers(); return
         request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        Provider.requests += 1
         with (root / 'http-requests.jsonl').open('a') as output:
             output.write(json.dumps(request) + '\n')
         schema = request['text']['format']['schema']
         payload = specimen(schema)
-        payload.update(revision_markdown='REVISED.', change_log=['Polished the selection.'],risks=[])
+        unchanged = sys.argv[2:] == ['no-progress-first'] and Provider.requests == 1
+        payload.update(revision_markdown='SELECTED.' if unchanged else 'REVISED.',
+            change_log=[] if unchanged else ['Polished the selection.'],risks=[])
         if 'memory_proposals' in schema['properties']: payload['memory_proposals']=[]
         if 'book_overview' in schema['properties']: payload['book_overview']='维修师在浮城寻找失灵闸门背后的真相。'
         text = json.dumps(payload)

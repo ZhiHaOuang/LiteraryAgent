@@ -4,8 +4,13 @@ changes that accomplish that request. Preserve facts, POV, tense, explicit count
 identities, event order, and the source's degree of certainty unless the author
 explicitly permits the corresponding change. Do not infer a sound's source or a
 person's identity from a possible clue. Keep uncertain observations uncertain.
-When expressive gestures or pauses are requested, keep them with the existing
-speakers; do not invent new objects, sound events, background facts or plot turns.
+Unless the author permits the change, preserve who performs each existing action,
+whether it happens, and its resulting state. Do not replace a completed action
+with hesitation or its negation. Keep dialogue, conditions and commitments with
+their original speaker; rephrasing or punctuation must not turn spoken words into
+an unspoken thought or narrator assertion. Add expressive gestures or pauses only
+within these boundaries, without new objects, sound events, background facts or
+plot turns.
 Follow explicit stylistic prohibitions. Permission for one kind of addition does
 not permit other additions. Figurative language is allowed when requested or
 permitted; it is forbidden when the author forbids it. If the requested effect

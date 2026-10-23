@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {ClientMessageSchema,emptyBook,type AuthorTaskRequest,type BackendEvent} from '../shared/protocol';
-import {TaskResult,LiteraryTasksPanel} from '../webview/LiteraryTasksPanel';
+import {TaskResult,LiteraryTasksPanel,buildClarifiedPolishRequest} from '../webview/LiteraryTasksPanel';
 import {LiteraryBackend} from '../src/backend/LiteraryBackend';
 
 const fingerprint='a'.repeat(64),operationId='b'.repeat(32);
@@ -18,6 +18,8 @@ test('bounded task messages reject unknown fields, invalid identities and unboun
     {action:'reviewAdopt',document:'one',version:2},
     {action:'narrative',options:{audience:'character',holder_document:'hero',position:5,operation:'character_next_action'}},
     {action:'receipt',operationId},
+    {action:'start',options:{strategy:'polish',document:'one',request:'Keep facts.',passage:'Exact.',
+      maxModelCalls:1,maxInputChars:1200}},
   ];
   for(const request of valid)assert.equal(ClientMessageSchema.parse({type:'boundedTask',request}).type,'boundedTask');
   const invalid=[
@@ -29,6 +31,10 @@ test('bounded task messages reject unknown fields, invalid identities and unboun
     {type:'boundedTask',request:{action:'narrative',options:{audience:'reader',position:1,
       operation:'reader_expectation',history:'FUTURE_SECRET'}}},
     {type:'boundedTask',request:{action:'receipt',operationId:'../database'}},
+    ...[{maxModelCalls:2},{maxModelCalls:0},{maxModelCalls:1.5},{maxInputChars:0},{maxInputChars:48001},
+      {maxInputChars:1.5},{plot_disagreement:false},{passage:' '}].map(change=>({type:'boundedTask',
+        request:{action:'start',options:{strategy:'polish',document:'one',request:'Polish.',passage:'Exact.',...change}}})),
+    {type:'boundedTask',request:{action:'start',options:{strategy:'chapter',document:'one',request:'Write.',passage:'Exact.'}}},
   ];
   for(const message of invalid)assert.equal(ClientMessageSchema.safeParse(message).success,false,JSON.stringify(message));
 });
@@ -36,6 +42,39 @@ test('bounded task messages reject unknown fields, invalid identities and unboun
 function render(structured:unknown,disabled=false){
   return renderToStaticMarkup(createElement(TaskResult,{structured,disabled,send:()=>{}}));
 }
+test('clarification keeps exact original request, scope and lower budget in an independently approved task',()=>{
+  const options={strategy:'polish' as const,document:'one',request:'  Keep dialogue and all facts.\n',
+    passage:'Exact.',maxModelCalls:1,maxInputChars:1200};
+  const original=structuredClone(options);
+  const command=buildClarifiedPolishRequest(options,'  Adjust only pauses.  ');
+  assert.equal(command.action,'start');
+  assert.deepEqual(command,{action:'start',options:{...options,
+    request:options.request+'\n\n作者补充：\nAdjust only pauses.'}});
+  assert.deepEqual(options,original,'Preparing a new task does not mutate the previous task options');
+  assert.deepEqual(ClientMessageSchema.parse({type:'boundedTask',request:command}),{type:'boundedTask',request:command});
+  assert.throws(()=>buildClarifiedPolishRequest(options,' \n '),/具体希望改哪一点/);
+  assert.throws(()=>buildClarifiedPolishRequest({...options,request:'x'.repeat(3990)},'long clarification'),/4000/);
+  assert.throws(()=>buildClarifiedPolishRequest({...options,maxModelCalls:2},'Again'));
+  assert.throws(()=>buildClarifiedPolishRequest({strategy:'chapter',document:'one',request:'Write.'},'Again'),/指定选区润色/);
+});
+test('current no-progress polish asks for specifics without automatically continuing or adopting',()=>{
+  const state={runId:'task-one',status:'stopped',reason:'no_textual_progress',nextAction:'clarify_request',
+    fingerprint,sourceStale:false,clarification:{question:'这段你具体希望改哪一点？',
+      options:{strategy:'polish',document:'one',request:'Keep <dialogue>.',passage:'Exact.',maxModelCalls:1,maxInputChars:1200}}};
+  const messages:unknown[]=[];
+  const html=renderToStaticMarkup(createElement(TaskResult,{structured:{literaryTask:state},disabled:false,
+    send:message=>messages.push(message)}));
+  assert.deepEqual(messages,[],'Rendering a stopped result never dispatches a new task');
+  for(const text of ['补充局部润色要求','这段你具体希望改哪一点','Keep &lt;dialogue&gt;.','Exact.',
+    '已用请求不会重置','最多 1 次模型请求','最多 1200 字符','这不是费用总额上限'])assert.ok(html.includes(text),text);
+  assert.match(html,/<button type="submit" disabled="">预览新任务并申请执行/);
+  assert.doesNotMatch(html,/已选择，继续写作|审读并申请采用/);
+  assert.match(render({literaryTask:state},true),/<textarea[^>]*disabled=""/);
+  for(const changes of [{sourceStale:true},{inputPolicyChanged:true},{status:'interrupted'},
+    {reason:'runtime_or_policy_changed'},{nextAction:'new_task'},{clarification:undefined}]){
+    assert.doesNotMatch(render({literaryTask:{...state,...changes}}),/补充局部润色要求|预览新任务并申请执行/);
+  }
+});
 test('waiting direction renders separate choice and continue controls, stale source disables both',()=>{
   const state={runId:'task-one',status:'waiting_author',fingerprint,decision:{options:[
     {id:'1',title:'留守',summary:'保护现有线索'},{id:'2',title:'追踪',summary:'寻找外部证据'}]}};
@@ -146,6 +185,9 @@ test('connector routes previews, exact selection, independent adoption and read-
     await backend.authorTask(session.id,{action:'read',taskId:'task-one'});
     await backend.authorTask(session.id,{action:'receipt',operationId});
     await backend.authorTask(session.id,{action:'sources',document:'one',version:1});
+    const clarification=buildClarifiedPolishRequest({strategy:'polish',document:'one',request:'Keep facts.',
+      passage:'Exact.',maxModelCalls:1,maxInputChars:1200},'Change only the pauses.');
+    await backend.authorTask(session.id,clarification);
     const calls=requests();
     const start=calls.find(item=>item.method==='task/start');
     assert.deepEqual(start.params,{sessionId:session.id,options,expectedFingerprint:fingerprint});
@@ -153,6 +195,13 @@ test('connector routes previews, exact selection, independent adoption and read-
     assert.deepEqual(calls.find(item=>item.method==='task/select').params,{sessionId:session.id,taskId:'task-one',expectedFingerprint:fingerprint,optionId:'2'});
     assert.deepEqual(calls.find(item=>item.method==='creative/apply').params,{sessionId:session.id,action:'acceptVersion',document:'one',version:2,review:true});
     assert.equal(calls.filter(item=>item.method==='creative/apply').length,1);
+    const taskStarts=calls.filter(item=>item.method==='task/start');
+    assert.equal(taskStarts.length,2);
+    assert.deepEqual(taskStarts[1].params,{sessionId:session.id,options:clarification.options,
+      expectedFingerprint:fingerprint});
+    const secondStart=calls.indexOf(taskStarts[1]);
+    assert.equal(calls[secondStart-1].method,'task/preview');
+    assert.deepEqual(calls[secondStart-1].params.options,taskStarts[1].params.options);
     assert.ok(events.some(event=>event.type==='item.updated'&&(event.item.structured as {operationReceipt?:unknown})?.operationReceipt));
     const before=requests().length;
     await assert.rejects(backend.authorTask('other-session',{action:'read',taskId:'task-one'}),/会话不匹配/);

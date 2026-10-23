@@ -35,6 +35,7 @@ class ReviewDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.requests, self.events = [], []
         self.quiet = False
         self.narrative_output = None
+        self.polish_output = 'REVISED.'
         self.request_arrived = threading.Event()
         self.release_response = threading.Event()
         owner = self
@@ -59,7 +60,7 @@ class ReviewDeliveryTests(unittest.IsolatedAsyncioTestCase):
                         'summary': 'Provisional chapter ready.', 'risks': []}
                 elif 'revision_markdown' in properties:
                     value = specimen(schema)
-                    value.update(revision_markdown='REVISED.', change_log=['Polished selection.'],risks=[])
+                    value.update(revision_markdown=owner.polish_output, change_log=['Polished selection.'],risks=[])
                     if 'memory_proposals' in properties: value['memory_proposals']=[]
                     if 'book_overview' in properties: value['book_overview']='维修师在浮城寻找失灵闸门背后的真相。'
                 elif 'findings' in properties or 'entries' in properties:
@@ -143,6 +144,102 @@ class ReviewDeliveryTests(unittest.IsolatedAsyncioTestCase):
             'expectedFingerprint': preview['fingerprint']})
         self.assertEqual(finished['result']['status'], 'awaiting_review', finished)
         return finished['result']
+
+    async def no_progress_polish(self):
+        self.polish_output = 'SELECTED.'
+        options = {'strategy': 'polish', 'document': 'one', 'passage': 'SELECTED.',
+            'request': 'Polish only this selected passage.', 'maxInputChars': 18000}
+        preview = await self.backend.dispatch('task/preview', {'options': options})
+        finished, _ = await self.approved('task/start', {'options': options,
+            'expectedFingerprint': preview['fingerprint']})
+        task = finished['result']
+        self.assertEqual(task['status'], 'stopped', task)
+        self.assertEqual(task['reason'], 'no_textual_progress')
+        self.assertEqual(task['nextAction'], 'clarify_request')
+        self.assertTrue(task['clarification']['question'])
+        self.assertEqual(task['clarification']['options'], preview['options'])
+        self.assertEqual(task['modelCalls'], 1)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(len(self.store.list_versions('one')), 1)
+        return task, preview
+
+    async def test_polish_no_progress_clarification_restart_and_new_task_approval(self):
+        from lg_cli.literary_tasks import clarified_options
+        task, original_preview = await self.no_progress_polish()
+        task_id = task['runId']
+        restored = await self.backend.dispatch('task/read', {'taskId': task_id})
+        advanced, _ = await self.approved('task/advance', {'taskId': task_id,
+            'expectedFingerprint': restored['fingerprint']})
+        self.assertEqual(advanced['result']['status'], 'stopped')
+        self.assertEqual(advanced['result']['modelCalls'], 1)
+        self.assertEqual(len(self.requests), 1, 'Advancing a stopped task must not repeat its request')
+        self.assertEqual(len(self.store.list_versions('one')), 1)
+
+        await self.backend.close()
+        self.backend = Backend(self.config, self.events.append)
+        await self.backend.dispatch('session/open', {'sessionId': self.session})
+        restored = await self.backend.dispatch('task/read', {'taskId': task_id})
+        self.assertEqual(restored['clarification'], task['clarification'])
+        self.assertEqual(restored['limits'], original_preview['limits'])
+        self.assertEqual(restored['modelCalls'], 1)
+        guidance = 'Keep the event order and clarify the pause.'
+        options = clarified_options(restored, guidance)
+        self.assertEqual(options['request'], original_preview['options']['request'] + '\n\n作者补充：\n' + guidance)
+        self.assertEqual(options['maxInputChars'], 18000)
+        self.assertEqual(options['maxModelCalls'], 1)
+        preview = await self.backend.dispatch('task/preview', {'options': options})
+        self.assertEqual(preview['status'], 'ready')
+        self.assertNotEqual(preview['fingerprint'], original_preview['fingerprint'])
+        self.assertEqual(len(self.requests), 1, 'Preparing a clarification draft is read-only')
+        self.assertEqual(len(self.store.list_versions('one')), 1)
+        params = {'options': options, 'expectedFingerprint': preview['fingerprint']}
+        _, declined = await self.approved('task/start', params, decision='decline', status='cancelled')
+        self.assertEqual(len(self.requests), 1, 'Rejecting a new task must not send a model request')
+        self.polish_output = 'REVISED.'
+        finished, accepted = await self.approved('task/start', params)
+        current = finished['result']
+        self.assertNotEqual(accepted['approvalId'], declined['approvalId'])
+        self.assertNotEqual(current['runId'], task_id)
+        self.assertEqual(current['status'], 'awaiting_review', current)
+        self.assertEqual(current['modelCalls'], 1)
+        self.assertEqual(len(self.requests), 2)
+        wire = json.dumps(self.requests[-1], ensure_ascii=False)
+        self.assertEqual(wire.count(original_preview['options']['request']), 1)
+        self.assertEqual(wire.count(guidance), 1)
+        self.assertEqual(self.store.get_version('one', current['candidate']['versionNumber']).content,
+            'Prefix. REVISED. Suffix.')
+        self.assertEqual(self.store.get_document('one').content, self.original.content)
+        self.assertEqual(self.store.get_document('one').active_version_id, self.original.active_version_id)
+        stopped = await self.backend.dispatch('task/read', {'taskId': task_id})
+        self.assertEqual(stopped['status'], 'stopped')
+        self.assertEqual(stopped['modelCalls'], 1)
+        self.assertEqual(stopped['fingerprint'], task['fingerprint'])
+
+    async def test_clarified_polish_author_edit_during_new_approval_blocks_request(self):
+        from lg_cli.literary_tasks import clarified_options
+        task, _ = await self.no_progress_polish()
+        options = clarified_options(task, 'Keep the event order and clarify the pause.')
+        preview = await self.backend.dispatch('task/preview', {'options': options})
+        started = await self.backend.dispatch('task/start', {'sessionId': self.session,
+            'options': options, 'expectedFingerprint': preview['fingerprint']})
+        approval = await self.approval(started, 'operation')
+        changed = self.store.edit_active_document('one', content='Author prefix. SELECTED. Suffix.',
+            expected_version_id=self.original.active_version_id, reason='author')
+        versions = len(self.store.list_versions('one'))
+        self.polish_output = 'REVISED.'
+        await self.answer(approval)
+        finished = await self.finish(started)
+        self.assertEqual(finished['result']['status'], 'stopped', finished)
+        self.assertEqual(finished['result']['reason'], 'preview_changed')
+        self.assertEqual(len(self.requests), 1, 'A stale approval cannot authorize another request')
+        self.assertEqual(len(self.store.list_versions('one')), versions)
+        self.assertEqual(self.store.get_document('one').active_version_id, changed.id)
+        self.assertEqual(self.store.get_document('one').content, 'Author prefix. SELECTED. Suffix.')
+        stale = await self.backend.dispatch('task/read', {'taskId': task['runId']})
+        self.assertEqual(stale['status'], 'stopped')
+        self.assertEqual(stale['modelCalls'], 1)
+        self.assertTrue(stale['sourceStale'])
+        self.assertNotIn('clarification', stale)
 
     async def test_disagreement_choice_restart_candidate_and_separate_adoption(self):
         await self.disagreement_adoption_journey(review=False)
@@ -309,7 +406,7 @@ with patch('lg_cli.acceptance_review.load_config', return_value=config):
         self.assertEqual(bounded, [], 'Cancelled inference must not publish its result')
         self.assertEqual(self.store.get_document('one').active_version_id, self.original.active_version_id)
 
-    async def test_actual_cli_identity_preview_and_confirmed_start_use_same_backend(self):
+    async def test_actual_cli_identity_preview_confirmed_start_and_clarification_use_same_backend(self):
         options = self.root / 'task-options.json'
         options.write_text(json.dumps({'strategy': 'polish', 'document': 'one', 'passage': 'SELECTED.',
             'request': 'Polish only this selected passage.'}))
@@ -357,3 +454,38 @@ with patch('lg_cli.main.load_config', return_value=config):
         self.assertEqual(self.store.get_version('one', result['candidate']['versionNumber']).content,
             'Prefix. REVISED. Suffix.')
         self.assertEqual(self.store.get_document('one').active_version_id, self.original.active_version_id)
+
+        self.polish_output = 'SELECTED.'
+        stopped = (await invoke('task', 'start', '--input', str(options), '--confirm', '--json', expected=2))[-1]
+        self.assertEqual(stopped['status'], 'stopped')
+        self.assertEqual(stopped['reason'], 'no_textual_progress')
+        self.assertEqual(stopped['modelCalls'], 1)
+        self.assertEqual(len(self.requests), 2)
+        guidance = 'Keep the event order and clarify the pause.'
+        draft = (await invoke('task', 'clarify', stopped['runId'], '--guidance', guidance, '--json'))[-1]
+        self.assertEqual(draft['request'], 'Polish only this selected passage.\n\n作者补充：\n' + guidance)
+        self.assertEqual(draft['maxModelCalls'], stopped['limits']['maxModelCalls'])
+        self.assertEqual(draft['maxInputChars'], stopped['limits']['maxInputChars'])
+        self.assertEqual(len(self.requests), 2, 'CLI clarification only prints a task draft')
+        self.assertEqual(len(self.store.list_versions('one')), 2)
+        clarified = self.root / 'clarified-task-options.json'
+        clarified.write_text(json.dumps(draft))
+        new_preview = (await invoke('task', 'preview', '--input', str(clarified), '--json'))[-1]
+        self.assertEqual(new_preview['status'], 'ready')
+        confirmation = (await invoke('task', 'start', '--input', str(clarified), '--json', expected=2))[-1]
+        self.assertEqual(confirmation['status'], 'confirmation_required')
+        self.assertEqual(len(self.requests), 2, 'CLI clarification cannot carry approval to the new task')
+        self.polish_output = 'REVISED.'
+        revised = (await invoke('task', 'start', '--input', str(clarified), '--confirm', '--json'))[-1]
+        self.assertEqual(revised['status'], 'awaiting_review')
+        self.assertNotEqual(revised['runId'], stopped['runId'])
+        self.assertEqual(len(self.requests), 3)
+        wire = json.dumps(self.requests[-1], ensure_ascii=False)
+        self.assertEqual(wire.count('Polish only this selected passage.'), 1)
+        self.assertEqual(wire.count(guidance), 1)
+        self.assertEqual(self.store.get_version('one', revised['candidate']['versionNumber']).content,
+            'Prefix. REVISED. Suffix.')
+        self.assertEqual(self.store.get_document('one').content, self.original.content)
+        old = (await invoke('task', 'show', stopped['runId'], '--json'))[-1]
+        self.assertEqual(old['status'], 'stopped')
+        self.assertEqual(old['modelCalls'], 1)

@@ -85,14 +85,23 @@ export type Snapshot = z.infer<typeof SnapshotSchema>;
 export const ActiveRunSchema = z.object({id,state:z.enum(['running','waiting','cancelling'])});
 export type ActiveRun = z.infer<typeof ActiveRunSchema>;
 const fingerprint = z.string().regex(/^[0-9a-f]{64}$/);
-const TaskOptions = z.object({strategy:z.enum(['polish','chapter']),document:id,
-  request:z.string().trim().min(1).max(4000),passage:z.string().min(1).max(24000).optional(),
-  plot_disagreement:z.boolean().optional()}).strict();
+export const TaskOptionsSchema = z.object({strategy:z.enum(['polish','chapter']),document:id,
+  request:z.string().min(1).max(4000).refine(value=>Boolean(value.trim())),
+  passage:z.string().min(1).max(24000).optional(),plot_disagreement:z.boolean().optional(),
+  maxModelCalls:z.number().int().min(1).max(2).optional(),
+  maxInputChars:z.number().int().min(1).max(48000).optional()}).strict().superRefine((options,ctx)=>{
+    if(options.strategy==='polish'&&(!options.passage?.trim()||options.plot_disagreement!==undefined||
+        (options.maxModelCalls??1)!==1))
+      ctx.addIssue({code:z.ZodIssueCode.custom,message:'Polish requires an exact passage and exactly one model call.'});
+    if(options.strategy==='chapter'&&options.passage!==undefined)
+      ctx.addIssue({code:z.ZodIssueCode.custom,message:'Chapter creation cannot use a polish selection.'});
+  });
+export type TaskOptions = z.infer<typeof TaskOptionsSchema>;
 const NarrativeOptions = z.object({audience:z.enum(['character','reader']),position:z.number().int(),
   operation:z.enum(['character_next_action','reader_expectation']),
   holder_document:z.union([id,z.number().int().positive()]).optional()}).strict();
 export const AuthorTaskRequestSchema = z.discriminatedUnion('action',[
-  z.object({action:z.literal('start'),options:TaskOptions}).strict(),
+  z.object({action:z.literal('start'),options:TaskOptionsSchema}).strict(),
   z.object({action:z.literal('read'),taskId:id}).strict(),
   z.object({action:z.literal('advance'),taskId:id,fingerprint}).strict(),
   z.object({action:z.literal('select'),taskId:id,optionId:id,fingerprint}).strict(),

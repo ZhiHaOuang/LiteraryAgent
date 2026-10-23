@@ -1,0 +1,178 @@
+{
+  "schema": "lg.polish-clarification-validation.v1",
+  "date": "2026-10-24",
+  "startedDate": "2026-10-23",
+  "branch": "codex/polish-compliance-20261022",
+  "baseline": "bc9756b06738714de25e317b21e720c4f9ae4398",
+  "changes": [
+    {
+      "path": "lg-cli/lg_cli/literary_tasks.py",
+      "before": "79ae8a4f3118cd53e4c7dc1fb5e0e14d7e5bea481ffa761d5bf1298265a824a5",
+      "after": "4d8a841baca2b5393a3f5297aa01c466ddf3d1dde8b0c9733cc965dca52b093f"
+    },
+    {
+      "path": "lg-cli/lg_cli/task_cli.py",
+      "before": "f6b433de28b59ce60947dd0893f89779ae4bb4d5c7fef9b6ed595184e1f9a8af",
+      "after": "811bf076b37f6ee65427becc4c8315cf20f6e7128328c8ccd0661e4f9f0b7692"
+    },
+    {
+      "path": "lg-cli/lg_cli/resources/polish-stage.txt",
+      "before": "a0b11e1b5625aefb6872abea0e80de75a62bf07f6c2cec6800cf07cebba21d5a",
+      "after": "bd6853aa3a98a71279051a2c5bf4eaff64d337d0eb9d887c18bc48e3f170e9eb"
+    },
+    {
+      "path": "lg-cli/lg_cli/story_workflow.py",
+      "before": "aa9bc29f3b5fce5793870d0f2aebcbc1ca815f634506a106727ad039bd4dde75",
+      "after": "1bee9a60870d2aca4587c881b7b1fc9ef5c0a8c012533177569c7a55a2d7b727"
+    },
+    {
+      "path": "tests/test_literary_tasks.py",
+      "before": "21ff81c0e779330c796ad1df898afc17464c118d4520fd9b3ad0abdb2de10bbb",
+      "after": "c56182546f64479eca65ed1fcb79f22848987800963ff194d375248267cfa1bd"
+    },
+    {
+      "path": "tests/test_polish_profile.py",
+      "before": "58a3e7524f9f4bf3b2240b88756891cb610eaf0774d9ce9e169e2e2eb1cdbf78",
+      "after": "54d022c1303a45242780b9ad1af10b73e2aa74e7ae14bf242abba67027bc9d08"
+    },
+    {
+      "path": "tests/test_review_delivery.py",
+      "before": "306927fb072c4b332ee1d8c090478ef903b84499b0da7b599b2637c39faf57b8",
+      "after": "b0c9b1ff15fd0987fbf7f35a7d908878d784605eed8dad32de3e14514baea12c"
+    },
+    {
+      "path": "lg-vscode/webview/LiteraryTasksPanel.tsx",
+      "before": "2b8ce82e354d8048867be3e01a8f9f93e8312bbe9ad3c9c826d543a354186691",
+      "after": "6d4119187f5284c76bfa91cceb9cc5b622c2723b08a0593efcff8db6371e99e9"
+    },
+    {
+      "path": "lg-vscode/shared/protocol.ts",
+      "before": "3c4c2094289f8307921c0c7f46927189b210e2261aa27cecb201233140d52835",
+      "after": "90d2f9a55dea0e436d04e9cead7854bfeb0dafd9e696f827c5d35023b210564c"
+    },
+    {
+      "path": "lg-vscode/tests/literary-tasks.test.ts",
+      "before": "06cf84adb44fb21730ee961f7cb20020a9899a7e35f3e4d17a02f50afe87fa1c",
+      "after": "29c5c9ebf23a0bccb0be0285794d4c823aa4d06244af87421f00206332efb273"
+    },
+    {
+      "path": "lg-vscode/tests/literary-task-backend.integration.ts",
+      "before": "32018b15fb80c553240669df9e036fb2e797361d262367f0a84c9d855d15bcaf",
+      "after": "4a2a51e43e2e9f9afb22f49d2379d37a3b1b7edd441a7a1a4fcfa18f9b291544"
+    },
+    {
+      "path": "lg-vscode/tests/fixtures/literary_task_backend.py",
+      "before": "57f035955197823b90938798a0213c6f92602d20c48b0b7cc6896a0091748be8",
+      "after": "173d95da88129113504203d6ce02f57a2b5190c25ceaaf040f2e0072a11567db"
+    }
+  ],
+  "fileDeletions": [],
+  "behavior": {
+    "oldNoProgressRun": "stopped; old record and used call count preserved",
+    "clarification": "read-only draft when exact source, Runtime and profile still match",
+    "newRun": "preserves request, selection and input budget; separately previewed and approved",
+    "scope": "one model call per approved polish task, not a cross-task money budget",
+    "promptProfile": "r5-polish.v3",
+    "promptExtraCharacters": 336,
+    "promptExtraUTF8Bytes": 336,
+    "extraMandatoryModelCalls": 0,
+    "semanticBlacklistAdded": false
+  },
+  "isolation": {
+    "python": {
+      "total": 192,
+      "passed": 189,
+      "skipped": 3,
+      "failures": 0,
+      "skipDetails": [
+        "test_real_core_receives_custom_instructions_from_private_file (tests.test_stage_input.CodexStageInputTests.test_real_core_receives_custom_instructions_from_private_file) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+        "test_real_core_uses_private_snapshot_after_source_changes (tests.test_output_schema.RealCoreSchemaTests.test_real_core_uses_private_snapshot_after_source_changes) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+        "test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption (tests.test_cli_backend.CLIBackendTests.test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'"
+      ]
+    },
+    "cliClarifyHelp": "passed"
+  },
+  "actual": {
+    "python": {
+      "total": 192,
+      "passed": 189,
+      "skipped": 3,
+      "failures": 0,
+      "skipDetails": [
+        "test_real_core_receives_custom_instructions_from_private_file (tests.test_stage_input.CodexStageInputTests.test_real_core_receives_custom_instructions_from_private_file) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+        "test_real_core_uses_private_snapshot_after_source_changes (tests.test_output_schema.RealCoreSchemaTests.test_real_core_uses_private_snapshot_after_source_changes) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'",
+        "test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption (tests.test_cli_backend.CLIBackendTests.test_codex_cli_literary_journey_uses_real_router_tools_and_separate_adoption) ... skipped 'set LG_TEST_RUNTIME_MANIFEST for pinned Core'"
+      ]
+    },
+    "cliClarifyHelp": "passed",
+    "extensionUnit": {
+      "tests": 59,
+      "pass": 59,
+      "fail": 0,
+      "skipped": 0
+    },
+    "extensionBackendNativeIntegration": {
+      "tests": 2,
+      "pass": 2,
+      "fail": 0,
+      "skipped": 0
+    },
+    "extensionTypecheck": "passed",
+    "extensionBuild": "passed"
+  },
+  "initialFailure": {
+    "tests": 192,
+    "failed": 4,
+    "skipped": 3,
+    "cause": "macOS /var vs /private/var unresolved path containment assertions",
+    "unchangedBaselineReproduction": {
+      "defaultTmpdir": "same 4 failed",
+      "canonicalTmpdir": "4 passed"
+    },
+    "resolution": "use existing documented TMPDIR=/private/tmp; no product/test change for these failures",
+    "evidenceSha256": "4fb311a2e688f0f40551d0eb796d78899d1ee23356186d19d89d3778a1470d47"
+  },
+  "testLevels": [
+    "unit and offline regression",
+    "real shared Backend, Native, SQLite and localhost synthetic HTTP",
+    "CLI subprocess and Extension connector integration",
+    "Responses and Anthropic request propagation",
+    "React server-side render, TypeScript and production build"
+  ],
+  "notVerified": [
+    "new real GLM literary quality",
+    "author revision workload or time benefit",
+    "desktop click/visual acceptance",
+    "current pinned Core runtime",
+    "installed VSIX or server deployment"
+  ],
+  "paidModelCalls": 0,
+  "tokensAndCostDelta": null,
+  "automaticRetry": false,
+  "mainMerged": false,
+  "effectAcceptance": "pending real-model and author evidence; previous v2 feedback does not validate v3",
+  "reproduce": {
+    "python": "PYTHONPATH=lg-cli:. TMPDIR=/private/tmp python -m unittest tests.test_literary_tasks tests.test_polish_profile tests.test_story_workflow tests.test_story_schema tests.test_story_generation_sources tests.test_stage_input tests.test_review_delivery tests.test_candidate_bases tests.test_direction_candidate_guard tests.test_execution_adapter tests.test_output_schema tests.test_code_workspace_boundary tests.test_cli_backend tests.test_backend_workflows tests.test_story_request_arguments tests.test_polish_source_comparison tests.test_literary_comparison -v",
+    "cli": "PYTHONPATH=lg-cli:. python -m lg_cli task clarify --help",
+    "extension": [
+      "npm test",
+      "node --import tsx --test --test-concurrency=1 tests/literary-task-backend.integration.ts",
+      "npm run typecheck",
+      "npm run build"
+    ],
+    "environment": "existing Python LitIsLand and Node 20.18.1; LG_TEST_PYTHON points to that Python; no dependency installation"
+  },
+  "logSha256": {
+    "baseline-private-tmpdir.log": "d9c049f9c74ab1a59ce63df471c35e75e365b695901c0d217cf912c6884c6a12",
+    "actual-python.log": "df38b190c12b7c3d0329926ad94d69ba666a8aca08373548957bfc6a8e49a522",
+    "isolation-python.log": "1c579af4ce2a4ed8aeccfb716bbf728563f06e33f4f0781453faa5641a69d9e6",
+    "actual-cli-help.log": "15426dca4e45b5415c65a61604d2d6129ae53e47eaa3a448ad9c3b69c5ef7ae2",
+    "actual-extension-integration.log": "891aadd4fbced65a70978ac198068536cb5e2047e8657e3434f64a1a54016df3",
+    "baseline-original-tmpdir.log": "805378e738d3bcabfb715d84a933ec3db7a8e1b56797045ea05defe07b74dc7e",
+    "actual-extension-build.log": "3c49cc0d33e97c198f969f7e260c8fe757dc38d85399697b76adad3bbee05709",
+    "actual-extension-unit.log": "7a0422a3cc16e0a837ba0f8382c1f0fb400e69eaf1ec9b620a55e9ea9e008834",
+    "actual-extension-typecheck.log": "fcb88fcf3598e3824cbe304506037a21deca5c66328f38393e2788d8e11e3e30",
+    "isolation-canonical-python.log": "e2d44edd8097fb1af0e9ff68ec4a880f3979fe33c8392994ec8c7e27fdd9af70",
+    "isolation-canonical-cli-help.log": "15426dca4e45b5415c65a61604d2d6129ae53e47eaa3a448ad9c3b69c5ef7ae2"
+  }
+}
