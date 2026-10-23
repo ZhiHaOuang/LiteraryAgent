@@ -5,17 +5,119 @@
   "paths": {
     "file": "lg-cli/lg_cli/paths.py",
     "after_sha256": "14ebbfc0410db746afed33eb265b3bb204dc63a2c2a446488b225f461be244bc",
-    "isolation": {"passed": 31, "skipped": 0, "failed": 0},
-    "actual": {"passed": 31, "skipped": 0, "failed": 0},
+    "isolation": {
+      "passed": 31,
+      "skipped": 0,
+      "failed": 0
+    },
+    "actual": {
+      "passed": 31,
+      "skipped": 0,
+      "failed": 0
+    },
     "baseline_equivalence_cases": 6,
     "catalog_fallback_cases": 6,
     "registry_fallback": "passed",
     "wheel_sha256": "456023b5ac711093529cac81c0899f73a33baf3afff687b227071e3e8ddd4968",
     "matched_package_files": 141,
-    "wheel_cli_help": "passed"
+    "wheel_cli_help": "passed",
+    "commit": "e29e8c2bca"
   },
   "new_deleted_files": [],
   "paid_model_calls": 0,
   "mainline_merged": false,
-  "deployed": false
+  "deployed": false,
+  "ui": {
+    "files": [
+      {
+        "path": "lg-vscode/webview/ui/components/layout/InputForm.tsx",
+        "sha256Before": "c1af9167efd392a9fa530adb3a1c0880aa10b31f0c6c5d018104d1ca0671baea",
+        "bytesBefore": 11419,
+        "linesBefore": 359,
+        "sha256After": "8010f23b442a8eb81ac2fe4060a0fa4bab2e5f3e732d24a2a1f9f5832bf6bf1f",
+        "bytesAfter": 10876,
+        "linesAfter": 332
+      },
+      {
+        "path": "lg-vscode/webview/ui/components/icons/EditIcons.tsx",
+        "sha256Before": "fe63d13896dc2d8cdc858dc44ad29a82130eddfba44d7eb54dc2f7baceb53176",
+        "bytesBefore": 10334,
+        "linesBefore": 382,
+        "sha256After": "dd177b8370a2f528be47d9baa8f43dd4faef82e5baa60727faf534ff0af26d1a",
+        "bytesAfter": 3211,
+        "linesAfter": 108
+      },
+      {
+        "path": "lg-vscode/webview/ui/components/icons/NavigationIcons.tsx",
+        "sha256Before": "5aebfc7037c7483b8b25ef19d1619a7577f6aa885141e3b1bdd65311a0940f04",
+        "bytesBefore": 5859,
+        "linesBefore": 263,
+        "sha256After": "eb4ba932c78eaf4f02e4befe1061768287ff8ecac90b16a2ca7f466e8adaeaa0",
+        "bytesAfter": 687,
+        "linesAfter": 30
+      },
+      {
+        "path": "lg-vscode/webview/ui/components/toolcalls/shared/LayoutComponents.tsx",
+        "sha256Before": "294dd480a6d66df4eb415a7f91d0781bc5bfd3afe6c513b4eaa11cf7120664a9",
+        "bytesBefore": 5175,
+        "linesBefore": 180,
+        "sha256After": "b25408d5b283f5ab57f209f095c22d3d62196c82f57c538452f294b2a3fd072f",
+        "bytesAfter": 2521,
+        "linesAfter": 76
+      }
+    ],
+    "summary": {
+      "sourceFilesChanged": 4,
+      "sourceLinesRemoved": 638,
+      "sourceBytesRemoved": 15492,
+      "removedRuntimeExports": 23,
+      "filesDeleted": 0
+    },
+    "isolation_unit": {
+      "passed": 59,
+      "failed": 0
+    },
+    "actual_unit": {
+      "passed": 59,
+      "failed": 0
+    },
+    "actual_integration": {
+      "passed": 3,
+      "skipped": 1,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "build": "passed",
+    "ssr_cases": 14,
+    "ssr_baseline_isolation_actual_identical": true,
+    "removed_css_rules": 16,
+    "removed_css_rule_uses_in_retained_components": 0,
+    "dynamic_class_expressions_reviewed": 19,
+    "production_artifacts": {
+      "dist/webview.css": {
+        "sha256": "cd99d1cc43dfc2bd17e5d8d5758dab70dcea22a2ae733e2e503cd8ceb973cd12",
+        "bytes": 50031
+      },
+      "dist/extension.cjs": {
+        "sha256": "9a45760eec760d6aa080025237a75ffc22b8cc7ccd203e56ee776b10fdd43256",
+        "bytes": 130517
+      },
+      "dist/webview.js": {
+        "sha256": "3d390521c9971ad86767bb68556f71f68e0c4d3f4d1be1ed49731fc69ad6ec79",
+        "bytes": 473925
+      }
+    },
+    "desktop_click_validation": false
+  },
+  "pending_file_deletion": {
+    "path": "lg-vscode/webview/ui/components/layout/FileLink.tsx",
+    "sha256": "07b79314ebb5de839237fc22a84bf1e09cdfacd47c25825aa538750c1c5421de",
+    "status": "awaiting_author_approval",
+    "omission_copy_unit_passed": 59,
+    "omission_typecheck": "passed",
+    "omission_build": "passed",
+    "additional_css_rules_removed": 17,
+    "additional_css_bytes_removed": 980,
+    "original_file_preserved": true
+  }
 }

@@ -1,11 +1,6 @@
 
 import type { FC } from 'react';
 import type { ReactNode } from 'react';
-import {
-  EditPencilIcon,
-  AutoEditIcon,
-  PlanModeIcon,
-} from '../icons/EditIcons.js';
 import { CodeBracketsIcon, HideContextIcon } from '../icons/EditIcons.js';
 import { SlashCommandIcon, LinkIcon } from '../icons/EditIcons.js';
 import { ArrowUpIcon } from '../icons/NavigationIcons.js';
@@ -26,28 +21,6 @@ export interface EditModeInfo {
   /** Icon to display */
   icon: ReactNode;
 }
-
-/**
- * Built-in icon types for edit modes
- */
-export type EditModeIconType = 'edit' | 'auto' | 'plan' | 'yolo';
-
-/**
- * Get icon component for edit mode type
- */
-export const getEditModeIcon = (iconType: EditModeIconType): ReactNode => {
-  switch (iconType) {
-    case 'edit':
-      return <EditPencilIcon />;
-    case 'auto':
-    case 'yolo':
-      return <AutoEditIcon />;
-    case 'plan':
-      return <PlanModeIcon />;
-    default:
-      return null;
-  }
-};
 
 /**
  * Props for InputForm component
@@ -131,7 +104,7 @@ export interface InputFormProps {
  *   isStreaming={false}
  *   isWaitingForResponse={false}
  *   isComposing={false}
- *   editModeInfo={{ label: 'Auto', title: 'Auto mode', icon: <AutoEditIcon /> }}
+ *   editModeInfo={{ label: '逐次审批', title: '写入前由作者确认', icon: null }}
  *   // ... other props
  * />
  * ```

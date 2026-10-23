@@ -1,6 +1,5 @@
 
 import type { FC } from 'react';
-import { FileLink } from '../../layout/FileLink.js';
 import './LayoutComponents.css';
 
 /**
@@ -61,88 +60,6 @@ export const ToolCallContainer: FC<ToolCallContainerProps> = ({
 );
 
 /**
- * Props for ToolCallCard
- */
-interface ToolCallCardProps {
-  icon: string;
-  children: React.ReactNode;
-}
-
-/**
- * ToolCallCard - Legacy card wrapper for complex layouts like diffs
- */
-export const ToolCallCard: FC<ToolCallCardProps> = ({
-  icon: _icon,
-  children,
-}) => (
-  <div className="grid grid-cols-[auto_1fr] gap-medium bg-[var(--app-input-background)] border border-[var(--app-input-border)] rounded-medium p-large my-medium items-start animate-[fadeIn_0.2s_ease-in] toolcall-card">
-    <div className="flex flex-col gap-medium min-w-0">{children}</div>
-  </div>
-);
-
-/**
- * Props for ToolCallRow
- */
-interface ToolCallRowProps {
-  label: string;
-  children: React.ReactNode;
-}
-
-/**
- * ToolCallRow - A single row in the tool call grid (legacy - for complex layouts)
- */
-export const ToolCallRow: FC<ToolCallRowProps> = ({ label, children }) => (
-  <div className="grid grid-cols-[80px_1fr] gap-medium min-w-0">
-    <div className="text-xs text-[var(--app-secondary-foreground)] font-medium pt-[2px]">
-      {label}
-    </div>
-    <div className="text-[var(--app-primary-foreground)] min-w-0 break-words">
-      {children}
-    </div>
-  </div>
-);
-
-/**
- * Props for StatusIndicator
- */
-interface StatusIndicatorProps {
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
-  text: string;
-}
-
-/**
- * Get status color class for StatusIndicator
- */
-const getStatusColorClass = (
-  status: 'pending' | 'in_progress' | 'completed' | 'failed',
-): string => {
-  switch (status) {
-    case 'pending':
-      return 'bg-[#ffc107]';
-    case 'in_progress':
-      return 'bg-[#2196f3]';
-    case 'completed':
-      return 'bg-[#4caf50]';
-    case 'failed':
-      return 'bg-[#f44336]';
-    default:
-      return 'bg-gray-500';
-  }
-};
-
-/**
- * StatusIndicator - Status indicator with colored dot
- */
-export const StatusIndicator: FC<StatusIndicatorProps> = ({ status, text }) => (
-  <div className="inline-block font-medium relative" title={status}>
-    <span
-      className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle ${getStatusColorClass(status)}`}
-    />
-    {text}
-  </div>
-);
-
-/**
  * Props for CodeBlock
  */
 interface CodeBlockProps {
@@ -156,25 +73,4 @@ export const CodeBlock: FC<CodeBlockProps> = ({ children }) => (
   <pre className="font-mono text-[var(--app-monospace-font-size)] bg-[var(--app-primary-background)] border border-[var(--app-input-border)] rounded-small p-medium overflow-x-auto mt-1 whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto">
     {children}
   </pre>
-);
-
-/**
- * Props for LocationsList
- */
-interface LocationsListProps {
-  locations: Array<{
-    path: string;
-    line?: number | null;
-  }>;
-}
-
-/**
- * LocationsList - List of file locations with clickable links
- */
-export const LocationsList: FC<LocationsListProps> = ({ locations }) => (
-  <div className="toolcall-locations-list flex flex-col gap-1 max-w-full">
-    {locations.map((loc, idx) => (
-      <FileLink key={idx} path={loc.path} line={loc.line} showFullPath={true} />
-    ))}
-  </div>
 );
