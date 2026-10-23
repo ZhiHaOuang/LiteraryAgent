@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-24",
+  "baseline": "7477dd0b051fbbf4fe25b6abe29ec741ed5765f3",
+  "branch": "codex/polish-compliance-20261022",
+  "paths": {
+    "file": "lg-cli/lg_cli/paths.py",
+    "after_sha256": "14ebbfc0410db746afed33eb265b3bb204dc63a2c2a446488b225f461be244bc",
+    "isolation": {"passed": 31, "skipped": 0, "failed": 0},
+    "actual": {"passed": 31, "skipped": 0, "failed": 0},
+    "baseline_equivalence_cases": 6,
+    "catalog_fallback_cases": 6,
+    "registry_fallback": "passed",
+    "wheel_sha256": "456023b5ac711093529cac81c0899f73a33baf3afff687b227071e3e8ddd4968",
+    "matched_package_files": 141,
+    "wheel_cli_help": "passed"
+  },
+  "new_deleted_files": [],
+  "paid_model_calls": 0,
+  "mainline_merged": false,
+  "deployed": false
+}

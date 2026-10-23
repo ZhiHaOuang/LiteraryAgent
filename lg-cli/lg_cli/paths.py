@@ -8,10 +8,7 @@ def product_root() -> Path:
     configured = os.environ.get("LITERARYGIANT_HOME") or os.environ.get("LG_HOME")
     if configured:
         return Path(configured).expanduser().resolve()
-    candidate = Path(__file__).resolve().parents[2]
-    if (candidate / "CODEX_CORE_COMMIT").exists() or (candidate / "lg-agent").exists():
-        return candidate
-    return candidate
+    return Path(__file__).resolve().parents[2]
 
 
 def core_codex_root() -> Path:
